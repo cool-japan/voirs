@@ -98,9 +98,10 @@ fn test_alternative_text_for_audio_output() {
     cmd.arg("synthesize")
         .arg("This is an accessibility test")
         .arg(output_file.to_str().unwrap())
-        .timeout(Duration::from_secs(600))
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(600));
+    if crate::common::run_or_skip_if_models_unavailable(&mut cmd).is_none() {
+        return;
+    }
     // Accessibility test focuses on successful completion regardless of output
 
     // Verify the output file exists (non-visual confirmation)
@@ -114,9 +115,10 @@ fn test_verbose_output_for_accessibility() {
     // Test that verbose mode provides good accessibility information
     cmd.arg("--verbose")
         .arg("list-voices")
-        .timeout(Duration::from_secs(10))
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(10));
+    if crate::common::run_or_skip_if_models_unavailable(&mut cmd).is_none() {
+        return;
+    }
 
     // Verbose mode should provide additional context
     let mut cmd = Command::cargo_bin("voirs").unwrap();
@@ -244,9 +246,8 @@ fn test_alternative_input_methods() {
         .arg(input_file.to_str().unwrap())
         .arg("--output-dir")
         .arg(temp_dir.path().to_str().unwrap())
-        .timeout(Duration::from_secs(600))
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(600));
+    crate::common::run_or_skip_if_models_unavailable(&mut cmd);
 }
 
 #[test]
@@ -254,14 +255,17 @@ fn test_clear_status_reporting() {
     let mut cmd = Command::cargo_bin("voirs").unwrap();
 
     // Status commands should provide clear, accessible information
-    cmd.arg("list-voices")
-        .timeout(Duration::from_secs(100))
-        .assert()
-        .success()
-        .stdout(predicate::function(|output: &str| {
-            // Output should be structured and informative
-            !output.trim().is_empty()
-        }));
+    cmd.arg("list-voices").timeout(Duration::from_secs(100));
+    let Some(output) = crate::common::run_or_skip_if_models_unavailable(&mut cmd) else {
+        return;
+    };
+
+    // Output should be structured and informative
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.trim().is_empty(),
+        "list-voices stdout should not be empty"
+    );
 }
 
 #[test]
@@ -322,9 +326,10 @@ fn test_audio_alternatives() {
     cmd.arg("synthesize")
         .arg("Testing audio alternatives for accessibility")
         .arg(output_file.to_str().unwrap())
-        .timeout(Duration::from_secs(600))
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(600));
+    if crate::common::run_or_skip_if_models_unavailable(&mut cmd).is_none() {
+        return;
+    }
 
     // The file should exist as a tangible alternative to audio
     assert!(output_file.exists());

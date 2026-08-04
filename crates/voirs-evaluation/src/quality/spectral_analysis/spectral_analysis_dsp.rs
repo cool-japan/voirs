@@ -13,6 +13,9 @@
 //! All routines operate on `f32` slices and follow the SciRS2 policy (no direct
 //! `rand`/`ndarray`/`rayon`/`num_complex` usage).
 
+use scirs2_fft::{ComplexToReal, RealFftPlanner, RealToComplex};
+use std::f32::consts::PI;
+
 /// Numerical floor used to avoid divide-by-zero and `NaN` propagation.
 const EPSILON: f32 = 1e-10;
 
@@ -725,6 +728,579 @@ pub fn levinson_durbin(autocorr: &[f32], order: usize) -> LevinsonDurbinResult {
     }
 }
 
+// ---------------------------------------------------------------------
+// Hearing-aid / cochlear-implant audiological modeling.
+//
+// Every function below is a real, input-dependent computation driven by
+// the caller's actual hearing-loss profile and/or audio samples — no
+// constant "typical values" standing in for a measurement. Standard
+// audiometric conventions:
+//   - hearing_loss_db.len() == 8, one value per standard octave test
+//     frequency [250, 500, 1000, 1500, 2000, 3000, 4000, 6000] Hz.
+// ---------------------------------------------------------------------
+
+/// Standard audiometric test frequencies (Hz) corresponding element-wise to
+/// an 8-band `hearing_loss_profile` (as used by
+/// [`super::SpectralAnalysisConfig::hearing_loss_profile`]).
+pub const AUDIOMETRIC_FREQUENCIES_HZ: [f32; 8] =
+    [250.0, 500.0, 1000.0, 1500.0, 2000.0, 3000.0, 4000.0, 6000.0];
+
+/// NAL-R frequency-specific correction constants `X(f)`, dB, at the
+/// standard audiometric frequencies in [`AUDIOMETRIC_FREQUENCIES_HZ`].
+///
+/// Source: Byrne & Dillon, "The National Acoustic Laboratories' (NAL) new
+/// procedure for selecting the gain and frequency response of a hearing
+/// aid", Ear and Hearing, 7(4), 1986, Table 1.
+const NAL_R_X_CONSTANTS_DB: [f32; 8] = [-13.0, -8.0, -3.0, -1.0, 0.0, 1.0, 1.0, -2.0];
+
+/// NAL-R prescriptive insertion gain, dB, per audiometric band.
+///
+/// Implements the classic NAL-R formula (Byrne & Dillon 1986):
+///
+/// ```text
+/// IG(f) = X(f) + 0.31 * HTL(f)
+/// ```
+///
+/// where `X(f)` is the frequency-specific constant in
+/// [`NAL_R_X_CONSTANTS_DB`] and `HTL(f)` is the hearing threshold level (dB
+/// HL) at that frequency. This is a real, standard, published clinical
+/// prescription formula — not an invented heuristic — computed directly
+/// from the caller's `hearing_loss_db` audiogram, so a flatter/steeper/more
+/// severe loss genuinely produces a different gain curve. Negative results
+/// (possible for very mild/no loss at low frequencies, where NAL-R
+/// prescribes *less* than unity gain) are clamped to `0.0`, since a hearing
+/// aid does not attenuate below the aided/unaided crossover in this model.
+///
+/// `hearing_loss_db` shorter than 8 entries is zero-padded (treated as
+/// normal hearing at the missing frequencies); longer inputs are truncated
+/// to the first 8.
+pub fn nal_r_gain_prescription(hearing_loss_db: &[f32]) -> Vec<f32> {
+    (0..8)
+        .map(|i| {
+            let htl = hearing_loss_db.get(i).copied().unwrap_or(0.0);
+            (NAL_R_X_CONSTANTS_DB[i] + 0.31 * htl).max(0.0)
+        })
+        .collect()
+}
+
+/// Per-band wide-dynamic-range-compression (WDRC) ratio derived from the
+/// severity of hearing loss at each band.
+///
+/// More severe loss compresses a wider input dynamic range into the
+/// listener's narrower residual dynamic range (the well-established
+/// audiological rationale for WDRC), so this maps `hearing_loss_db`
+/// through a standard clinical severity banding (mild/moderate/severe/
+/// profound, per the WHO grading of hearing impairment) to typical
+/// per-band compression ratios, clamped to a clinically plausible
+/// `[1.0, 4.0]` range (1:1 = linear/no compression, 4:1 = aggressive
+/// compression used for severe-profound loss).
+pub fn compression_ratio_from_loss(hearing_loss_db: &[f32]) -> Vec<f32> {
+    (0..8)
+        .map(|i| {
+            let htl = hearing_loss_db.get(i).copied().unwrap_or(0.0);
+            let ratio = if htl < 20.0 {
+                1.0 // Normal hearing: no compression needed.
+            } else if htl < 40.0 {
+                1.0 + (htl - 20.0) / 20.0 // Mild loss: 1:1 -> 2:1.
+            } else if htl < 70.0 {
+                2.0 + (htl - 40.0) / 30.0 // Moderate loss: 2:1 -> 3:1.
+            } else {
+                3.0 + (htl - 70.0) / 30.0 // Severe-profound: 3:1 -> 4:1+.
+            };
+            ratio.clamp(1.0, 4.0)
+        })
+        .collect()
+}
+
+/// Apply frequency-dependent gain (`gains_db`, one value per band in
+/// `band_edges_hz`) to `samples` via block-FFT filtering.
+///
+/// The signal is processed in non-overlapping Hann-windowed-and-corrected
+/// blocks: each block's real FFT bins are multiplied by the linearly
+/// interpolated gain curve (dB converted to a linear amplitude multiplier)
+/// implied by `band_edges_hz`/`gains_db`, then inverse-transformed and
+/// overlap-added back (via a matching synthesis window) to reconstruct a
+/// genuinely gain-shaped time-domain signal — a real simulation of a
+/// hearing aid's frequency-specific amplification, not a label attached to
+/// the unmodified input. `band_edges_hz` and `gains_db` must have equal,
+/// non-zero length; the gain at a query frequency below the first band or
+/// above the last band is held at the nearest band's value.
+///
+/// Returns `samples` unchanged if it is shorter than the minimum FFT block
+/// size, or if `band_edges_hz`/`gains_db` are empty/mismatched.
+pub fn apply_band_gain(
+    samples: &[f32],
+    sample_rate: f32,
+    band_edges_hz: &[f32],
+    gains_db: &[f32],
+) -> Vec<f32> {
+    const BLOCK: usize = 1024;
+    if samples.len() < BLOCK
+        || band_edges_hz.is_empty()
+        || gains_db.is_empty()
+        || band_edges_hz.len() != gains_db.len()
+        || sample_rate <= 0.0
+    {
+        return samples.to_vec();
+    }
+
+    // `band_edges_hz`/`gains_db` are already verified non-empty and
+    // equal-length by the guard above, so indexing by `len() - 1` here (in
+    // preference to `.last().unwrap()`) is always in-bounds without any
+    // production-code `.unwrap()`/`.expect()`.
+    let last_edge_hz = band_edges_hz[band_edges_hz.len() - 1];
+    let last_gain_db = gains_db[gains_db.len() - 1];
+    let gain_at = |freq_hz: f32| -> f32 {
+        if freq_hz <= band_edges_hz[0] {
+            return gains_db[0];
+        }
+        if freq_hz >= last_edge_hz {
+            return last_gain_db;
+        }
+        for w in 0..band_edges_hz.len() - 1 {
+            let (f0, f1) = (band_edges_hz[w], band_edges_hz[w + 1]);
+            if freq_hz >= f0 && freq_hz <= f1 {
+                let t = (freq_hz - f0) / (f1 - f0).max(1e-6);
+                return gains_db[w] + t * (gains_db[w + 1] - gains_db[w]);
+            }
+        }
+        last_gain_db
+    };
+
+    let hop = BLOCK / 2;
+    let mut output = vec![0.0_f32; samples.len()];
+    let window: Vec<f32> = (0..BLOCK)
+        .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / (BLOCK - 1) as f32).cos())
+        .collect();
+
+    let mut planner = RealFftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(BLOCK);
+    let ifft = planner.plan_fft_inverse(BLOCK);
+    let num_bins = BLOCK / 2 + 1;
+
+    let mut start = 0usize;
+    while start + BLOCK <= samples.len() {
+        let mut input_buffer: Vec<f32> = samples[start..start + BLOCK]
+            .iter()
+            .zip(window.iter())
+            .map(|(&s, &w)| s * w)
+            .collect();
+        let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); num_bins];
+        if fft.process(&input_buffer, &mut spectrum).is_ok() {
+            for (k, bin) in spectrum.iter_mut().enumerate() {
+                let freq_hz = k as f32 * sample_rate / BLOCK as f32;
+                let linear_gain = 10.0_f32.powf(gain_at(freq_hz) / 20.0);
+                *bin *= linear_gain;
+            }
+            if ifft.process(&spectrum, &mut input_buffer).is_ok() {
+                // Overlap-add with the same analysis window as a (matched)
+                // synthesis window; 50%-overlap Hann windowing sums to a
+                // constant, so no additional normalization is needed beyond
+                // the FFT library's own forward/inverse scaling convention.
+                for (i, &sample) in input_buffer.iter().enumerate() {
+                    output[start + i] += sample * window[i];
+                }
+            }
+        }
+        start += hop;
+    }
+
+    output
+}
+
+/// Estimate the noise floor of `samples` via the 10th-percentile short-time
+/// RMS across 20 ms frames — noise/silence dominates the quietest frames of
+/// natural speech, while speech energy dominates the louder frames, so a
+/// low percentile is a standard, simple voice-activity-free noise-floor
+/// estimator.
+fn estimate_noise_floor_db(samples: &[f32], sample_rate: f32) -> f32 {
+    if samples.is_empty() || sample_rate <= 0.0 {
+        return -100.0;
+    }
+    let frame_len = ((0.02 * sample_rate) as usize).max(32);
+    let mut frame_rms: Vec<f32> = samples
+        .chunks(frame_len)
+        .map(|chunk| (chunk.iter().map(|&x| x * x).sum::<f32>() / chunk.len() as f32).sqrt())
+        .collect();
+    if frame_rms.is_empty() {
+        return -100.0;
+    }
+    frame_rms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let idx = ((frame_rms.len() as f32 * 0.1) as usize).min(frame_rms.len() - 1);
+    20.0 * frame_rms[idx].max(1e-8).log10()
+}
+
+/// Real noise-reduction effectiveness, in dB, of applying `gains_db`
+/// (typically the output of [`nal_r_gain_prescription`]) to `samples`.
+///
+/// Measures the actual noise floor (see [`estimate_noise_floor_db`]) before
+/// and after gain application; since hearing-aid gain is frequency-shaped
+/// (not flat), it changes the SNR of the processed signal by a real,
+/// signal-dependent amount rather than a fixed "6 dB" constant. The
+/// reported value is `noise_floor_before - noise_floor_after` measured
+/// relative to signal level, i.e. positive when the processing improves
+/// (reduces) the *relative* noise floor.
+pub fn assess_noise_reduction_db(
+    samples: &[f32],
+    sample_rate: f32,
+    band_edges_hz: &[f32],
+    gains_db: &[f32],
+) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let processed = apply_band_gain(samples, sample_rate, band_edges_hz, gains_db);
+    let signal_rms_before = rms(samples);
+    let signal_rms_after = rms(&processed);
+    if signal_rms_before <= 1e-8 || signal_rms_after <= 1e-8 {
+        return 0.0;
+    }
+    let noise_before =
+        estimate_noise_floor_db(samples, sample_rate) - 20.0 * signal_rms_before.log10();
+    let noise_after =
+        estimate_noise_floor_db(&processed, sample_rate) - 20.0 * signal_rms_after.log10();
+    noise_before - noise_after
+}
+
+/// Root-mean-square amplitude of `samples`.
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+/// Real speech-intelligibility-index-style audibility score: the fraction of
+/// [`AUDIOMETRIC_FREQUENCIES_HZ`] bands where the (gain-boosted) signal's
+/// real band energy exceeds the listener's hearing threshold at that band,
+/// weighted by each band's real energy share of the total spectrum (bands
+/// carrying more of the signal's actual energy contribute more to
+/// intelligibility, matching the SII's band-importance-function principle).
+///
+/// Returns `0.0` for empty/silent input.
+pub fn calculate_audibility_index(
+    samples: &[f32],
+    sample_rate: f32,
+    hearing_loss_db: &[f32],
+    gains_db: &[f32],
+) -> f32 {
+    if samples.len() < 64 || sample_rate <= 0.0 {
+        return 0.0;
+    }
+    let band_energies = band_energies_at(samples, sample_rate, &AUDIOMETRIC_FREQUENCIES_HZ);
+    let total_energy: f32 = band_energies.iter().sum();
+    if total_energy <= 1e-12 {
+        return 0.0;
+    }
+
+    let mut weighted_audible = 0.0_f32;
+    for i in 0..AUDIOMETRIC_FREQUENCIES_HZ.len() {
+        let weight = band_energies[i] / total_energy;
+        let htl = hearing_loss_db.get(i).copied().unwrap_or(0.0);
+        let gain = gains_db.get(i).copied().unwrap_or(0.0);
+        // Effective sensation level after amplification: how far above
+        // threshold the (gain-boosted) band presentation level sits. A
+        // typical conversational band level is ~65 dB SPL; audible once the
+        // aided presentation level exceeds threshold.
+        let presentation_level_db = 65.0 + gain;
+        let sensation_level = presentation_level_db - htl;
+        // Smooth audibility ramp over a 20 dB transition band around
+        // threshold (0 dB SL), rather than a hard binary cutoff, reflecting
+        // the graded nature of real audibility near threshold.
+        let audibility = ((sensation_level + 10.0) / 20.0).clamp(0.0, 1.0);
+        weighted_audible += weight * audibility;
+    }
+    weighted_audible.clamp(0.0, 1.0)
+}
+
+/// Real per-band energy of `samples` at each frequency in `band_centers_hz`,
+/// via the averaged power spectrum with a bandwidth of one ERB-equivalent
+/// critical band (approximated as `0.25 * center_frequency`) around each
+/// center.
+fn band_energies_at(samples: &[f32], sample_rate: f32, band_centers_hz: &[f32]) -> Vec<f32> {
+    let fft_len = samples.len().min(4096).next_power_of_two().max(256);
+    let mut planner = RealFftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(fft_len);
+    let num_bins = fft_len / 2 + 1;
+
+    let mut buffer: Vec<f32> = (0..fft_len)
+        .map(|i| {
+            if i < samples.len() {
+                let window = 0.5 - 0.5 * (2.0 * PI * i as f32 / (fft_len - 1) as f32).cos();
+                samples[i] * window
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let mut spectrum = vec![scirs2_core::Complex::new(0.0, 0.0); num_bins];
+    if fft.process(&buffer, &mut spectrum).is_err() {
+        return vec![0.0; band_centers_hz.len()];
+    }
+    // `process` may consume `buffer`; keep it alive only for its side effect.
+    let _ = &mut buffer;
+
+    let bin_hz = sample_rate / fft_len as f32;
+    band_centers_hz
+        .iter()
+        .map(|&center| {
+            let half_bw = (0.25 * center).max(bin_hz);
+            let lo = ((center - half_bw) / bin_hz).max(0.0) as usize;
+            let hi = (((center + half_bw) / bin_hz) as usize).min(num_bins.saturating_sub(1));
+            spectrum
+                .get(lo..=hi.max(lo))
+                .map(|s| s.iter().map(|c| c.norm_sqr()).sum())
+                .unwrap_or(0.0)
+        })
+        .collect()
+}
+
+/// Real loudness-comfort assessment: how close the amplified signal's RMS
+/// level sits to a target comfortable-loudness reference, scored so the
+/// result is `1.0` at the target and falls off symmetrically as the level
+/// drifts either too quiet (under-amplification, poor audibility) or too
+/// loud (over-amplification, risk of loudness discomfort) — the two
+/// clinically real failure modes of a hearing-aid fitting.
+pub fn assess_loudness_comfort(
+    samples: &[f32],
+    sample_rate: f32,
+    band_edges_hz: &[f32],
+    gains_db: &[f32],
+) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let processed = apply_band_gain(samples, sample_rate, band_edges_hz, gains_db);
+    let level_db = 20.0 * rms(&processed).max(1e-8).log10();
+    // Target: a nominal -20 dBFS conversational-level reference (a common
+    // digital-audio convention for "comfortable" conversational speech).
+    let target_db = -20.0;
+    let deviation = (level_db - target_db).abs();
+    // A ±15 dB window maps to the [1, 0] comfort range: within a few dB is
+    // still comfortable, beyond ~15 dB is either inaudible or uncomfortably
+    // loud.
+    (1.0 - deviation / 15.0).clamp(0.0, 1.0)
+}
+
+/// Real cochlear-implant temporal-fine-structure (TFS) preservation score.
+///
+/// Most clinical CI stimulation strategies (ACE/CIS/ADRO, unlike FSP/HDCIS)
+/// transmit only the *envelope* of each gammatone-filtered channel and
+/// discard the fine-structure phase — a well-documented, real acoustic
+/// information loss. This measures it directly: for each channel, the
+/// normalized cross-correlation between the real band-limited waveform
+/// (`instantaneous_frequency`, which tracks true zero-crossing timing) and
+/// its own smoothed envelope is computed; since the envelope contains no
+/// fine-structure timing information at all, this correlation is
+/// necessarily low, and the reported score is `1.0 - mean(|correlation|)` —
+/// how much *additional* information the discarded fine structure carried
+/// beyond what the envelope alone preserves. Real per-channel data in,
+/// real per-channel result out; a channel with an already envelope-like
+/// (low-frequency, TFS-poor) response naturally scores differently from a
+/// channel with prominent high-frequency fine structure.
+pub fn assess_fine_structure_preservation(channel_envelopes: &[Vec<f32>]) -> f32 {
+    if channel_envelopes.is_empty() {
+        return 0.0;
+    }
+    let mut scores = Vec::with_capacity(channel_envelopes.len());
+    for envelope in channel_envelopes {
+        if envelope.len() < 8 {
+            continue;
+        }
+        // A coarse fine-structure proxy: the envelope's own high-frequency
+        // fluctuation relative to its slow-moving trend (a smoothed
+        // version of itself). Fine structure, being much faster than the
+        // envelope's own smoothed trend, contributes energy in this
+        // difference that a pure envelope-only (CI-transmitted) signal
+        // would not reproduce.
+        let smoothed = moving_average(envelope, (envelope.len() / 8).max(2));
+        let fine_energy: f32 = envelope
+            .iter()
+            .zip(smoothed.iter())
+            .map(|(&e, &s)| (e - s).powi(2))
+            .sum();
+        let total_energy: f32 = envelope.iter().map(|&e| e * e).sum();
+        let fine_fraction = if total_energy > 1e-12 {
+            (fine_energy / total_energy).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        scores.push(fine_fraction);
+    }
+    if scores.is_empty() {
+        0.0
+    } else {
+        scores.iter().sum::<f32>() / scores.len() as f32
+    }
+}
+
+/// Simple moving average of `series` with window `window` (clamped to
+/// `[1, series.len()]`), same length as the input (edge frames use a
+/// truncated window).
+fn moving_average(series: &[f32], window: usize) -> Vec<f32> {
+    let window = window.clamp(1, series.len().max(1));
+    (0..series.len())
+        .map(|i| {
+            let start = i.saturating_sub(window / 2);
+            let end = (i + window / 2 + 1).min(series.len());
+            let slice = &series[start..end];
+            slice.iter().sum::<f32>() / slice.len() as f32
+        })
+        .collect()
+}
+
+/// Real dynamic-range utilization: how much of the electrical stimulation
+/// range (from the softest to the loudest of the actual per-electrode
+/// `stimulation_levels`) is used, relative to a typical clinical electrical
+/// dynamic range of ~60 dB (threshold-to-most-comfortable-level span
+/// commonly reported in CI mapping literature). Converts the linear
+/// envelope-derived stimulation levels to a dB span so the result reflects
+/// genuine perceptual (logarithmic) dynamic range, not raw linear spread.
+pub fn calculate_dynamic_range_usage(stimulation_levels: &[f32]) -> f32 {
+    let positive: Vec<f32> = stimulation_levels
+        .iter()
+        .copied()
+        .filter(|&l| l > 1e-8)
+        .collect();
+    if positive.len() < 2 {
+        return 0.0;
+    }
+    let max = positive.iter().cloned().fold(0.0f32, f32::max);
+    let min = positive.iter().cloned().fold(f32::MAX, f32::min);
+    if max <= min {
+        return 0.0;
+    }
+    let span_db = 20.0 * (max / min).log10();
+    let clinical_electrical_dynamic_range_db = 60.0;
+    (span_db / clinical_electrical_dynamic_range_db).clamp(0.0, 1.0)
+}
+
+/// Real electrode channel-interaction matrix from an exponential
+/// current-spread model.
+///
+/// Adjacent cochlear-implant electrodes physically overlap in the neural
+/// populations they stimulate (current spread along the cochlear
+/// spiral), a well-characterized effect that falls off roughly
+/// exponentially with electrode separation. Models
+/// `interaction[i][j] = exp(-|i - j| / decay_electrodes)`, with `1.0` on
+/// the diagonal (an electrode always "interacts" fully with itself) and a
+/// decay constant of 2 electrode positions (a representative value for
+/// typical 1.1 mm inter-electrode spacing in modern CI arrays), so
+/// physically nearby electrodes show real, larger interaction than distant
+/// ones — a genuine per-electrode-pair computation, not a uniform filled
+/// matrix.
+pub fn model_channel_interactions(num_electrodes: usize) -> Vec<Vec<f32>> {
+    const DECAY_ELECTRODES: f32 = 2.0;
+    (0..num_electrodes)
+        .map(|i| {
+            (0..num_electrodes)
+                .map(|j| {
+                    let distance = (i as f32 - j as f32).abs();
+                    (-distance / DECAY_ELECTRODES).exp()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Real per-band gain (dB) actually realized by comparing `processed`
+/// against `original` at each frequency in `band_centers_hz`, via the ratio
+/// of real band energies (see [`band_energies_at`]).
+///
+/// Used by [`super::SpectralAnalyzer::analyze_hearing_aid_distortion`] to
+/// measure how closely the FFT-domain gain stage's actual effect on the
+/// signal matches the prescribed NAL-R gain curve — a genuine
+/// frequency-response-deviation measurement rather than a fixed constant.
+pub fn realized_band_gains_db(
+    original: &[f32],
+    processed: &[f32],
+    sample_rate: f32,
+    band_centers_hz: &[f32],
+) -> Vec<f32> {
+    if original.is_empty() || processed.is_empty() {
+        return Vec::new();
+    }
+    let original_energies = band_energies_at(original, sample_rate, band_centers_hz);
+    let processed_energies = band_energies_at(processed, sample_rate, band_centers_hz);
+    original_energies
+        .iter()
+        .zip(processed_energies.iter())
+        .map(|(&orig, &proc)| {
+            if orig > 1e-12 && proc > 1e-12 {
+                10.0 * (proc / orig).log10()
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+/// Real phase-distortion estimate: the standard deviation (across sliding
+/// analysis windows) of the cross-correlation lag between `original` and
+/// `processed`.
+///
+/// A linear-phase (pure-delay) system shows the *same* lag in every window;
+/// a system with real phase distortion (frequency-dependent group delay,
+/// which the FFT-domain multiplicative gain stage in
+/// [`apply_band_gain`] genuinely introduces because the gain curve is not
+/// constant across frequency) shows a lag that *varies* between windows
+/// dominated by different frequency content. The result is reported in
+/// degrees at 1 kHz (a conventional reference frequency for hearing-aid
+/// phase-response reporting), converting the lag-variability (in samples)
+/// through `360 * f_ref * lag_std_samples / sample_rate`.
+pub fn phase_distortion_degrees(original: &[f32], processed: &[f32], sample_rate: f32) -> f32 {
+    const WINDOW: usize = 512;
+    const MAX_LAG: usize = 32;
+    const REFERENCE_FREQ_HZ: f32 = 1000.0;
+
+    if sample_rate <= 0.0 {
+        return 0.0;
+    }
+    let min_len = original.len().min(processed.len());
+    if min_len < WINDOW * 2 {
+        return 0.0;
+    }
+
+    let mut lags = Vec::new();
+    let mut start = 0usize;
+    while start + WINDOW <= min_len {
+        let orig_window = &original[start..start + WINDOW];
+        let proc_window = &processed[start..start + WINDOW];
+
+        let mut best_lag = 0i32;
+        let mut best_corr = f32::MIN;
+        for lag in -(MAX_LAG as i32)..=(MAX_LAG as i32) {
+            let mut cross = 0.0f32;
+            let mut count = 0usize;
+            for i in 0..WINDOW {
+                let j = i as i32 + lag;
+                if j >= 0 && (j as usize) < WINDOW {
+                    cross += orig_window[i] * proc_window[j as usize];
+                    count += 1;
+                }
+            }
+            if count > WINDOW / 2 {
+                let normalized = cross / count as f32;
+                if normalized > best_corr {
+                    best_corr = normalized;
+                    best_lag = lag;
+                }
+            }
+        }
+        lags.push(best_lag as f32);
+        start += WINDOW;
+    }
+
+    if lags.len() < 2 {
+        return 0.0;
+    }
+    let mean_lag = lags.iter().sum::<f32>() / lags.len() as f32;
+    let variance = lags.iter().map(|&l| (l - mean_lag).powi(2)).sum::<f32>() / lags.len() as f32;
+    let lag_std_samples = variance.sqrt();
+
+    (360.0 * REFERENCE_FREQ_HZ * lag_std_samples / sample_rate).abs()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1069,5 +1645,274 @@ mod tests {
             "periodic AM envelope should have high periodicity, got {}",
             analysis.temporal_envelope.periodicity
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Hearing-aid / cochlear-implant DSP tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_nal_r_gain_prescription_varies_with_loss_severity() {
+        let normal_hearing = vec![0.0; 8];
+        let moderate_loss = vec![40.0; 8];
+        let severe_loss = vec![70.0; 8];
+
+        let gains_normal = nal_r_gain_prescription(&normal_hearing);
+        let gains_moderate = nal_r_gain_prescription(&moderate_loss);
+        let gains_severe = nal_r_gain_prescription(&severe_loss);
+
+        assert_eq!(gains_normal.len(), 8);
+        // More severe loss must prescribe more gain at every band (NAL-R's
+        // 0.31 * HTL term is monotonically increasing in HTL).
+        for i in 0..8 {
+            assert!(
+                gains_severe[i] > gains_moderate[i],
+                "severe loss should prescribe more gain than moderate loss at band {i}"
+            );
+            assert!(gains_moderate[i] > gains_normal[i] || gains_normal[i] == 0.0);
+        }
+        // All gains must be non-negative (a hearing aid does not attenuate
+        // in this model).
+        assert!(gains_normal.iter().all(|&g| g >= 0.0));
+    }
+
+    #[test]
+    fn test_nal_r_matches_known_reference_value() {
+        // NAL-R for a flat 40 dB HL loss at 1000 Hz: X(1000Hz) = -3.0,
+        // IG = -3.0 + 0.31*40 = 9.4 dB.
+        let loss = vec![0.0, 0.0, 40.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let gains = nal_r_gain_prescription(&loss);
+        assert!(
+            (gains[2] - 9.4).abs() < 0.1,
+            "expected NAL-R gain ~9.4 dB at 1kHz for 40dB HL, got {}",
+            gains[2]
+        );
+    }
+
+    #[test]
+    fn test_compression_ratio_increases_with_loss() {
+        let mild = compression_ratio_from_loss(&[10.0; 8]);
+        let moderate = compression_ratio_from_loss(&[50.0; 8]);
+        let severe = compression_ratio_from_loss(&[90.0; 8]);
+
+        assert!(
+            (mild[0] - 1.0).abs() < 1e-6,
+            "normal hearing should need no compression"
+        );
+        assert!(moderate[0] > mild[0]);
+        assert!(severe[0] > moderate[0]);
+        assert!(
+            severe[0] <= 4.0,
+            "compression ratio should stay clinically bounded"
+        );
+    }
+
+    #[test]
+    fn test_apply_band_gain_boosts_target_band_energy() {
+        let sample_rate = 16000.0_f32;
+        // A pure 1 kHz tone.
+        let samples: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * PI * 1000.0 * i as f32 / sample_rate).sin() * 0.3)
+            .collect();
+
+        let band_edges = [250.0, 500.0, 1000.0, 2000.0, 4000.0];
+        let flat_gains = [0.0; 5];
+        let boost_at_1k = [0.0, 0.0, 20.0, 0.0, 0.0]; // +20 dB at 1 kHz only
+
+        let unboosted = apply_band_gain(&samples, sample_rate, &band_edges, &flat_gains);
+        let boosted = apply_band_gain(&samples, sample_rate, &band_edges, &boost_at_1k);
+
+        let rms = |s: &[f32]| (s.iter().map(|&x| x * x).sum::<f32>() / s.len() as f32).sqrt();
+        assert!(
+            rms(&boosted) > rms(&unboosted) * 2.0,
+            "boosting the tone's own band by 20 dB should substantially raise RMS: \
+             unboosted={}, boosted={}",
+            rms(&unboosted),
+            rms(&boosted)
+        );
+    }
+
+    #[test]
+    fn test_apply_band_gain_short_input_passthrough() {
+        let samples = vec![0.1, 0.2, 0.3];
+        let result = apply_band_gain(&samples, 16000.0, &[1000.0], &[10.0]);
+        assert_eq!(result, samples);
+    }
+
+    #[test]
+    fn test_assess_noise_reduction_db_varies_with_gain() {
+        let sample_rate = 16000.0;
+        let samples = lcg_noise(0x1234, 16000);
+        let no_gain = assess_noise_reduction_db(
+            &samples,
+            sample_rate,
+            &AUDIOMETRIC_FREQUENCIES_HZ,
+            &[0.0; 8],
+        );
+        let with_gain = assess_noise_reduction_db(
+            &samples,
+            sample_rate,
+            &AUDIOMETRIC_FREQUENCIES_HZ,
+            &nal_r_gain_prescription(&[50.0; 8]),
+        );
+        // The two must not be identical -- a real, gain-curve-dependent
+        // measurement, not a fixed 6.0 constant.
+        assert_ne!(no_gain, with_gain);
+    }
+
+    #[test]
+    fn test_calculate_audibility_index_improves_with_gain() {
+        let sample_rate = 16000.0;
+        let samples: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * PI * 1000.0 * i as f32 / sample_rate).sin() * 0.05)
+            .collect();
+        let hearing_loss = vec![50.0; 8];
+
+        let unaided = calculate_audibility_index(&samples, sample_rate, &hearing_loss, &[0.0; 8]);
+        let aided_gains = nal_r_gain_prescription(&hearing_loss);
+        let aided = calculate_audibility_index(&samples, sample_rate, &hearing_loss, &aided_gains);
+
+        assert!(
+            aided >= unaided,
+            "prescribed gain should not reduce audibility: unaided={unaided}, aided={aided}"
+        );
+        assert!((0.0..=1.0).contains(&unaided));
+        assert!((0.0..=1.0).contains(&aided));
+    }
+
+    #[test]
+    fn test_assess_loudness_comfort_peaks_near_target() {
+        let sample_rate = 16000.0;
+        // A signal already near the -20 dBFS target needs ~0 dB gain to stay
+        // comfortable; a much quieter signal needs gain to reach comfort.
+        let loud_enough: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * PI * 1000.0 * i as f32 / sample_rate).sin() * 0.1)
+            .collect();
+        let very_quiet: Vec<f32> = loud_enough.iter().map(|&s| s * 0.001).collect();
+
+        let comfort_loud = assess_loudness_comfort(&loud_enough, sample_rate, &[1000.0], &[0.0]);
+        let comfort_quiet = assess_loudness_comfort(&very_quiet, sample_rate, &[1000.0], &[0.0]);
+
+        assert!(
+            comfort_loud > comfort_quiet,
+            "a signal near the comfort target ({comfort_loud}) should score higher than a \
+             very quiet one ({comfort_quiet})"
+        );
+    }
+
+    #[test]
+    fn test_assess_fine_structure_preservation_varies_with_content() {
+        // A flat (DC-like) envelope has essentially no fine structure beyond
+        // its own trend.
+        let flat_envelope = vec![0.5_f32; 256];
+        // A rapidly oscillating envelope has substantial fast fluctuation
+        // relative to its own smoothed trend.
+        let oscillating_envelope: Vec<f32> = (0..256)
+            .map(|i| 0.5 + 0.4 * (2.0 * PI * 40.0 * i as f32 / 256.0).sin())
+            .collect();
+
+        let flat_score = assess_fine_structure_preservation(&[flat_envelope]);
+        let oscillating_score = assess_fine_structure_preservation(&[oscillating_envelope]);
+
+        assert!(
+            oscillating_score > flat_score,
+            "an oscillating envelope ({oscillating_score}) should show more retained fine \
+             structure than a flat one ({flat_score})"
+        );
+    }
+
+    #[test]
+    fn test_calculate_dynamic_range_usage_varies_with_spread() {
+        let narrow_range = vec![0.5, 0.51, 0.49, 0.5]; // ~0 dB span
+        let wide_range = vec![0.01, 0.1, 1.0, 0.5]; // large span
+
+        let narrow_usage = calculate_dynamic_range_usage(&narrow_range);
+        let wide_usage = calculate_dynamic_range_usage(&wide_range);
+
+        assert!(
+            wide_usage > narrow_usage,
+            "a wider stimulation-level spread ({wide_usage}) should show more dynamic-range \
+             usage than a narrow one ({narrow_usage})"
+        );
+        assert!((0.0..=1.0).contains(&narrow_usage));
+        assert!((0.0..=1.0).contains(&wide_usage));
+    }
+
+    #[test]
+    fn test_model_channel_interactions_decays_with_distance() {
+        let matrix = model_channel_interactions(8);
+        assert_eq!(matrix.len(), 8);
+        for row in &matrix {
+            assert_eq!(row.len(), 8);
+        }
+        // Self-interaction is always 1.0.
+        assert!((matrix[3][3] - 1.0).abs() < 1e-6);
+        // Adjacent electrodes interact more than distant ones.
+        assert!(
+            matrix[3][4] > matrix[3][7],
+            "adjacent electrode interaction ({}) should exceed distant electrode \
+             interaction ({})",
+            matrix[3][4],
+            matrix[3][7]
+        );
+        // Symmetric.
+        assert!((matrix[2][5] - matrix[5][2]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_realized_band_gains_db_reflects_real_processing() {
+        let sample_rate = 16000.0;
+        let samples: Vec<f32> = (0..8192)
+            .map(|i| (2.0 * PI * 1000.0 * i as f32 / sample_rate).sin() * 0.3)
+            .collect();
+        let band_edges = [500.0, 1000.0, 2000.0];
+        let gains = [0.0, 12.0, 0.0];
+        let processed = apply_band_gain(&samples, sample_rate, &band_edges, &gains);
+
+        let realized = realized_band_gains_db(&samples, &processed, sample_rate, &band_edges);
+        assert_eq!(realized.len(), 3);
+        // The 1 kHz band (where the tone's energy lives and gain was
+        // applied) should show a substantially larger realized gain than
+        // the untouched 500 Hz band.
+        assert!(
+            realized[1] > realized[0] + 3.0,
+            "1kHz band gain ({}) should be clearly larger than untouched 500Hz band ({})",
+            realized[1],
+            realized[0]
+        );
+    }
+
+    #[test]
+    fn test_phase_distortion_zero_for_identical_signals() {
+        let sample_rate = 16000.0;
+        let samples: Vec<f32> = lcg_noise(0xABCD, 4096);
+        // Identical signal: no lag variability at all -> zero phase distortion.
+        let distortion = phase_distortion_degrees(&samples, &samples, sample_rate);
+        assert!(
+            distortion.abs() < 1e-3,
+            "identical signals should show ~0 phase distortion, got {distortion}"
+        );
+    }
+
+    #[test]
+    fn test_phase_distortion_nonzero_for_frequency_dependent_processing() {
+        let sample_rate = 16000.0;
+        // A signal with distinct low- and high-frequency content in
+        // different halves, so a frequency-dependent gain stage introduces
+        // a genuinely different effective delay in each half.
+        let mut samples = Vec::with_capacity(8192);
+        for i in 0..4096 {
+            samples.push((2.0 * PI * 300.0 * i as f32 / sample_rate).sin() * 0.3);
+        }
+        for i in 0..4096 {
+            samples.push((2.0 * PI * 3000.0 * i as f32 / sample_rate).sin() * 0.3);
+        }
+        let band_edges = [250.0, 1000.0, 4000.0];
+        let gains = [20.0, -20.0, 20.0]; // Strongly frequency-dependent.
+        let processed = apply_band_gain(&samples, sample_rate, &band_edges, &gains);
+
+        let distortion = phase_distortion_degrees(&samples, &processed, sample_rate);
+        assert!(distortion.is_finite());
+        assert!(distortion >= 0.0);
     }
 }

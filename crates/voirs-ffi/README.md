@@ -5,795 +5,275 @@
 
 **Foreign Function Interface (FFI) bindings for VoiRS speech synthesis.**
 
-This crate provides C-compatible bindings and Python integration for the VoiRS speech synthesis framework, enabling seamless integration with applications written in other programming languages.
+This crate builds a single native library (Cargo package `voirs-ffi`, library name **`voirs`**)
+that exposes the VoiRS pipeline to other languages: a C-compatible ABI (always built), and
+optional Python (PyO3) and Node.js (N-API) bindings behind Cargo feature flags.
 
-## Features
+> **Note on this document:** every function and struct named below was verified against the
+> current source under `src/` at the time of writing. This crate does **not** ship a generated
+> C header (no `cbindgen` build step exists yet), so a C caller must declare the prototypes it
+> uses itself, as the example below does.
 
-- **C API**: Zero-cost C-compatible bindings with comprehensive error handling
-- **Python Bindings**: PyO3-based Python package with native performance
-- **Memory Safety**: Rust's memory safety guarantees extended to FFI boundaries
-- **Thread Safety**: Safe concurrent access from multiple threads
-- **Error Handling**: Comprehensive error propagation across language boundaries
-- **Streaming Support**: Real-time synthesis through callback interfaces
+## Bindings
 
-## Supported Languages
+| Binding | Mechanism | How to enable | Status |
+|---|---|---|---|
+| **C / C++** | raw `extern "C"` functions in `src/c_api/*.rs`, `src/lib.rs`, `src/memory.rs`, `src/performance.rs`, `src/platform/*.rs`, `src/error/*.rs`, `src/utils/*.rs` | built by default (no feature flag) | Present, no header shipped |
+| **Python** | PyO3 module `voirs` (`src/python/`) | `--features python` (add `numpy` for `PyAudioBuffer::as_numpy`) | Present |
+| **Node.js** | N-API bindings (`src/nodejs.rs`) | `--features nodejs` | Present |
+| **WebAssembly** | `wasm-bindgen` bindings (`src/wasm.rs`) | `--features wasm` | Present |
 
-| Language | Binding Type | Status | Features |
-|----------|-------------|--------|----------|
-| **C/C++** | Native FFI | ✅ Stable | Full API, callbacks, threading |
-| **Python** | PyO3 | ✅ Stable | Async/await, NumPy, type hints |
-| **Node.js** | NAPI | 🚧 Beta | Async, TypeScript definitions |
-| **Java** | JNI | 📋 Planned | JVM integration |
-| **C#/.NET** | P/Invoke | 📋 Planned | .NET Core support |
-| **Go** | CGO | 📋 Planned | Go module integration |
+Other feature flags worth knowing about:
+
+- `gpu` — forwards to `voirs-acoustic`/`voirs-vocoder` GPU support.
+- `codecs` — forwards to `voirs-vocoder/ffi-codecs`; without it, `voirs_audio_save_mp3` compiles
+  and links but returns `VOIRS_ERROR_INTERNAL_ERROR` instead of encoding. `voirs_audio_save_flac`
+  works either way.
+- `linux-platform` / `macos-platform` / `windows-platform` — pull in ALSA/PulseAudio/D-Bus, cpal,
+  and `windows`-crate dependencies respectively, so the platform-specific functions described in
+  [`docs/c/linux.md`](docs/c/linux.md), [`docs/c/macos.md`](docs/c/macos.md), and
+  [`docs/c/windows.md`](docs/c/windows.md) do real device/system queries instead of falling back
+  to conservative defaults.
+- `ffi-test-mocks` — off by default; used only by this crate's own test suite to swap the real
+  pipeline manager for an in-memory fake. Never enable this in an application.
 
 ## Quick Start
 
-### C/C++ Usage
+### C
+
+`voirs_synthesize_advanced()` builds and internally caches its own pipeline, so a minimal example
+does not need to call `voirs_create_pipeline()` at all — see
+["Pipeline handles vs. self-contained synthesis"](#pipeline-handles-vs-self-contained-synthesis)
+below for when you *do* want an explicit pipeline handle (e.g. to call `voirs_set_voice`).
 
 ```c
-#include "voirs.h"
+/* quickstart.c
+ *
+ * No C header ships with voirs-ffi yet, so we declare the small slice of the
+ * real #[repr(C)] ABI this example uses. Types/signatures must match
+ * crates/voirs-ffi/src/lib.rs and crates/voirs-ffi/src/c_api/synthesis.rs.
+ */
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdbool.h>
 
-int main() {
-    // Initialize VoiRS
-    VoirsHandle* handle = voirs_create();
-    if (!handle) {
-        fprintf(stderr, "Failed to initialize VoiRS\n");
-        return 1;
-    }
-    
-    // Set voice
-    if (voirs_set_voice(handle, "en-US-female-calm") != VOIRS_SUCCESS) {
-        fprintf(stderr, "Failed to set voice\n");
-        voirs_destroy(handle);
-        return 1;
-    }
-    
-    // Synthesize text
-    VoirsAudioBuffer* audio = NULL;
-    VoirsResult result = voirs_synthesize_text(
-        handle,
-        "Hello, world! This is VoiRS speaking from C.",
-        &audio
-    );
-    
-    if (result == VOIRS_SUCCESS) {
-        // Save audio to file
-        voirs_audio_save_wav(audio, "output.wav");
-        printf("Synthesis complete! Audio saved to output.wav\n");
-        
-        // Cleanup
-        voirs_audio_free(audio);
-    } else {
-        fprintf(stderr, "Synthesis failed: %s\n", voirs_get_last_error(handle));
-    }
-    
-    voirs_destroy(handle);
-    return 0;
-}
-```
-
-### Python Usage
-
-```python
-import voirs
-import asyncio
-
-async def main():
-    # Initialize VoiRS pipeline
-    pipeline = await voirs.VoirsPipeline.create(
-        voice="en-US-female-calm",
-        quality=voirs.Quality.HIGH
-    )
-    
-    # Synthesize text
-    audio = await pipeline.synthesize("Hello from Python!")
-    
-    # Save to file
-    audio.save_wav("output.wav")
-    
-    # Access raw audio data as NumPy array
-    samples = audio.numpy()
-    print(f"Generated {len(samples)} audio samples")
-    print(f"Sample rate: {audio.sample_rate} Hz")
-    print(f"Duration: {audio.duration:.2f} seconds")
-
-# Run async function
-asyncio.run(main())
-```
-
-## C API Reference
-
-### Core Types
-
-```c
-// Opaque handle to VoiRS instance
-typedef struct VoirsHandle VoirsHandle;
-
-// Audio buffer containing synthesized speech
-typedef struct VoirsAudioBuffer VoirsAudioBuffer;
-
-// Result codes
 typedef enum {
     VOIRS_SUCCESS = 0,
-    VOIRS_ERROR_INVALID_HANDLE = -1,
-    VOIRS_ERROR_INVALID_PARAMETER = -2,
-    VOIRS_ERROR_VOICE_NOT_FOUND = -3,
-    VOIRS_ERROR_SYNTHESIS_FAILED = -4,
-    VOIRS_ERROR_IO_ERROR = -5,
-    VOIRS_ERROR_OUT_OF_MEMORY = -6,
-    VOIRS_ERROR_THREAD_ERROR = -7,
-} VoirsResult;
+    VOIRS_ERROR_INVALID_PARAMETER = 1,
+    VOIRS_ERROR_INITIALIZATION_FAILED = 2,
+    VOIRS_ERROR_SYNTHESIS_FAILED = 3,
+    VOIRS_ERROR_VOICE_NOT_FOUND = 4,
+    VOIRS_ERROR_IO_ERROR = 5,
+    VOIRS_ERROR_OUT_OF_MEMORY = 6,
+    VOIRS_ERROR_OPERATION_CANCELLED = 7,
+    VOIRS_ERROR_INTERNAL_ERROR = 99,
+} VoirsErrorCode;
 
-// Audio format configuration
 typedef struct {
-    uint32_t sample_rate;    // Sample rate in Hz
-    uint16_t channels;       // Number of channels (1=mono, 2=stereo)
-    uint16_t bit_depth;      // Bit depth (16, 24, 32)
-} VoirsAudioFormat;
+    float *samples;
+    unsigned int length;
+    unsigned int sample_rate;
+    unsigned int channels;
+    float duration;
+} VoirsAudioBuffer;
 
-// Synthesis configuration
+typedef enum { VOIRS_FORMAT_WAV = 0, VOIRS_FORMAT_FLAC = 1, VOIRS_FORMAT_MP3 = 2,
+               VOIRS_FORMAT_OPUS = 3, VOIRS_FORMAT_OGG = 4 } VoirsAudioFormat;
+typedef enum { VOIRS_QUALITY_LOW = 0, VOIRS_QUALITY_MEDIUM = 1,
+               VOIRS_QUALITY_HIGH = 2, VOIRS_QUALITY_ULTRA = 3 } VoirsQualityLevel;
+
 typedef struct {
-    float speaking_rate;     // Speaking rate multiplier (0.5 - 2.0)
-    float pitch_shift;       // Pitch shift in semitones (-12.0 - 12.0)
-    float volume_gain;       // Volume gain in dB (-20.0 - 20.0)
-    bool enable_enhancement; // Enable audio enhancement
-    VoirsAudioFormat format; // Output audio format
+    float speaking_rate;
+    float pitch_shift;
+    float volume_gain;
+    int enable_enhancement;       /* 0/1 */
+    VoirsAudioFormat output_format;
+    unsigned int sample_rate;
+    VoirsQualityLevel quality;
 } VoirsSynthesisConfig;
-```
 
-### Core Functions
-
-```c
-// Instance management
-VoirsHandle* voirs_create(void);
-VoirsHandle* voirs_create_with_config(const char* config_path);
-void voirs_destroy(VoirsHandle* handle);
-
-// Voice management
-VoirsResult voirs_set_voice(VoirsHandle* handle, const char* voice_id);
-VoirsResult voirs_get_voice(VoirsHandle* handle, char* buffer, size_t buffer_size);
-VoirsResult voirs_list_voices(VoirsHandle* handle, char*** voices, size_t* count);
-void voirs_free_voice_list(char** voices, size_t count);
-
-// Synthesis
-VoirsResult voirs_synthesize_text(
-    VoirsHandle* handle,
-    const char* text,
-    VoirsAudioBuffer** audio
-);
-
-VoirsResult voirs_synthesize_text_with_config(
-    VoirsHandle* handle,
-    const char* text,
-    const VoirsSynthesisConfig* config,
-    VoirsAudioBuffer** audio
-);
-
-VoirsResult voirs_synthesize_ssml(
-    VoirsHandle* handle,
-    const char* ssml,
-    VoirsAudioBuffer** audio
-);
-
-// Streaming synthesis
-typedef void (*VoirsAudioCallback)(
-    const float* samples,
-    size_t sample_count,
-    void* user_data
-);
-
-VoirsResult voirs_synthesize_streaming(
-    VoirsHandle* handle,
-    const char* text,
-    VoirsAudioCallback callback,
-    void* user_data
-);
-
-// Audio buffer operations
-size_t voirs_audio_get_sample_count(const VoirsAudioBuffer* audio);
-uint32_t voirs_audio_get_sample_rate(const VoirsAudioBuffer* audio);
-uint16_t voirs_audio_get_channels(const VoirsAudioBuffer* audio);
-float voirs_audio_get_duration(const VoirsAudioBuffer* audio);
-
-const float* voirs_audio_get_samples(const VoirsAudioBuffer* audio);
-VoirsResult voirs_audio_copy_samples(
-    const VoirsAudioBuffer* audio,
-    float* buffer,
-    size_t buffer_size
-);
-
-VoirsResult voirs_audio_save_wav(const VoirsAudioBuffer* audio, const char* filename);
-VoirsResult voirs_audio_save_format(
-    const VoirsAudioBuffer* audio,
-    const char* filename,
-    const char* format  // "wav", "flac", "mp3", "opus"
-);
-
-void voirs_audio_free(VoirsAudioBuffer* audio);
-
-// Error handling
-const char* voirs_get_last_error(VoirsHandle* handle);
-VoirsResult voirs_clear_error(VoirsHandle* handle);
-const char* voirs_result_to_string(VoirsResult result);
-
-// Threading
-VoirsResult voirs_set_thread_count(VoirsHandle* handle, uint32_t thread_count);
-uint32_t voirs_get_thread_count(VoirsHandle* handle);
-
-// Configuration
-VoirsResult voirs_set_config_value(
-    VoirsHandle* handle,
-    const char* key,
-    const char* value
-);
-VoirsResult voirs_get_config_value(
-    VoirsHandle* handle,
-    const char* key,
-    char* buffer,
-    size_t buffer_size
-);
-```
-
-## Python API Reference
-
-### Installation
-
-```bash
-# Install from PyPI (when released)
-pip install voirs
-
-# Install from source
-pip install maturin
-maturin develop --release
-```
-
-### Core Classes
-
-```python
-class VoirsPipeline:
-    """Main VoiRS synthesis pipeline."""
-    
-    @classmethod
-    async def create(
-        cls,
-        voice: str = "en-US-female-calm",
-        quality: Quality = Quality.HIGH,
-        device: str = "auto",
-        **kwargs
-    ) -> "VoirsPipeline":
-        """Create a new VoiRS pipeline."""
-        ...
-    
-    async def synthesize(
-        self,
-        text: str,
-        *,
-        speed: float = 1.0,
-        pitch: float = 0.0,
-        volume: float = 0.0,
-        enhance: bool = True
-    ) -> "AudioBuffer":
-        """Synthesize text to audio."""
-        ...
-    
-    async def synthesize_ssml(self, ssml: str) -> "AudioBuffer":
-        """Synthesize SSML markup to audio."""
-        ...
-    
-    async def synthesize_stream(
-        self,
-        text: str,
-        chunk_size: int = 256
-    ) -> AsyncIterator["AudioBuffer"]:
-        """Stream synthesis for long texts."""
-        ...
-    
-    def set_voice(self, voice: str) -> None:
-        """Change the active voice."""
-        ...
-    
-    def get_voices(self) -> List[str]:
-        """Get list of available voices."""
-        ...
-
-class AudioBuffer:
-    """Audio buffer containing synthesized speech."""
-    
-    @property
-    def sample_rate(self) -> int:
-        """Sample rate in Hz."""
-        ...
-    
-    @property
-    def channels(self) -> int:
-        """Number of audio channels."""
-        ...
-    
-    @property
-    def duration(self) -> float:
-        """Duration in seconds."""
-        ...
-    
-    def numpy(self) -> np.ndarray:
-        """Get audio samples as NumPy array."""
-        ...
-    
-    def save_wav(self, filename: str) -> None:
-        """Save audio as WAV file."""
-        ...
-    
-    def save(self, filename: str, format: str = "wav") -> None:
-        """Save audio in specified format."""
-        ...
-    
-    def play(self) -> None:
-        """Play audio through system speakers."""
-        ...
-
-class Quality(Enum):
-    """Synthesis quality levels."""
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    ULTRA = "ultra"
-
-class VoirsError(Exception):
-    """Base exception for VoiRS errors."""
-    pass
-```
-
-### Usage Examples
-
-#### Basic Synthesis
-
-```python
-import voirs
-import asyncio
-
-async def basic_example():
-    pipeline = await voirs.VoirsPipeline.create()
-    audio = await pipeline.synthesize("Hello, world!")
-    audio.save_wav("hello.wav")
-
-asyncio.run(basic_example())
-```
-
-#### Advanced Synthesis with Controls
-
-```python
-import voirs
-import asyncio
-
-async def advanced_example():
-    pipeline = await voirs.VoirsPipeline.create(
-        voice="en-US-male-news",
-        quality=voirs.Quality.ULTRA
-    )
-    
-    audio = await pipeline.synthesize(
-        "This is an important announcement!",
-        speed=0.9,      # Slightly slower
-        pitch=0.5,      # Slightly higher pitch
-        volume=3.0,     # 3dB louder
-        enhance=True    # Enable enhancement
-    )
-    
-    audio.save("announcement.flac", format="flac")
-    print(f"Generated {audio.duration:.2f}s of audio")
-
-asyncio.run(advanced_example())
-```
-
-#### Streaming Synthesis
-
-```python
-import voirs
-import asyncio
-
-async def streaming_example():
-    pipeline = await voirs.VoirsPipeline.create()
-    
-    long_text = "This is a very long text that will be synthesized in chunks..."
-    
-    async for audio_chunk in pipeline.synthesize_stream(long_text):
-        # Process each chunk as it's generated
-        samples = audio_chunk.numpy()
-        print(f"Received chunk: {len(samples)} samples")
-        
-        # Could play or save each chunk immediately
-        # audio_chunk.play()
-
-asyncio.run(streaming_example())
-```
-
-#### SSML Synthesis
-
-```python
-import voirs
-import asyncio
-
-async def ssml_example():
-    pipeline = await voirs.VoirsPipeline.create()
-    
-    ssml_text = """
-    <speak>
-        <p>Welcome to <emphasis level="strong">VoiRS</emphasis>!</p>
-        <break time="1s"/>
-        <p><prosody rate="slow" pitch="low">This is slow and low.</prosody></p>
-        <p><prosody rate="fast" pitch="high">This is fast and high!</prosody></p>
-    </speak>
-    """
-    
-    audio = await pipeline.synthesize_ssml(ssml_text)
-    audio.save_wav("ssml_demo.wav")
-
-asyncio.run(ssml_example())
-```
-
-#### NumPy Integration
-
-```python
-import voirs
-import numpy as np
-import matplotlib.pyplot as plt
-import asyncio
-
-async def numpy_example():
-    pipeline = await voirs.VoirsPipeline.create()
-    audio = await pipeline.synthesize("Hello, NumPy!")
-    
-    # Get audio data as NumPy array
-    samples = audio.numpy()
-    
-    # Analyze audio
-    print(f"Shape: {samples.shape}")
-    print(f"Max amplitude: {np.max(np.abs(samples)):.3f}")
-    print(f"RMS level: {np.sqrt(np.mean(samples**2)):.3f}")
-    
-    # Plot waveform
-    time = np.linspace(0, audio.duration, len(samples))
-    plt.figure(figsize=(10, 4))
-    plt.plot(time, samples)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Amplitude")
-    plt.title("VoiRS Synthesis Waveform")
-    plt.grid(True)
-    plt.show()
-
-asyncio.run(numpy_example())
-```
-
-## Building and Installation
-
-### C/C++ Integration
-
-#### CMake Integration
-
-```cmake
-# CMakeLists.txt
-cmake_minimum_required(VERSION 3.15)
-project(my_project)
-
-# Find VoiRS
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(VOIRS REQUIRED voirs-ffi)
-
-# Add executable
-add_executable(my_app main.c)
-
-# Link VoiRS
-target_link_libraries(my_app ${VOIRS_LIBRARIES})
-target_include_directories(my_app PRIVATE ${VOIRS_INCLUDE_DIRS})
-target_compile_options(my_app PRIVATE ${VOIRS_CFLAGS_OTHER})
-```
-
-#### Manual Compilation
-
-```bash
-# Linux/macOS
-gcc -o my_app main.c -lvoirs -lpthread -ldl -lm
-
-# Windows (MSVC)
-cl main.c voirs.lib
-```
-
-### Python Development
-
-#### Building from Source
-
-```bash
-# Clone repository
-git clone https://github.com/cool-japan/voirs.git
-cd voirs/crates/voirs-ffi
-
-# Install Python dependencies
-pip install maturin numpy
-
-# Build and install
-maturin develop --release
-
-# Run tests
-python -m pytest tests/
-```
-
-#### Creating Wheel Packages
-
-```bash
-# Build wheel for current platform
-maturin build --release
-
-# Build wheels for multiple platforms
-maturin build --release --target x86_64-unknown-linux-gnu
-maturin build --release --target x86_64-pc-windows-msvc
-maturin build --release --target x86_64-apple-darwin
-```
-
-## Error Handling
-
-### C Error Handling
-
-```c
-#include "voirs.h"
-
-VoirsResult handle_synthesis_error(VoirsHandle* handle, VoirsResult result) {
-    if (result != VOIRS_SUCCESS) {
-        const char* error_msg = voirs_get_last_error(handle);
-        const char* result_str = voirs_result_to_string(result);
-        
-        fprintf(stderr, "VoiRS Error [%s]: %s\n", result_str, error_msg);
-        
-        // Handle specific error types
-        switch (result) {
-            case VOIRS_ERROR_VOICE_NOT_FOUND:
-                fprintf(stderr, "Available voices:\n");
-                
-                char** voices;
-                size_t count;
-                if (voirs_list_voices(handle, &voices, &count) == VOIRS_SUCCESS) {
-                    for (size_t i = 0; i < count; i++) {
-                        fprintf(stderr, "  - %s\n", voices[i]);
-                    }
-                    voirs_free_voice_list(voices, count);
-                }
-                break;
-                
-            case VOIRS_ERROR_OUT_OF_MEMORY:
-                fprintf(stderr, "Insufficient memory. Try reducing quality or text length.\n");
-                break;
-                
-            default:
-                break;
-        }
+typedef struct {
+    VoirsSynthesisConfig base_config;
+    bool enable_quality_analysis;
+    bool enable_real_time_processing;
+    bool enable_noise_reduction;
+    bool enable_normalization;
+    float target_loudness_lufs;
+    unsigned int chunk_size_ms;
+} VoirsAdvancedSynthesisConfig;
+
+typedef struct {
+    VoirsAudioBuffer *audio;
+    float synthesis_time_ms;
+    float quality_score;
+    char *processing_info;
+} VoirsSynthesisResult;
+
+extern VoirsErrorCode voirs_synthesize_advanced(const char *text,
+                                                 const VoirsAdvancedSynthesisConfig *config,
+                                                 VoirsSynthesisResult *result);
+extern void voirs_free_synthesis_result(VoirsSynthesisResult *result);
+extern VoirsErrorCode voirs_audio_save_flac(const VoirsAudioBuffer *buffer,
+                                             const char *filename,
+                                             unsigned int compression_level);
+extern char *voirs_get_last_error(void);
+extern void voirs_free_string(char *s);
+extern const char *voirs_error_message(VoirsErrorCode code);
+
+int main(void) {
+    VoirsSynthesisResult result;
+
+    /* NULL config -> VoirsAdvancedSynthesisConfig::default() */
+    VoirsErrorCode code = voirs_synthesize_advanced("Hello, world!", NULL, &result);
+    if (code != VOIRS_SUCCESS) {
+        char *detail = voirs_get_last_error();
+        fprintf(stderr, "synthesis failed (%s): %s\n",
+                voirs_error_message(code), detail ? detail : "(no detail)");
+        if (detail) voirs_free_string(detail);
+        return 1;
     }
-    
-    return result;
-}
-```
 
-### Python Error Handling
+    printf("synthesized %u samples @ %u Hz, %u channel(s), %.2f s\n",
+           result.audio->length, result.audio->sample_rate,
+           result.audio->channels, result.audio->duration);
 
-```python
-import voirs
+    voirs_audio_save_flac(result.audio, "output.flac", /*compression_level=*/5);
 
-async def safe_synthesis():
-    try:
-        pipeline = await voirs.VoirsPipeline.create(voice="nonexistent-voice")
-        audio = await pipeline.synthesize("Hello, world!")
-        
-    except voirs.VoiceNotFoundError as e:
-        print(f"Voice not found: {e}")
-        
-        # Get available voices
-        voices = voirs.get_available_voices()
-        print("Available voices:")
-        for voice in voices:
-            print(f"  - {voice}")
-            
-    except voirs.SynthesisError as e:
-        print(f"Synthesis failed: {e}")
-        
-    except voirs.VoirsError as e:
-        print(f"VoiRS error: {e}")
-        
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-```
-
-## Performance Considerations
-
-### C Performance Tips
-
-```c
-// Reuse VoiRS handle for multiple syntheses
-VoirsHandle* handle = voirs_create();
-
-// Configure synthesis parameters once
-VoirsSynthesisConfig config = {
-    .speaking_rate = 1.0f,
-    .pitch_shift = 0.0f,
-    .volume_gain = 0.0f,
-    .enable_enhancement = true,
-    .format = {
-        .sample_rate = 22050,
-        .channels = 1,
-        .bit_depth = 16
-    }
-};
-
-// Synthesize multiple texts efficiently
-for (int i = 0; i < num_texts; i++) {
-    VoirsAudioBuffer* audio;
-    if (voirs_synthesize_text_with_config(handle, texts[i], &config, &audio) == VOIRS_SUCCESS) {
-        // Process audio...
-        voirs_audio_free(audio);
-    }
-}
-
-voirs_destroy(handle);
-```
-
-### Python Performance Tips
-
-```python
-import voirs
-import asyncio
-
-async def efficient_batch_synthesis():
-    # Create pipeline once
-    pipeline = await voirs.VoirsPipeline.create(
-        quality=voirs.Quality.HIGH,
-        device="cuda:0"  # Use GPU if available
-    )
-    
-    texts = ["Text 1", "Text 2", "Text 3", ...]
-    
-    # Process in parallel
-    tasks = [pipeline.synthesize(text) for text in texts]
-    audio_buffers = await asyncio.gather(*tasks)
-    
-    # Save results
-    for i, audio in enumerate(audio_buffers):
-        audio.save_wav(f"output_{i:03d}.wav")
-```
-
-## Thread Safety
-
-### C Thread Safety
-
-```c
-#include <pthread.h>
-#include "voirs.h"
-
-// VoiRS handles are thread-safe for synthesis operations
-void* synthesis_thread(void* arg) {
-    VoirsHandle* handle = (VoirsHandle*)arg;
-    
-    VoirsAudioBuffer* audio;
-    VoirsResult result = voirs_synthesize_text(
-        handle,
-        "Thread-safe synthesis",
-        &audio
-    );
-    
-    if (result == VOIRS_SUCCESS) {
-        // Process audio...
-        voirs_audio_free(audio);
-    }
-    
-    return NULL;
-}
-
-int main() {
-    VoirsHandle* handle = voirs_create();
-    
-    pthread_t threads[4];
-    for (int i = 0; i < 4; i++) {
-        pthread_create(&threads[i], NULL, synthesis_thread, handle);
-    }
-    
-    for (int i = 0; i < 4; i++) {
-        pthread_join(threads[i], NULL);
-    }
-    
-    voirs_destroy(handle);
+    voirs_free_synthesis_result(&result); /* also frees result.audio and processing_info */
     return 0;
 }
 ```
 
-### Python Thread Safety
+Build the library, then compile and link against it (see [Building](#building) for details):
+
+```bash
+cargo build --release -p voirs-ffi
+gcc quickstart.c -Ltarget/release -lvoirs -o quickstart
+LD_LIBRARY_PATH=target/release ./quickstart   # macOS: DYLD_LIBRARY_PATH instead
+```
+
+Real synthesis loads acoustic/vocoder model weights (first call may fetch them and can take a
+while); if no models are reachable, `voirs_synthesize_advanced` returns
+`VOIRS_ERROR_SYNTHESIS_FAILED` / `VOIRS_ERROR_INITIALIZATION_FAILED` rather than fabricating
+audio — check `voirs_get_last_error()`.
+
+### Python (`--features python`)
 
 ```python
 import voirs
-import asyncio
-import concurrent.futures
 
-async def thread_safe_example():
-    pipeline = await voirs.VoirsPipeline.create()
-    
-    # VoiRS Python bindings are thread-safe
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        loop = asyncio.get_event_loop()
-        
-        futures = [
-            loop.run_in_executor(executor, sync_synthesize, pipeline, f"Text {i}")
-            for i in range(10)
-        ]
-        
-        results = await asyncio.gather(*futures)
-        return results
+pipeline = voirs.VoirsPipeline()          # synchronous constructor, no asyncio needed
+audio = pipeline.synthesize("Hello, world!")   # -> PyAudioBuffer
 
-def sync_synthesize(pipeline, text):
-    # Note: This would need a sync version of the API
-    # or proper async handling within threads
-    return f"Synthesized: {text}"
+print(audio.sample_rate(), audio.channels(), audio.duration())  # methods, not properties
+audio.save("output.wav")                  # format inferred from extension; "wav" is the default
+
+# With --features numpy:
+# samples = audio.as_numpy()
 ```
 
-## Troubleshooting
+`VoirsPipeline.with_config(use_gpu=None, num_threads=None, cache_dir=None, device=None)` is a
+`@staticmethod` alternative constructor. See `voirs.pyi` in this crate for the full stub, and
+`src/python/pipeline.rs` / `src/python/audio_buffer.rs` for the implementation.
 
-### Common Issues
+## Pipeline handles vs. self-contained synthesis
 
-**Library not found:**
-```bash
-# Linux: Add to LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+Two independent ways to drive synthesis exist in the C API; pick one per call site:
 
-# macOS: Add to DYLD_LIBRARY_PATH
-export DYLD_LIBRARY_PATH=/usr/local/lib:$DYLD_LIBRARY_PATH
+1. **Self-contained** (`voirs_synthesize_advanced`, `voirs_synthesize_streaming*`, `voirs_synthesize_batch*`) —
+   builds/reuses an internally cached pipeline; no handle to manage.
+2. **Explicit pipeline handle** — create one with `voirs_create_pipeline()` (returns a `uint32_t`
+   ID, 0 on failure; check `voirs_get_last_error()`), then pass that ID to
+   `voirs_set_voice(pipeline_id, voice_id)`, `voirs_get_voice(pipeline_id)`,
+   `voirs_synthesize_async(...)`, or `voirs_synthesize_parallel(...)`; release it with
+   `voirs_destroy_pipeline(pipeline_id)`. Validate with `voirs_is_pipeline_valid(pipeline_id)`.
 
-# Windows: Add to PATH or place DLL in executable directory
-```
-
-**Python import errors:**
-```bash
-# Ensure maturin is installed
-pip install maturin
-
-# Rebuild bindings
-maturin develop --release
-
-# Check Python path
-python -c "import sys; print(sys.path)"
-```
-
-**Memory issues:**
 ```c
-// Always free audio buffers
-VoirsAudioBuffer* audio;
-if (voirs_synthesize_text(handle, text, &audio) == VOIRS_SUCCESS) {
-    // Use audio...
-    voirs_audio_free(audio);  // Important!
-}
-
-// Destroy handle when done
-voirs_destroy(handle);
+extern unsigned int voirs_create_pipeline(void);
+extern int voirs_set_voice(unsigned int pipeline_id, const char *voice_id);
+extern int voirs_destroy_pipeline(unsigned int pipeline_id);
 ```
 
-## Contributing
+Setting the environment variable `VOIRS_BENCHMARK_MODE=1` makes `voirs_create_pipeline()` return a
+lightweight placeholder handle (skips model loading) for measuring handle-management overhead in
+isolation; a placeholder handle fails any real synthesis/voice call. See the doc comment on
+`voirs_create_pipeline` in `src/c_api/core.rs` for the full contract.
 
-We welcome contributions! Please see the [main repository](https://github.com/cool-japan/voirs) for contribution guidelines.
+## Error handling
 
-### Development Setup
+Errors are thread-local, not per-handle:
+
+```c
+extern int voirs_has_error(void);          /* 1 if a message is pending */
+extern char *voirs_get_last_error(void);   /* caller frees with voirs_free_string */
+extern void voirs_clear_error(void);
+extern const char *voirs_error_message(VoirsErrorCode code); /* static string, do not free */
+```
+
+## Building
 
 ```bash
-git clone https://github.com/cool-japan/voirs.git
-cd voirs/crates/voirs-ffi
+# From the workspace root
+cargo build --release -p voirs-ffi
 
-# Install development dependencies
-pip install maturin pytest numpy
-
-# Build and test
-maturin develop
-python -m pytest tests/
-
-# Run C tests
-make test-c
-
-# Check bindings
-cargo test
+# Or from this directory
+cargo build --release
 ```
+
+`[lib] crate-type = ["cdylib", "rlib"]` — the crate produces a dynamic library only (no static
+`.a`/`.lib`):
+
+| Platform | Artifact | Import lib |
+|---|---|---|
+| Linux | `target/release/libvoirs.so` | — |
+| macOS | `target/release/libvoirs.dylib` | — |
+| Windows | `target/release/voirs.dll` | `target/release/voirs.dll.lib` |
+
+See [`docs/c/linux.md`](docs/c/linux.md), [`docs/c/macos.md`](docs/c/macos.md), and
+[`docs/c/windows.md`](docs/c/windows.md) for platform-specific linking, `rpath`/`LD_LIBRARY_PATH`/
+`DYLD_LIBRARY_PATH` details, and the full function reference (including the ~9-13 platform-only
+functions per OS).
+
+### Python
+
+```bash
+pip install maturin
+cd crates/voirs-ffi
+maturin develop --release --features python   # add ",numpy" for NumPy array support
+```
+
+### Node.js
+
+```bash
+cd crates/voirs-ffi
+cargo build --release --features nodejs
+```
+
+## C API overview
+
+The C API is large (roughly 200 functions available on every desktop OS, plus 5-13 more per
+platform) because it also exposes internal utilities (zero-copy buffers, format conversion,
+allocator control, DSP analysis) as stable C entry points, not just the top-level synthesis path.
+Rather than duplicate a 200-row table here, the full categorized listing lives in the platform
+guides, which are otherwise identical for the cross-platform functions:
+
+- [`docs/c/linux.md`](docs/c/linux.md)
+- [`docs/c/macos.md`](docs/c/macos.md)
+- [`docs/c/windows.md`](docs/c/windows.md)
+
+Note there is no plain `voirs_synthesize` function: the one-shot self-contained entry point is
+`voirs_synthesize_advanced`, and the callback/streaming entry points are `voirs_synthesize_streaming`,
+`voirs_synthesize_streaming_advanced`, and `voirs_synthesize_streaming_realtime` (all in
+`src/c_api/synthesis.rs`).
+
+## Memory ownership rules
+
+- Every `voirs_*_create`/`voirs_list_voices`/`voirs_get_voice_info`/`voirs_synthesize_advanced`
+  that hands back a heap pointer has a matching `voirs_free_*` — call it exactly once.
+- `voirs_free_synthesis_result` also frees `result.audio` and `result.processing_info`; do not
+  additionally call `voirs_free_audio_buffer` on `result.audio` or `voirs_free_string` on
+  `result.processing_info`.
+- Strings returned by `voirs_get_last_error`, `voirs_get_voice`, `voirs_macos_get_system_language`,
+  and `voirs_windows_read_registry_config` must be freed with `voirs_free_string`.
 
 ## License
 

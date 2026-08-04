@@ -985,15 +985,29 @@ impl MemoryMonitor {
 
         #[cfg(target_os = "macos")]
         {
-            use std::process::Command;
-            if let Ok(output) = Command::new("ps")
-                .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-                .output()
-            {
-                if let Ok(output_str) = String::from_utf8(output.stdout) {
-                    if let Ok(kb) = output_str.trim().parse::<usize>() {
-                        return kb * 1024; // Convert KB to bytes
+            // Memory usage changes constantly, so (unlike the device-
+            // availability probes in `pipeline::state`) this is intentionally
+            // NOT cached - but it is still guarded by a hard timeout so a
+            // slow/wedged `ps` can never block the caller. See
+            // `crate::process_probe::run_with_timeout`.
+            let mut command = std::process::Command::new("ps");
+            command.args(["-o", "rss=", "-p", &std::process::id().to_string()]);
+            match crate::process_probe::run_with_timeout(
+                &mut command,
+                crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+            ) {
+                Ok(Some(output)) => {
+                    if let Ok(output_str) = String::from_utf8(output.stdout) {
+                        if let Ok(kb) = output_str.trim().parse::<usize>() {
+                            return kb * 1024; // Convert KB to bytes
+                        }
                     }
+                }
+                Ok(None) => {
+                    warn!("ps did not respond within the probe timeout; reporting 0 memory usage");
+                }
+                Err(e) => {
+                    warn!("Failed to spawn ps for memory usage probing: {e}");
                 }
             }
         }
@@ -1098,5 +1112,29 @@ mod tests {
         let text = "This is a long text that will be split into chunks for streaming synthesis.";
         let stream = orchestrator.synthesize_stream(text, &config).await;
         assert!(stream.is_ok());
+    }
+
+    /// Regression test: `MemoryMonitor::get_memory_usage` used to shell out
+    /// to `ps` on macOS via `Command::output()` with no timeout, so a
+    /// slow/wedged `ps` could block the calling thread indefinitely (the
+    /// same shape of bug as the device-availability probes in
+    /// `pipeline::state`). Call it with `test_mode = false` (so the real,
+    /// non-test code path - including the subprocess - actually runs) on a
+    /// background thread and require it to report back within a generous
+    /// bound.
+    #[test]
+    fn get_memory_usage_returns_within_bounded_time() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(MemoryMonitor::get_memory_usage(false));
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(_bytes) => {}
+            Err(_) => panic!(
+                "get_memory_usage did not return within the 10s bound; \
+                 the subprocess timeout guard has regressed"
+            ),
+        }
     }
 }

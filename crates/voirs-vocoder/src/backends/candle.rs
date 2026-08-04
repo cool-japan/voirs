@@ -11,8 +11,17 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+// `CandleBackend` (below) unconditionally holds `Option<Device>`/`DType`/
+// `Option<GpuMemoryPool>` fields, and the `#[cfg(not(feature = "candle"))]`
+// fallback methods further down still take/return `Tensor` (they just report
+// "not enabled" rather than doing real work) - so `DType`/`Device`/`Tensor`
+// must always be in scope regardless of the `candle` feature. `Module` and
+// `Shape` remain feature-gated: they are only used inside
+// `#[cfg(feature = "candle")]` blocks (the real `GpuMemoryPool`/`.forward()`
+// implementations).
+use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "candle")]
-use candle_core::{DType, Device, Module, Shape, Tensor};
+use candle_core::{Module, Shape};
 #[cfg(feature = "candle")]
 use candle_nn::{Conv1d, ConvTranspose1d};
 
@@ -30,7 +39,12 @@ pub struct CandleBackend {
 }
 
 /// GPU memory pool for efficient memory management
-#[cfg(feature = "candle")]
+///
+/// The struct itself is unconditionally defined because `CandleBackend`
+/// unconditionally holds an `Option<GpuMemoryPool>` field; only its methods
+/// (`impl GpuMemoryPool` below) - and therefore every place a pool actually
+/// gets constructed - are feature-gated, since those are only reachable from
+/// the `#[cfg(feature = "candle")]` `initialize_device`.
 #[allow(dead_code)]
 struct GpuMemoryPool {
     pre_allocated_tensors: HashMap<String, Tensor>,

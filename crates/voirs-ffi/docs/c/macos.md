@@ -1,677 +1,236 @@
 # macOS Integration Guide
 
-VoiRS provides comprehensive macOS integration through Core Audio framework, AVFoundation support, Objective-C runtime bindings, and macOS-specific performance optimizations.
-
-## Table of Contents
-
-- [Core Audio Integration](#core-audio-integration)
-- [AVFoundation Support](#avfoundation-support)
-- [Objective-C Runtime](#objective-c-runtime)
-- [Performance Optimization](#performance-optimization)
-- [Build Configuration](#build-configuration)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-
-## Core Audio Integration
-
-VoiRS leverages Core Audio for high-performance, low-latency audio processing on macOS.
-
-### Basic Core Audio Setup
-
-```c
-#include "voirs/platform/macos.h"
-
-// Initialize Core Audio system
-VoirsMacOSCoreAudio* core_audio = voirs_macos_init_core_audio();
-if (!core_audio) {
-    fprintf(stderr, "Failed to initialize Core Audio\n");
-    return -1;
-}
-
-// Core Audio automatically cleaned up when destroyed
-voirs_macos_destroy_core_audio(core_audio);
-```
-
-### Audio Device Management
-
-```c
-VoirsMacOSCoreAudio* core_audio = voirs_macos_init_core_audio();
-
-// Get available audio devices
-VoirsAudioDevice* devices;
-int device_count = voirs_macos_get_audio_devices(core_audio, &devices);
-
-for (int i = 0; i < device_count; i++) {
-    printf("Device %d: %s\n", devices[i].id, devices[i].name);
-    printf("  Sample Rate: %.0f Hz\n", devices[i].sample_rate);
-    printf("  Channels: %u\n", devices[i].channels);
-    printf("  %s\n", devices[i].is_input ? "Input" : "Output");
-    printf("  %s\n", devices[i].is_default ? "Default" : "Non-default");
-}
-
-voirs_macos_free_device_list(devices, device_count);
-```
-
-### Audio Unit Configuration
-
-```c
-// Create and configure Audio Unit for real-time processing
-VoirsCoreAudioUnit* audio_unit = voirs_macos_create_audio_unit();
-
-// Set audio format
-VoirsCoreAudioFormat format = {
-    .sample_rate = 44100.0,
-    .channels = 2,
-    .bits_per_sample = 32,
-    .format_flags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked
-};
-
-voirs_macos_set_audio_unit_format(audio_unit, &format);
-
-// Set buffer size for low latency
-voirs_macos_set_audio_unit_buffer_size(audio_unit, 256);
-
-// Register audio processing callback
-voirs_macos_set_audio_unit_callback(audio_unit, audio_render_callback, user_data);
-
-// Start audio processing
-voirs_macos_start_audio_unit(audio_unit);
-```
-
-### Audio Processing Callback
-
-```c
-OSStatus audio_render_callback(
-    void* user_data,
-    AudioUnitRenderActionFlags* flags,
-    const AudioTimeStamp* timestamp,
-    UInt32 bus_number,
-    UInt32 frame_count,
-    AudioBufferList* data
-) {
-    VoirsPipeline* pipeline = (VoirsPipeline*)user_data;
-    
-    // Generate audio samples
-    float* output = (float*)data->mBuffers[0].mData;
-    voirs_process_audio_realtime(pipeline, output, frame_count);
-    
-    return noErr;
-}
-```
-
-### Sample Rate and Format Control
-
-```c
-// Set device sample rate
-AudioDeviceID device_id = 1; // Default output device
-voirs_macos_set_device_sample_rate(core_audio, device_id, 48000.0);
-
-// Get supported sample rates
-double* supported_rates;
-int rate_count = voirs_macos_get_supported_sample_rates(core_audio, device_id, &supported_rates);
-
-for (int i = 0; i < rate_count; i++) {
-    printf("Supported rate: %.0f Hz\n", supported_rates[i]);
-}
-
-voirs_macos_free_sample_rates(supported_rates);
-```
-
-## AVFoundation Support
-
-AVFoundation provides audio session management, permissions, and high-level audio features.
-
-### Audio Session Configuration
-
-```c
-// Initialize AVFoundation
-VoirsMacOSAVFoundation* av_foundation = voirs_macos_init_avfoundation();
-if (!av_foundation) {
-    fprintf(stderr, "Failed to initialize AVFoundation\n");
-    return -1;
-}
-
-// Configure audio session for speech synthesis
-voirs_macos_configure_synthesis_session(av_foundation);
-
-// Set audio session category
-voirs_macos_set_audio_session_category(av_foundation, VOIRS_AUDIO_CATEGORY_PLAYBACK);
-
-// Enable background audio
-voirs_macos_set_audio_session_mode(av_foundation, VOIRS_AUDIO_MODE_SPOKEN_AUDIO);
-```
-
-### Microphone Permissions
-
-```c
-// Check microphone permission status
-VoirsPermissionStatus status = voirs_macos_get_microphone_permission_status(av_foundation);
-
-switch (status) {
-    case VOIRS_PERMISSION_GRANTED:
-        printf("Microphone permission granted\n");
-        break;
-    case VOIRS_PERMISSION_DENIED:
-        printf("Microphone permission denied\n");
-        break;
-    case VOIRS_PERMISSION_NOT_DETERMINED:
-        printf("Microphone permission not determined, requesting...\n");
-        // Request permission
-        voirs_macos_request_microphone_permission(av_foundation, permission_callback, NULL);
-        break;
-}
-
-void permission_callback(VoirsPermissionStatus status, void* user_data) {
-    if (status == VOIRS_PERMISSION_GRANTED) {
-        printf("Microphone permission granted by user\n");
-        // Proceed with audio input functionality
-    } else {
-        printf("Microphone permission denied by user\n");
-        // Disable audio input features
-    }
-}
-```
-
-### Audio Interruption Handling
-
-```c
-// Register for audio interruption notifications
-void audio_interruption_callback(VoirsAudioInterruptionType type, void* user_data) {
-    switch (type) {
-        case VOIRS_AUDIO_INTERRUPTION_BEGAN:
-            printf("Audio interrupted (phone call, etc.)\n");
-            // Pause synthesis
-            voirs_pipeline_pause(pipeline);
-            break;
-        case VOIRS_AUDIO_INTERRUPTION_ENDED:
-            printf("Audio interruption ended\n");
-            // Resume synthesis
-            voirs_pipeline_resume(pipeline);
-            break;
-    }
-}
-
-voirs_macos_register_interruption_callback(av_foundation, audio_interruption_callback, NULL);
-```
-
-## Objective-C Runtime
-
-Access native macOS APIs and system features through Objective-C runtime integration.
-
-### System Information
-
-```c
-// Get system language preference
-char* language = voirs_macos_get_system_language();
-printf("System language: %s\n", language);
-voirs_free_string(language);
-
-// Get system appearance (light/dark mode)
-char* appearance = voirs_macos_get_system_appearance();
-printf("System appearance: %s\n", appearance);
-voirs_free_string(appearance);
-
-// Get system locale information
-VoirsMacOSLocaleInfo locale;
-voirs_macos_get_locale_info(&locale);
-printf("Locale: %s\n", locale.identifier);
-printf("Language Code: %s\n", locale.language_code);
-printf("Country Code: %s\n", locale.country_code);
-```
-
-### Native Notifications
-
-```c
-// Show native macOS notification
-voirs_macos_show_notification(
-    "VoiRS", 
-    "Speech synthesis completed", 
-    "Your audio file has been generated successfully."
-);
-
-// Show notification with custom options
-VoirsMacOSNotificationOptions options = {
-    .title = "VoiRS Synthesis",
-    .subtitle = "Processing Complete",
-    .body = "Your speech synthesis is ready.",
-    .sound_name = "default",
-    .has_action_button = true,
-    .action_button_title = "Open File"
-};
-
-voirs_macos_show_notification_with_options(&options, notification_callback, NULL);
-
-void notification_callback(VoirsMacOSNotificationResponse response, void* user_data) {
-    if (response == VOIRS_NOTIFICATION_ACTION_CLICKED) {
-        printf("User clicked notification action\n");
-        // Open the generated file
-    }
-}
-```
-
-### File System Integration
-
-```c
-// Get system directories
-char* documents_dir = voirs_macos_get_documents_directory();
-char* downloads_dir = voirs_macos_get_downloads_directory();
-char* temp_dir = voirs_macos_get_temporary_directory();
-
-printf("Documents: %s\n", documents_dir);
-printf("Downloads: %s\n", downloads_dir);
-printf("Temporary: %s\n", temp_dir);
-
-voirs_free_string(documents_dir);
-voirs_free_string(downloads_dir);
-voirs_free_string(temp_dir);
-
-// File access permissions
-bool has_documents_access = voirs_macos_check_documents_access();
-bool has_downloads_access = voirs_macos_check_downloads_access();
-
-if (!has_documents_access) {
-    printf("No documents access, requesting permission...\n");
-    voirs_macos_request_documents_access();
-}
-```
-
-## Performance Optimization
-
-macOS-specific performance optimizations for real-time audio processing.
-
-### Real-time Thread Configuration
-
-```c
-// Enable low-latency audio mode
-voirs_macos_enable_low_latency_mode();
-
-// Set real-time thread priorities
-voirs_macos_set_audio_thread_priority(VOIRS_MACOS_THREAD_PRIORITY_REALTIME);
-
-// Configure thread time constraints
-VoirsMacOSThreadConstraints constraints = {
-    .period = 2902,        // ~128 samples at 44.1kHz
-    .computation = 2177,   // 75% of period
-    .constraint = 2902,    // Same as period
-    .preemptible = true
-};
-
-voirs_macos_set_thread_constraints(&constraints);
-```
-
-### Memory Optimization
-
-```c
-// Configure memory for optimal performance
-voirs_macos_configure_vm_pressure();
-
-// Enable large page support (if available)
-voirs_macos_enable_large_pages();
-
-// Set memory pressure handling
-void memory_pressure_callback(VoirsMacOSMemoryPressure pressure, void* user_data) {
-    switch (pressure) {
-        case VOIRS_MEMORY_PRESSURE_NORMAL:
-            // Normal operation
-            break;
-        case VOIRS_MEMORY_PRESSURE_WARNING:
-            printf("Memory pressure warning\n");
-            // Reduce memory usage
-            voirs_pipeline_reduce_memory_usage(pipeline);
-            break;
-        case VOIRS_MEMORY_PRESSURE_CRITICAL:
-            printf("Critical memory pressure\n");
-            // Aggressively reduce memory usage
-            voirs_pipeline_emergency_memory_reduction(pipeline);
-            break;
-    }
-}
-
-voirs_macos_register_memory_pressure_callback(memory_pressure_callback, NULL);
-```
-
-### Core Animation Integration
-
-```c
-// Enable Core Animation for UI updates
-void synthesis_progress_callback(float progress, void* user_data) {
-    // Update UI on main thread
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // Update progress indicator
-        voirs_macos_update_progress_indicator(progress);
-    });
-}
-
-voirs_set_synthesis_progress_callback(pipeline, synthesis_progress_callback, NULL);
-```
-
-### Metal Performance Shaders
-
-```c
-// Enable Metal acceleration (if available)
-if (voirs_macos_supports_metal()) {
-    printf("Metal Performance Shaders available\n");
-    voirs_macos_enable_metal_acceleration();
-    
-    // Configure Metal device
-    VoirsMacOSMetalConfig metal_config = {
-        .device_type = VOIRS_METAL_DEVICE_TYPE_DISCRETE,  // Prefer discrete GPU
-        .memory_mode = VOIRS_METAL_MEMORY_MODE_SHARED,
-        .enable_profiling = false
-    };
-    
-    voirs_macos_configure_metal(&metal_config);
-}
-```
-
-## Build Configuration
-
-### Xcode Project Configuration
-
-```xml
-<!-- Info.plist entries -->
-<key>NSMicrophoneUsageDescription</key>
-<string>VoiRS needs microphone access for voice input features</string>
-
-<key>NSDocumentsFolderUsageDescription</key>
-<string>VoiRS saves audio files to your Documents folder</string>
-
-<key>NSDownloadsFolderUsageDescription</key>
-<string>VoiRS saves downloaded voice models to your Downloads folder</string>
-
-<!-- Hardened Runtime entitlements -->
-<key>com.apple.security.device.audio-input</key>
-<true/>
-<key>com.apple.security.files.user-selected.read-write</key>
-<true/>
-<key>com.apple.security.files.downloads.read-write</key>
-<true/>
-```
-
-### CMake Configuration
-
-```cmake
-# macOS-specific configuration
-if(APPLE)
-    find_library(CORE_AUDIO_FRAMEWORK CoreAudio)
-    find_library(AUDIO_UNIT_FRAMEWORK AudioUnit)
-    find_library(AVFOUNDATION_FRAMEWORK AVFoundation)
-    find_library(FOUNDATION_FRAMEWORK Foundation)
-    find_library(METAL_FRAMEWORK Metal)
-    
-    target_link_libraries(your_app 
-        voirs_ffi
-        ${CORE_AUDIO_FRAMEWORK}
-        ${AUDIO_UNIT_FRAMEWORK}
-        ${AVFOUNDATION_FRAMEWORK}
-        ${FOUNDATION_FRAMEWORK}
-        ${METAL_FRAMEWORK}
-    )
-    
-    # macOS version targeting
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
-    
-    # Enable features
-    target_compile_definitions(your_app PRIVATE 
-        VOIRS_ENABLE_CORE_AUDIO=1
-        VOIRS_ENABLE_AVFOUNDATION=1
-        VOIRS_ENABLE_METAL=1
-    )
-endif()
-```
-
-### Compiler Flags
+This page documents the real, currently-exported C API of the `voirs-ffi` crate (library name
+`voirs`) as built for macOS, and how to build/link against it. It replaces an earlier revision
+that documented roughly 63 functions, of which only about 8 actually existed (things like
+`VoirsMacOSPerformanceMonitor`, `voirs_macos_create_audio_unit`, and Metal-acceleration hooks never
+existed in this crate); every symbol listed below was verified against
+`crates/voirs-ffi/src/**/*.rs` directly.
+
+No C header ships with this crate (there is no `cbindgen` build step), so every prototype below is
+what a caller must declare itself.
+
+## Building
 
 ```bash
-# Compile with Core Audio support
-gcc -o example example.c \
-    -lvoirs_ffi \
-    -framework CoreAudio \
-    -framework AudioUnit \
-    -framework AVFoundation \
-    -framework Foundation \
-    -framework Metal \
-    -mmacosx-version-min=10.15
+# From the workspace root
+cargo build --release -p voirs-ffi
 ```
 
-## Examples
+This produces `target/release/libvoirs.dylib` (crate `[lib] name = "voirs"`,
+`crate-type = ["cdylib", "rlib"]` — dynamic library only, no static `.a`).
 
-### Complete macOS Integration Example
+The nine `voirs_macos_*` functions below compile and link either way; two of them
+(`voirs_macos_get_system_volume` via `osascript`, `voirs_macos_get_system_language` via
+`defaults read`) shell out to macOS system tools and work in a default build. Device enumeration
+inside `MacOSCoreAudio` additionally uses the `cpal` crate for richer results when built with:
+
+```bash
+cargo build --release -p voirs-ffi --features macos-platform
+```
+
+## Linking
+
+```bash
+clang myapp.c -I. -Ltarget/release -lvoirs -o myapp
+```
+
+At runtime the loader needs to find `libvoirs.dylib`. Options, in order of how "permanent" they are:
+
+```bash
+# 1. Environment variable (simplest for local development/testing)
+DYLD_LIBRARY_PATH=target/release ./myapp
+
+# 2. Bake an rpath into the binary at link time (no env var needed afterwards)
+clang myapp.c -I. -Ltarget/release -Wl,-rpath,@executable_path -lvoirs -o myapp   # if libvoirs.dylib sits next to myapp
+clang myapp.c -I. -Ltarget/release -Wl,-rpath,/absolute/install/path -lvoirs -o myapp
+
+# 3. Fix up an already-built binary's search path after the fact
+install_name_tool -add_rpath /absolute/install/path myapp
+```
+
+Verify resolution with `otool -L myapp` (lists the dylibs the binary references and how it expects
+to find them) or `dyld_info -dependents myapp`.
+
+### Code signing
+
+A `libvoirs.dylib` built locally with `cargo build` is unsigned. For local development this is
+fine — macOS allows running unsigned binaries you built yourself without extra steps (Gatekeeper
+mainly gates binaries downloaded from the internet, tracked via the quarantine xattr, which a
+local `cargo build` output does not have). If you later distribute a signed/notarized application
+bundling `libvoirs.dylib`, sign it as part of that pipeline, e.g.:
+
+```bash
+codesign --sign - --force target/release/libvoirs.dylib   # ad-hoc signature, local testing only
+codesign --sign "Developer ID Application: Your Name (TEAMID)" target/release/libvoirs.dylib
+codesign --verify --verbose target/release/libvoirs.dylib
+```
+
+There is nothing macOS-specific in this crate's own build process that requires entitlements or a
+hardened runtime — those only become relevant if your embedding application itself needs them
+(e.g. to access the microphone), independent of `voirs-ffi`.
+
+## Minimal example
+
+See the [crate README's Quick Start](../../README.md#quick-start) for a complete, compilable
+`voirs_synthesize_advanced` example (it declares the small subset of the real ABI it uses, since no
+header ships). Nothing in it is macOS-specific; it builds and links the same way as shown above.
+
+## macOS-specific functions (`src/platform/macos.rs`)
+
+These 9 functions only compile when `target_os = "macos"` (`crates/voirs-ffi/src/platform/mod.rs`
+gates `pub mod macos;` on it). Notes below reflect what the code actually does today, not what the
+names might suggest:
 
 ```c
-#include "voirs/voirs_ffi.h"
-#include "voirs/platform/macos.h"
+/* Opaque handles -- only ever used through the functions below. */
+typedef struct MacOSCoreAudio MacOSCoreAudio;
+typedef struct MacOSAVFoundation MacOSAVFoundation;
 
-int main() {
-    // Initialize macOS-specific features
-    if (!voirs_macos_initialize()) {
-        fprintf(stderr, "Failed to initialize macOS features\n");
-        return 1;
-    }
-    
-    // Initialize Core Audio
-    VoirsMacOSCoreAudio* core_audio = voirs_macos_init_core_audio();
-    if (!core_audio) {
-        fprintf(stderr, "Failed to initialize Core Audio\n");
-        return 1;
-    }
-    
-    // Initialize AVFoundation
-    VoirsMacOSAVFoundation* av_foundation = voirs_macos_init_avfoundation();
-    if (!av_foundation) {
-        fprintf(stderr, "Failed to initialize AVFoundation\n");
-        voirs_macos_destroy_core_audio(core_audio);
-        return 1;
-    }
-    
-    // Configure for optimal macOS performance
-    VoirsAudioConfig config = {
-        .backend = "coreaudio",
-        .sample_rate = 44100,
-        .buffer_size = 256,
-        .channels = 2,
-        .use_exclusive_mode = false  // Core Audio manages this
-    };
-    
-    // Create pipeline with macOS optimizations
-    VoirsPipeline* pipeline = voirs_create_pipeline_with_config(&config);
-    
-    // Enable macOS-specific optimizations
-    voirs_macos_enable_low_latency_mode();
-    voirs_macos_configure_vm_pressure();
-    
-    // Configure audio session
-    voirs_macos_configure_synthesis_session(av_foundation);
-    
-    // Synthesize speech
-    const char* text = "Hello from VoiRS on macOS!";
-    VoirsAudioBuffer* audio = voirs_synthesize(pipeline, text);
-    
-    if (audio) {
-        // Save using Core Audio services
-        voirs_macos_save_audio_core_audio(audio, "output.m4a", VOIRS_CORE_AUDIO_FORMAT_AAC);
-        
-        // Show completion notification
-        voirs_macos_show_notification("VoiRS", "Synthesis Complete", "Audio saved successfully");
-        
-        voirs_destroy_audio_buffer(audio);
-    }
-    
-    // Clean up
-    voirs_destroy_pipeline(pipeline);
-    voirs_macos_destroy_avfoundation(av_foundation);
-    voirs_macos_destroy_core_audio(core_audio);
-    voirs_macos_cleanup();
-    
-    return 0;
-}
+MacOSCoreAudio *voirs_macos_init_core_audio(void);
+void voirs_macos_destroy_core_audio(MacOSCoreAudio *core_audio);
+float voirs_macos_get_system_volume(MacOSCoreAudio *core_audio);   /* -1.0 on error/null */
+
+MacOSAVFoundation *voirs_macos_init_avfoundation(void);
+void voirs_macos_destroy_avfoundation(MacOSAVFoundation *av_foundation);
+bool voirs_macos_request_microphone_permission(MacOSAVFoundation *av_foundation);
+
+char *voirs_macos_get_system_language(void);   /* caller must free with voirs_free_string */
+
+bool voirs_macos_show_notification(const char *title, const char *message);
+bool voirs_macos_enable_low_latency_mode(void);
 ```
 
-### Real-time Audio Processing with Core Audio
+Caveats verified against source (`crates/voirs-ffi/src/platform/macos.rs`):
 
-```c
-// Set up real-time audio processing
-void setup_realtime_processing() {
-    // Create Audio Unit
-    VoirsCoreAudioUnit* audio_unit = voirs_macos_create_audio_unit();
-    
-    // Configure for low latency
-    voirs_macos_set_audio_unit_buffer_size(audio_unit, 128);
-    voirs_macos_enable_low_latency_mode();
-    
-    // Set up real-time thread
-    pthread_t audio_thread;
-    pthread_create(&audio_thread, NULL, audio_thread_func, audio_unit);
-    
-    // Set thread priority
-    struct sched_param param;
-    param.sched_priority = 63;  // High priority
-    pthread_setschedparam(audio_thread, SCHED_FIFO, &param);
-}
+- `voirs_macos_get_system_volume` is real: it runs
+  `osascript -e "output volume of (get volume settings)"`.
+- `voirs_macos_get_system_language` is real: it runs `defaults read -g AppleLocale`.
+- `voirs_macos_request_microphone_permission` is currently a **placeholder that always returns
+  `true`** — its own source comment says "Implementation would use
+  `AVAudioSession.requestRecordPermission`. For now, return granted as placeholder." It does not
+  actually invoke the system permission prompt.
+- `voirs_macos_show_notification` is currently a **placeholder that always returns `true` without
+  showing anything** — its own source comment says "Implementation would use
+  `NSUserNotification`. For now, return success as placeholder."
+- `voirs_macos_enable_low_latency_mode` is currently a **placeholder that always returns `true`
+  without changing any Core Audio buffer/power setting** — its own source comment says
+  "Implementation would configure Core Audio for low latency... For now, [return Ok]."
 
-void* audio_thread_func(void* arg) {
-    VoirsCoreAudioUnit* audio_unit = (VoirsCoreAudioUnit*)arg;
-    
-    // Set thread time constraints for real-time processing
-    VoirsMacOSThreadConstraints constraints = {
-        .period = 2902,        // ~128 samples at 44.1kHz
-        .computation = 2177,   // 75% of period
-        .constraint = 2902,
-        .preemptible = true
-    };
-    
-    voirs_macos_set_thread_constraints(&constraints);
-    
-    // Start audio processing
-    voirs_macos_start_audio_unit(audio_unit);
-    
-    return NULL;
-}
-```
+## Cross-platform functions (identical on Linux/macOS/Windows)
+
+Everything below compiles regardless of target OS. Full signatures live in the source files named;
+this is a complete, machine-checked name index grouped by module (not padded, not invented):
+
+**Pipeline lifecycle** (`src/c_api/core.rs`, 6 functions)
+
+`voirs_create_pipeline`, `voirs_create_pipeline_with_config`, `voirs_destroy_pipeline`, `voirs_get_pipeline_count`, `voirs_is_pipeline_benchmark_placeholder`, `voirs_is_pipeline_valid`
+
+**Synthesis** (`src/c_api/synthesis.rs`, 10 functions)
+
+`voirs_free_batch_synthesis_result`, `voirs_free_synthesis_result`, `voirs_get_synthesis_stats`, `voirs_reset_synthesis_stats`, `voirs_synthesize_advanced`, `voirs_synthesize_batch`, `voirs_synthesize_batch_advanced`, `voirs_synthesize_streaming`, `voirs_synthesize_streaming_advanced`, `voirs_synthesize_streaming_realtime`
+
+**Voice management** (`src/c_api/voice.rs`, 6 functions)
+
+`voirs_free_voice_info`, `voirs_free_voice_list`, `voirs_get_voice`, `voirs_get_voice_info`, `voirs_list_voices`, `voirs_set_voice`
+
+**Audio post-processing / effects (extended)** (`src/c_api/audio.rs`, 8 functions)
+
+`voirs_audio_apply_effects`, `voirs_audio_crossfade`, `voirs_audio_duplicate`, `voirs_audio_get_statistics`, `voirs_audio_get_supported_formats`, `voirs_audio_mix`, `voirs_audio_save_flac`, `voirs_audio_save_mp3`
+
+**Audio analysis & DSP utilities** (`src/utils/audio.rs`, 27 functions)
+
+`voirs_audio_analyze`, `voirs_audio_apply_compression`, `voirs_audio_apply_multiband_eq`, `voirs_audio_calculate_brightness`, `voirs_audio_calculate_hnr`, `voirs_audio_calculate_spectral_flux`, `voirs_audio_calculate_spectral_rolloff`, `voirs_audio_enhance_quality`, `voirs_audio_fade_in`, `voirs_audio_fade_out`, `voirs_audio_get_peak`, `voirs_audio_get_rms`, `voirs_audio_low_pass_filter`, `voirs_audio_normalize`, `voirs_audio_remove_dc`, `voirs_audio_soft_limiter`, `voirs_performance_monitor_create`, `voirs_performance_monitor_free`, `voirs_performance_monitor_get_summary`, `voirs_performance_monitor_record_audio_time`, `voirs_performance_monitor_record_cpu`, `voirs_performance_monitor_record_memory`, `voirs_regression_detector_add_measurement`, `voirs_regression_detector_check`, `voirs_regression_detector_create`, `voirs_regression_detector_free`, `voirs_regression_detector_set_baseline`
+
+**Sample format / rate conversion** (`src/c_api/convert.rs`, 17 functions)
+
+`voirs_audio_convert_format`, `voirs_convert_double_to_float`, `voirs_convert_float_to_double`, `voirs_convert_float_to_int16`, `voirs_convert_float_to_int24`, `voirs_convert_float_to_int32`, `voirs_convert_float_to_uint16`, `voirs_convert_float_to_uint32`, `voirs_convert_float_to_uint8`, `voirs_convert_int16_to_float`, `voirs_convert_int24_to_float`, `voirs_convert_mono_to_stereo`, `voirs_convert_sample_rate`, `voirs_convert_stereo_to_mono`, `voirs_convert_uint16_to_float`, `voirs_convert_uint32_to_float`, `voirs_convert_uint8_to_float`
+
+**Configuration builders & validation** (`src/c_api/config.rs`, 8 functions)
+
+`voirs_config_apply_synthesis_preset`, `voirs_config_create_model_default`, `voirs_config_create_performance_default`, `voirs_config_create_synthesis_default`, `voirs_config_get_synthesis_info`, `voirs_config_validate_model`, `voirs_config_validate_performance`, `voirs_config_validate_synthesis`
+
+**Threading & async/callback synthesis** (`src/c_api/threading.rs`, 13 functions)
+
+`voirs_cancel_synthesis`, `voirs_get_active_operations`, `voirs_get_global_thread_count`, `voirs_get_max_concurrent`, `voirs_get_thread_stats`, `voirs_is_thread_pool_enabled`, `voirs_register_callbacks`, `voirs_set_global_thread_count`, `voirs_set_max_concurrent`, `voirs_set_thread_pool_enabled`, `voirs_synthesize_async`, `voirs_synthesize_parallel`, `voirs_unregister_callbacks`
+
+**Custom allocator control** (`src/c_api/allocator.rs`, 6 functions)
+
+`voirs_get_allocator_name`, `voirs_get_allocator_stats`, `voirs_get_memory_fragmentation`, `voirs_has_custom_allocator`, `voirs_reset_allocator_stats`, `voirs_set_allocator`
+
+**Zero-copy buffers, ring buffers, memory-mapped files** (`src/c_api/zero_copy.rs`, 32 functions)
+
+`voirs_memory_map_advise_random`, `voirs_memory_map_advise_sequential`, `voirs_memory_map_data`, `voirs_memory_map_data_mut`, `voirs_memory_map_destroy`, `voirs_memory_map_open_read`, `voirs_memory_map_open_write`, `voirs_memory_map_size`, `voirs_memory_map_sync`, `voirs_zero_copy_batch_copy`, `voirs_zero_copy_buffer_capacity`, `voirs_zero_copy_buffer_clone`, `voirs_zero_copy_buffer_create`, `voirs_zero_copy_buffer_data`, `voirs_zero_copy_buffer_data_mut`, `voirs_zero_copy_buffer_destroy`, `voirs_zero_copy_buffer_len`, `voirs_zero_copy_buffer_ref_count`, `voirs_zero_copy_buffer_set_len`, `voirs_zero_copy_buffer_slice`, `voirs_zero_copy_deinterleave`, `voirs_zero_copy_interleave`, `voirs_zero_copy_ring_available_read`, `voirs_zero_copy_ring_available_write`, `voirs_zero_copy_ring_capacity`, `voirs_zero_copy_ring_create`, `voirs_zero_copy_ring_destroy`, `voirs_zero_copy_ring_read`, `voirs_zero_copy_ring_write`, `voirs_zero_copy_view_data`, `voirs_zero_copy_view_destroy`, `voirs_zero_copy_view_len`
+
+**Misc utilities (version, logging, validation)** (`src/c_api/utils.rs`, 16 functions)
+
+`voirs_calculate_aligned_size`, `voirs_get_build_info`, `voirs_get_error_description`, `voirs_get_memory_stats`, `voirs_get_process_memory_usage`, `voirs_get_recommended_buffer_size`, `voirs_get_system_info`, `voirs_get_version_string`, `voirs_is_log_level_enabled`, `voirs_log_message`, `voirs_reset_memory_stats`, `voirs_set_log_callback`, `voirs_validate_audio_format`, `voirs_validate_buffer`, `voirs_validate_range_float`, `voirs_validate_range_uint`
+
+**Memory statistics (buffer tracking)** (`src/memory.rs`, 4 functions)
+
+`voirs_memory_check_leaks`, `voirs_memory_clear_pools`, `voirs_memory_get_stats`, `voirs_memory_reset_stats`
+
+**Performance / SIMD / batch helpers** (`src/performance.rs`, 6 functions)
+
+`voirs_batch_convert_format`, `voirs_batch_process_audio`, `voirs_convert_f32_to_i16_optimized`, `voirs_detect_cpu_features`, `voirs_get_optimal_performance_config`, `voirs_interleave_audio_optimized`
+
+**Batch-config helpers** (`src/utils/batch_ops.rs`, 6 functions)
+
+`voirs_batch_config_create`, `voirs_batch_config_free`, `voirs_batch_config_set_cache`, `voirs_batch_config_set_sample_rate`, `voirs_batch_config_set_voice`, `voirs_batch_config_set_workers`
+
+**Error message localization** (`src/error/i18n.rs`, 3 functions)
+
+`voirs_get_locale`, `voirs_get_localized_message`, `voirs_set_locale`
+
+**Structured error aggregation** (`src/error/structured.rs`, 3 functions)
+
+`voirs_clear_error_aggregator`, `voirs_get_error_stats`, `voirs_get_recent_errors`
+
+**Error recovery hints** (`src/error/recovery.rs`, 2 functions)
+
+`voirs_attempt_recovery`, `voirs_get_recovery_stats`
+
+**Generic platform info** (`src/platform/mod.rs`, 6 functions)
+
+`voirs_get_audio_config_low_latency`, `voirs_get_audio_config_optimal`, `voirs_get_optimal_buffer_size`, `voirs_get_optimal_threads`, `voirs_get_platform_info`, `voirs_supports_hardware_acceleration`
+
+**Linux package building (.deb) — compiled on every OS this crate builds for** (`src/platform/packages.rs`, 4 functions)
+
+`voirs_package_build_all`, `voirs_package_build_debian`, `voirs_package_create_manager`, `voirs_package_destroy_manager`
+
+**Visual Studio project integration — compiled on every OS this crate builds for** (`src/platform/vs.rs`, 5 functions)
+
+`voirs_vs_create_integration`, `voirs_vs_destroy_integration`, `voirs_vs_get_version`, `voirs_vs_install_integration`, `voirs_vs_verify_installation`
+
+**Xcode project integration** (`src/platform/xcode.rs`, 5 functions) — compiled on every OS this crate builds for, but naturally most relevant here:
+
+`voirs_xcode_build_framework`, `voirs_xcode_create_integration`, `voirs_xcode_destroy_integration`, `voirs_xcode_install_integration`, `voirs_xcode_verify_installation`
+
+**Core error/string/buffer plumbing** (`src/lib.rs`, 6 functions)
+
+`voirs_clear_error`, `voirs_error_message`, `voirs_free_audio_buffer`, `voirs_free_string`, `voirs_get_last_error`, `voirs_has_error`
+
+*(cross-platform total: 199 functions, identical on Linux/macOS/Windows)*
+
+Full prototypes for the core subset used in the Quick Start example (pipeline lifecycle, synthesis,
+voice management, error handling) are in the [crate README](../../README.md).
+
+## Xcode / framework packaging
+
+`voirs_xcode_create_integration`, `voirs_xcode_install_integration`, `voirs_xcode_verify_installation`,
+`voirs_xcode_build_framework`, and `voirs_xcode_destroy_integration` (`src/platform/xcode.rs`) are
+real dev-tooling entry points for packaging this crate's own build output as an Xcode
+framework/CocoaPod, not something a typical embedding application calls at synthesis time.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### Core Audio Initialization Failed
-```c
-// Check Core Audio availability
-if (!voirs_macos_check_core_audio_availability()) {
-    printf("Core Audio not available\n");
-    // Fall back to alternative audio backend
-}
-
-// Verify audio hardware
-VoirsCoreAudioDeviceInfo info;
-if (voirs_macos_get_default_device_info(&info)) {
-    printf("Default device: %s\n", info.name);
-    printf("Sample rate: %.0f Hz\n", info.sample_rate);
-} else {
-    printf("No audio devices available\n");
-}
-```
-
-#### Permission Issues
-```c
-// Check and request permissions
-if (!voirs_macos_has_microphone_permission()) {
-    printf("Requesting microphone permission...\n");
-    voirs_macos_request_microphone_permission(av_foundation, NULL, NULL);
-}
-
-if (!voirs_macos_has_documents_access()) {
-    printf("Requesting documents folder access...\n");
-    voirs_macos_request_documents_access();
-}
-```
-
-#### Audio Unit Problems
-```c
-// Debug Audio Unit issues
-OSStatus status = voirs_macos_get_audio_unit_status(audio_unit);
-if (status != noErr) {
-    printf("Audio Unit error: %d\n", (int)status);
-    
-    // Get detailed error information
-    char error_string[256];
-    voirs_macos_get_audio_unit_error_string(status, error_string, sizeof(error_string));
-    printf("Error details: %s\n", error_string);
-}
-```
-
-### Debug Tools
-
-```c
-// Enable macOS-specific debugging
-voirs_macos_enable_debug_mode();
-voirs_macos_set_debug_level(VOIRS_DEBUG_VERBOSE);
-
-// Core Audio debugging
-voirs_macos_enable_core_audio_debugging();
-voirs_macos_log_audio_devices();
-voirs_macos_log_audio_unit_graph();
-
-// Performance monitoring
-VoirsMacOSPerformanceMonitor* monitor = voirs_macos_create_performance_monitor();
-voirs_macos_start_monitoring(monitor);
-
-// ... perform operations ...
-
-VoirsMacOSPerformanceReport report;
-voirs_macos_get_performance_report(monitor, &report);
-printf("Average latency: %.2f ms\n", report.average_latency_ms);
-printf("CPU usage: %.2f%%\n", report.cpu_usage);
-printf("Memory pressure events: %u\n", report.memory_pressure_events);
-
-voirs_macos_destroy_performance_monitor(monitor);
-```
-
-### Performance Tuning
-
-```c
-// Optimize for specific scenarios
-typedef enum {
-    VOIRS_MACOS_PROFILE_REALTIME,     // Lowest latency
-    VOIRS_MACOS_PROFILE_BALANCED,     // Good latency/quality balance
-    VOIRS_MACOS_PROFILE_QUALITY       // Highest quality
-} VoirsMacOSPerformanceProfile;
-
-voirs_macos_set_performance_profile(VOIRS_MACOS_PROFILE_REALTIME);
-
-// Fine-tune based on system capabilities
-VoirsMacOSSystemCapabilities caps;
-voirs_macos_get_system_capabilities(&caps);
-
-if (caps.has_discrete_gpu) {
-    voirs_macos_enable_metal_acceleration();
-}
-
-if (caps.memory_gb >= 16) {
-    voirs_macos_enable_large_buffers();
-}
-
-if (caps.cpu_cores >= 8) {
-    voirs_macos_enable_parallel_processing();
-}
-```
-
-## Security Considerations
-
-- Microphone access requires user permission and usage description
-- File system access requires appropriate sandbox entitlements
-- Code signing required for distribution outside Mac App Store
-- Hardened Runtime may affect some advanced features
-
-## Version Compatibility
-
-VoiRS macOS integration supports:
-- macOS 10.15 (Catalina) and later (recommended)
-- macOS 11.0 (Big Sur) and later for full Metal support
-- Limited support for macOS 10.14 (without some AVFoundation features)
-
-## Related Documentation
-
-- [C API Reference](api_reference.md)
-- [Memory Management](memory_management.md)
-- [Threading Guide](threading.md)
-- [Performance Optimization](performance.md)
+- **`dyld: Library not loaded: libvoirs.dylib`** — the dynamic linker can't find the library; see
+  [Linking](#linking) above, and confirm with `otool -L myapp`.
+- **`undefined symbol: voirs_synthesize`** — that function does not exist. The one-shot
+  self-contained entry point is `voirs_synthesize_advanced`; the streaming entry points are
+  `voirs_synthesize_streaming`, `voirs_synthesize_streaming_advanced`, and
+  `voirs_synthesize_streaming_realtime`. See [C API overview](../../README.md#c-api-overview) in
+  the crate README.
+- **Synthesis returns `VOIRS_ERROR_SYNTHESIS_FAILED`/`VOIRS_ERROR_INITIALIZATION_FAILED`** — real
+  model weights could not be loaded (e.g. no network access on first run). Call
+  `voirs_get_last_error()` for the underlying `voirs_sdk` error message.

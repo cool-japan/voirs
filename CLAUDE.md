@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VoiRS is a pure-Rust neural speech synthesis (TTS) framework with modular architecture. Current version: **0.3.0**.
+VoiRS is a pure-Rust neural speech synthesis (TTS) framework with modular architecture. Current version: **0.1.0** (see `[workspace.package].version` in the root `Cargo.toml` for the authoritative value).
 
 ### Core Architecture
 
@@ -53,6 +53,10 @@ cargo build --release
 cargo build --release --features gpu
 
 # Build with all features
+# NOTE: within this workspace checkout, [patch.crates-io] supplies non-panicking
+# stubs for candle-kernels/cudarc on machines without a CUDA toolchain. That patch
+# does NOT propagate to published crates.io crates -- see PUBLISHING.md section 3
+# for the caveat that applies once these crates are published.
 cargo build --release --all-features
 
 # Run tests with nextest (preferred)
@@ -227,9 +231,9 @@ serde.workspace = true             # ✅ Use workspace
 3. **Workspace Dependencies:**
    ```toml
    [workspace.dependencies]
-   # ✅ REQUIRED - SciRS2 ecosystem crates (RC.1)
-   scirs2-core = { version = "0.3.0", features = ["array", "random", "simd", "parallel"] }
-   scirs2-fft = "0.3.0"
+   # ✅ REQUIRED - SciRS2 ecosystem crates (match root Cargo.toml for the current pin)
+   scirs2-core = { version = "0.6.5", features = ["array", "random", "simd", "parallel"] }
+   scirs2-fft = "0.6.5"
 
    # ❌ REMOVED - These dependencies are NO LONGER in workspace
    # rand, ndarray, num-complex, rayon, nalgebra
@@ -359,7 +363,7 @@ Cross-platform code should use conditional compilation for platform-specific opt
 
 ## Version and Release Notes
 
-Current version is 0.3.0. This is a beta release with:
+Current version is 0.1.0 (see root `Cargo.toml`, which is the single source of truth — update this file's prose if it ever drifts, rather than hardcoding a version number that goes stale). This is a beta release with:
 - ✅ Core TTS pipeline working and tested
 - ✅ Advanced features (emotion, cloning, spatial) implemented
 - ✅ CLI tool and examples functional

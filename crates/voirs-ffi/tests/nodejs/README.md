@@ -54,37 +54,73 @@ npm run test:all
 
 ### Environment Variables
 
-- `VOIRS_SKIP_SLOW_TESTS=true` - Skip performance and memory tests (fast mode)
-- `CI=true` - Automatically enables fast mode for CI environments
+These are read by the JS test files themselves (`test-runner.js`,
+`performance-tests.js`, `memory-tests.js`):
+
+- `VOIRS_SKIP_SLOW_TESTS=true` - Skip performance and memory test suites (fast mode)
+- `CI=true` - Same effect as `VOIRS_SKIP_SLOW_TESTS=true` for these JS test files (`process.env.VOIRS_SKIP_SLOW_TESTS === 'true' || process.env.CI === 'true'`)
 - `VERBOSE=true` - Enable verbose output with detailed test information
-- `NODE_ENV=test` - Set automatically by test runner
+- `NODE_ENV=test` - Set automatically by `test-runner.js` on the child processes it spawns for each suite (does not need to be set manually)
+
+**Neither `VOIRS_SKIP_SLOW_TESTS` nor `CI` affects what audio the native
+addon produces.** They only decide which JS test *suites* run; see "Dummy vs.
+real synthesis" below for the (unrelated) variable that controls audio
+content.
 
 ### Fast Mode
 
 When `VOIRS_SKIP_SLOW_TESTS=true` or `CI=true`:
-- Performance tests are skipped
-- Memory tests are skipped  
-- Long-running operations are bypassed
-- Tests complete in under 10 seconds
+- The `Performance Tests` and `Memory Tests` suites are skipped entirely by `test-runner.js` (`skipInFastMode: true` in its suite list)
+- The remaining suites (Unit, Integration, Error, Concurrency) still run in full
+- Each suite still has its own internal timeout (`TEST_CONFIG.timeout`, 30 seconds)
 
 ### Full Mode (Default)
 
-- All test categories run
-- Complete performance benchmarks
-- Comprehensive memory analysis
-- Full test suite takes 2-5 minutes
+- All test suites run, including Performance and Memory
 
 ## Test Architecture
 
-### Mock Implementations
+### Dummy vs. real synthesis (native addon)
 
-When VoiRS bindings are not available (e.g., not compiled), the tests use sophisticated mock implementations that:
+If the native addon (`crates/voirs-ffi`) is compiled and loaded, by default
+these tests exercise **real synthesis** through it — not fabricated audio.
+The addon's C API only serves dummy/stub audio (via the SDK's explicit
+`with_test_mode(true)` pipeline) when the environment variable
+`VOIRS_FFI_TEST_SYNTHESIS` is set to exactly `dummy` (see
+`crates/voirs-ffi/src/c_api/synthesis.rs`, `dummy_synthesis_requested()`).
+This variable is intentionally namespaced and exact-match so that no ambient
+CI variable (including bare `CI=true`) can silently switch it on:
+
+```rust
+fn dummy_synthesis_requested() -> bool {
+    std::env::var("VOIRS_FFI_TEST_SYNTHESIS")
+        .map(|value| value == "dummy")
+        .unwrap_or(false)
+}
+```
+
+None of the files in this directory set or read `VOIRS_FFI_TEST_SYNTHESIS` —
+it is reserved for `voirs-ffi`'s own Rust-level test suite (`cargo test -p
+voirs-ffi`), not for these Node.js tests. Do not set it when running the
+suite in this directory; if you do, synthesis results here will silently
+become stub data instead of real output.
+
+### Mock Implementations (JS-level, addon not compiled)
+
+Independently of the above, when the native addon is **not compiled at all**
+(`../../index.js` fails to load), the JS test files fall back to their own
+JavaScript mock classes (e.g. `MockVoirsPipeline` in `unit-tests.js`) so the
+suite can still exercise its own logic. These mocks:
 
 - Simulate realistic processing times
 - Generate proper audio buffer structures
 - Implement error conditions and edge cases
 - Support concurrent operations
 - Track memory usage patterns
+
+This fallback is unconditional on whether the bindings loaded successfully —
+it is not controlled by `CI`, `VOIRS_SKIP_SLOW_TESTS`, or
+`VOIRS_FFI_TEST_SYNTHESIS`.
 
 ### Test Framework Features
 
@@ -187,11 +223,11 @@ Multi-threading and thread safety:
 
 ### Performance Benchmarks
 
-- **Latency**: Single synthesis < 1 second
-- **Throughput**: Batch processing > 0.1x real-time
-- **Concurrency**: Handle 8+ parallel operations
-- **Memory**: < 200MB growth across test suite
-- **Streaming**: First chunk < 500ms
+- **Latency**: Single synthesis < 1 second (`performance-tests.js`)
+- **Throughput**: Batch processing > 0.1x real-time (`performance-tests.js`)
+- **Concurrency**: Tests run at 8 and up to 20 parallel operations (`concurrent-tests.js`, `memory-tests.js`)
+- **Memory**: < 200MB total growth in the repeated-iteration leak-detection test; < 300MB for the 8-way concurrent test (`memory-tests.js`)
+- **Streaming**: First chunk < 500ms (`performance-tests.js`)
 
 ### Metrics Collected
 

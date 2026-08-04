@@ -4,6 +4,7 @@
 
 mod accessibility;
 mod cli;
+mod common;
 mod integration;
 mod performance;
 mod unit;

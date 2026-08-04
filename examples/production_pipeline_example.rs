@@ -69,13 +69,14 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, oneshot, Semaphore};
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{info, span, warn, Level};
 use uuid::Uuid;
-use voirs::*;
+use voirs_evaluation::traits::QualityEvaluator as _;
+use voirs_sdk::prelude::*;
 
 /// Production-grade configuration with environment-specific settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -418,14 +419,26 @@ impl ProductionSynthesizer {
         // Create production-optimized pipeline
         let pipeline = Self::create_production_pipeline(&config).await?;
 
+        // Initialize cache service and quality evaluator before the request
+        // processor, since worker tasks need both for every request.
+        let cache = CacheService::new(config.cache.clone());
+        let quality_evaluator = Arc::new(
+            voirs_evaluation::quality::evaluator::QualityEvaluator::new()
+                .await
+                .context("Failed to initialize quality evaluator")?,
+        );
+
         // Initialize request processor
-        let request_processor = Self::create_request_processor(&config, pipeline.clone()).await?;
+        let request_processor = Self::create_request_processor(
+            &config,
+            pipeline.clone(),
+            cache.clone(),
+            quality_evaluator,
+        )
+        .await?;
 
         // Initialize monitoring service
         let monitoring = MonitoringService::new(config.monitoring.clone());
-
-        // Initialize cache service
-        let cache = CacheService::new(config.cache.clone());
 
         let synthesizer = ProductionSynthesizer {
             config,
@@ -447,28 +460,25 @@ impl ProductionSynthesizer {
     async fn create_production_pipeline(config: &ProductionConfig) -> Result<Arc<VoirsPipeline>> {
         info!("🔧 Creating production synthesis pipeline");
 
-        // Production-optimized components based on quality level
-        let g2p = create_g2p(G2pBackend::RuleBased);
-        let acoustic = match config.synthesis.quality_level {
+        // Production-optimized quality level, mapped onto the unified builder's
+        // real `QualityLevel`, which the underlying acoustic/vocoder stage honors.
+        let quality = match config.synthesis.quality_level {
             ProductionQualityLevel::Fast => {
-                info!("Using fast acoustic model for production");
-                create_acoustic(AcousticBackend::Vits)
+                info!("Using fast (low-latency) quality preset for production");
+                QualityLevel::Low
             }
             ProductionQualityLevel::Balanced => {
-                info!("Using balanced acoustic model for production");
-                create_acoustic(AcousticBackend::Vits)
+                info!("Using balanced quality preset for production");
+                QualityLevel::Medium
             }
             ProductionQualityLevel::Premium => {
-                info!("Using premium acoustic model for production");
-                create_acoustic(AcousticBackend::Vits)
+                info!("Using premium quality preset for production");
+                QualityLevel::Ultra
             }
         };
-        let vocoder = create_vocoder(VocoderBackend::HifiGan);
 
         let pipeline = VoirsPipelineBuilder::new()
-            .with_g2p(g2p)
-            .with_acoustic_model(acoustic)
-            .with_vocoder(vocoder)
+            .with_quality(quality)
             .build()
             .await
             .context("Failed to create production synthesis pipeline")?;
@@ -480,8 +490,14 @@ impl ProductionSynthesizer {
     async fn create_request_processor(
         config: &ProductionConfig,
         pipeline: Arc<VoirsPipeline>,
+        cache: CacheService,
+        quality_evaluator: Arc<voirs_evaluation::quality::evaluator::QualityEvaluator>,
     ) -> Result<RequestProcessor> {
-        let (request_tx, mut request_rx) = mpsc::unbounded_channel();
+        let (request_tx, request_rx) =
+            mpsc::unbounded_channel::<(ProductionRequest, oneshot::Sender<ProductionResponse>)>();
+        // Shared behind a Mutex so every worker task in the pool can pull from the
+        // same queue (`mpsc::UnboundedReceiver` has exactly one owner otherwise).
+        let request_rx = Arc::new(tokio::sync::Mutex::new(request_rx));
         let semaphore = Arc::new(Semaphore::new(config.resources.max_concurrent_requests));
 
         // Start worker pool
@@ -492,17 +508,40 @@ impl ProductionSynthesizer {
             let pipeline = pipeline.clone();
             let semaphore = semaphore.clone();
             let config = config.clone();
+            let request_rx = request_rx.clone();
+            let cache = cache.clone();
+            let quality_evaluator = quality_evaluator.clone();
 
             tokio::spawn(async move {
-                while let Some((request, response_tx)) = request_rx.recv().await {
-                    let permit = semaphore.acquire().await.unwrap();
+                loop {
+                    let next = { request_rx.lock().await.recv().await };
+                    let Some((request, response_tx)) = next else {
+                        info!("Worker {worker_id} shutting down: request channel closed");
+                        break;
+                    };
+
+                    // An owned permit (not borrowed from `semaphore`) so it can be
+                    // moved into the `'static` inner task below.
+                    let permit = semaphore
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("semaphore should not be closed while workers are running");
                     let pipeline = pipeline.clone();
                     let config = config.clone();
+                    let cache = cache.clone();
+                    let quality_evaluator = quality_evaluator.clone();
 
                     tokio::spawn(async move {
                         let _permit = permit;
-                        let response =
-                            Self::process_production_request(request, &pipeline, &config).await;
+                        let response = Self::process_production_request(
+                            request,
+                            &pipeline,
+                            &config,
+                            &cache,
+                            &quality_evaluator,
+                        )
+                        .await;
                         let _ = response_tx.send(response);
                     });
                 }
@@ -520,6 +559,8 @@ impl ProductionSynthesizer {
         request: ProductionRequest,
         pipeline: &VoirsPipeline,
         config: &ProductionConfig,
+        cache: &CacheService,
+        quality_evaluator: &voirs_evaluation::quality::evaluator::QualityEvaluator,
     ) -> ProductionResponse {
         let span = span!(Level::DEBUG, "process_request", request_id = %request.id);
         let _guard = span.enter();
@@ -541,6 +582,31 @@ impl ProductionSynthesizer {
             };
         }
 
+        // Real cache lookup, keyed on the request text (the only synthesis input
+        // this demo varies). A hit skips synthesis entirely.
+        if config.cache.enable_cache {
+            if let Some(audio) = cache.get(&request.text).await {
+                let processing_time = start_time.elapsed();
+                return ProductionResponse {
+                    request_id: request.id,
+                    audio: Some(audio),
+                    status: ResponseStatus::Success,
+                    processing_time,
+                    queue_time,
+                    cache_hit: true,
+                    metrics: ProcessingMetrics {
+                        cpu_usage_percent: 0.0, // No synthesis work performed on a cache hit
+                        memory_usage_mb: Self::get_memory_usage_mb(),
+                        gpu_utilized: false,
+                        model_load_time_ms: 0,
+                        synthesis_time_ms: processing_time.as_millis() as u64,
+                        quality_score: 0.0, // Not re-evaluated on a cache hit
+                    },
+                    error: None,
+                };
+            }
+        }
+
         // Attempt synthesis with retries
         let max_retries = 3;
         let mut attempts = 0;
@@ -552,20 +618,35 @@ impl ProductionSynthesizer {
                 Ok(audio) => {
                     let processing_time = start_time.elapsed();
 
+                    // Real quality measurement via voirs-evaluation (no reference
+                    // audio is available here, so this scores the synthesis on its
+                    // own intrinsic quality signals).
+                    let quality_score = quality_evaluator
+                        .evaluate_quality(&audio, None, None)
+                        .await
+                        .map(|score| f64::from(score.overall_score))
+                        .unwrap_or(0.0);
+
+                    if config.cache.enable_cache {
+                        cache.put(request.text.clone(), audio.clone()).await;
+                    }
+
                     return ProductionResponse {
                         request_id: request.id,
                         audio: Some(audio),
                         status: ResponseStatus::Success,
                         processing_time,
                         queue_time,
-                        cache_hit: false, // Cache integration would be implemented here
+                        cache_hit: false,
                         metrics: ProcessingMetrics {
-                            cpu_usage_percent: 15.0,
-                            memory_usage_mb: 256.0,
+                            cpu_usage_percent: f64::from(Self::get_cpu_usage_percent()),
+                            memory_usage_mb: Self::get_memory_usage_mb(),
                             gpu_utilized: config.synthesis.enable_gpu_acceleration,
-                            model_load_time_ms: 100,
+                            // The pipeline (and its models) is built once at
+                            // `ProductionSynthesizer::new`, not per request.
+                            model_load_time_ms: 0,
                             synthesis_time_ms: processing_time.as_millis() as u64,
-                            quality_score: 0.95,
+                            quality_score,
                         },
                         error: None,
                     };
@@ -646,7 +727,32 @@ impl ProductionSynthesizer {
 
     /// Attempt synthesis with production error handling
     async fn attempt_synthesis(text: &str, pipeline: &VoirsPipeline) -> Result<AudioBuffer> {
-        pipeline.synthesize(text).await
+        Ok(pipeline.synthesize(text).await?)
+    }
+
+    /// Real global CPU usage percentage via `sysinfo` (no simulated values).
+    fn get_cpu_usage_percent() -> f32 {
+        let mut system = sysinfo::System::new_all();
+        // CPU usage is a delta between two samples; sysinfo documents the
+        // minimum interval required between them for a meaningful reading.
+        system.refresh_cpu_usage();
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        system.refresh_cpu_usage();
+        system.global_cpu_usage()
+    }
+
+    /// Real current-process memory usage in MB via `sysinfo` (no simulated values).
+    fn get_memory_usage_mb() -> f64 {
+        let pid = sysinfo::Pid::from_u32(std::process::id());
+        let mut system = sysinfo::System::new_with_specifics(
+            sysinfo::RefreshKind::nothing()
+                .with_processes(sysinfo::ProcessRefreshKind::nothing().with_memory()),
+        );
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        system
+            .process(pid)
+            .map(|process| process.memory() as f64 / (1024.0 * 1024.0))
+            .unwrap_or(0.0)
     }
 
     /// Start background services for monitoring and maintenance
@@ -682,14 +788,32 @@ impl ProductionSynthesizer {
         loop {
             interval.tick().await;
 
-            // In production, would collect actual system metrics
+            // Real OS-reported process/system metrics via `sysinfo` (blocking
+            // work, so it runs on a dedicated blocking thread rather than
+            // stalling this task's async worker thread).
+            let (cpu, memory) = tokio::task::spawn_blocking(|| {
+                (Self::get_cpu_usage_percent(), Self::get_memory_usage_mb())
+            })
+            .await
+            .unwrap_or((0.0, 0.0));
+
             let mut metrics = metrics.write().unwrap_or_else(|e| e.into_inner());
-            metrics.memory_usage_mb = 512.0; // Simulated
-            metrics.cpu_usage_percent = 25.0; // Simulated
+            metrics.memory_usage_mb = memory;
+            metrics.cpu_usage_percent = f64::from(cpu);
         }
     }
 
     /// Submit a production synthesis request
+    /// Get the production configuration this synthesizer was built with
+    pub fn config(&self) -> &ProductionConfig {
+        &self.config
+    }
+
+    /// Get the underlying synthesis pipeline (e.g. for advanced/manual use)
+    pub fn pipeline(&self) -> &Arc<VoirsPipeline> {
+        &self.pipeline
+    }
+
     pub async fn synthesize_production(
         &self,
         request: ProductionRequest,
@@ -708,6 +832,13 @@ impl ProductionSynthesizer {
 
         // Submit to request processor
         let (response_tx, response_rx) = oneshot::channel();
+
+        // Real backpressure signal: how many concurrent-request permits remain
+        // right now (not a simulated/estimated value).
+        let available_capacity = self.request_processor.semaphore.available_permits();
+        if available_capacity == 0 {
+            warn!("Production synthesizer at full concurrent-request capacity; request will queue");
+        }
 
         self.request_processor
             .request_tx
@@ -804,7 +935,10 @@ impl MonitoringService {
     }
 
     async fn get_health_status(&self) -> HealthStatus {
-        self.health_status.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.health_status
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -817,8 +951,94 @@ impl CacheService {
         }
     }
 
+    /// Look up a cached synthesis result, recording a real hit/miss and
+    /// bumping the entry's access bookkeeping on success.
+    async fn get(&self, text: &str) -> Option<AudioBuffer> {
+        let ttl = Duration::from_secs(self.config.ttl_seconds);
+        let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
+
+        let hit = match cache.get_mut(text) {
+            Some(entry) if entry.created_at.elapsed().unwrap_or_default() < ttl => {
+                entry.access_count += 1;
+                entry.last_accessed = SystemTime::now();
+                Some(entry.audio.clone())
+            }
+            Some(_) => {
+                // Entry exists but has expired.
+                cache.remove(text);
+                None
+            }
+            None => None,
+        };
+
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+        if hit.is_some() {
+            stats.hits += 1;
+        } else {
+            stats.misses += 1;
+        }
+
+        hit
+    }
+
+    /// Store a synthesis result, evicting the least-recently-used entry first
+    /// if this would push the cache over its configured size budget.
+    async fn put(&self, text: String, audio: AudioBuffer) {
+        let entry_mb =
+            audio.samples().len() as f64 * std::mem::size_of::<f32>() as f64 / (1024.0 * 1024.0);
+
+        let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
+        let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+
+        while stats.size_mb + entry_mb > self.config.max_cache_size_mb as f64 && !cache.is_empty() {
+            if let Some(lru_key) = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_accessed)
+                .map(|(key, _)| key.clone())
+            {
+                if let Some(evicted) = cache.remove(&lru_key) {
+                    stats.size_mb -= evicted.audio.samples().len() as f64
+                        * std::mem::size_of::<f32>() as f64
+                        / (1024.0 * 1024.0);
+                    stats.evictions += 1;
+                }
+            } else {
+                break;
+            }
+        }
+
+        cache.insert(
+            text,
+            CacheEntry {
+                audio,
+                created_at: SystemTime::now(),
+                access_count: 0,
+                last_accessed: SystemTime::now(),
+            },
+        );
+        stats.size_mb += entry_mb;
+    }
+
+    /// Periodically sweep expired entries so the cache doesn't grow unbounded
+    /// with stale data even when nothing evicts it via `put`'s size budget.
     async fn start_maintenance(&self) {
-        // Implementation would include cache cleanup and maintenance
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        let ttl = Duration::from_secs(self.config.ttl_seconds);
+
+        loop {
+            interval.tick().await;
+
+            let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
+            let before = cache.len();
+            cache.retain(|_, entry| entry.created_at.elapsed().unwrap_or_default() < ttl);
+            let expired = before - cache.len();
+
+            if expired > 0 {
+                let mut stats = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+                stats.evictions += expired as u64;
+                info!("🧹 Cache maintenance: expired {expired} stale entries");
+            }
+        }
     }
 }
 
@@ -925,7 +1145,7 @@ async fn main() -> Result<()> {
 
         let scenario_start = Instant::now();
         let response = synthesizer.synthesize_production(request).await?;
-        let scenario_time = scenario_start.elapsed();
+        let _scenario_time = scenario_start.elapsed();
 
         match response.status {
             ResponseStatus::Success => {

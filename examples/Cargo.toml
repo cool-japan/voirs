@@ -160,6 +160,82 @@ path = "kokoro_multilingual_demo.rs"
 name = "kokoro_espeak_auto_demo"
 path = "kokoro_espeak_auto_demo.rs"
 
+[[example]]
+name = "basic_configuration"
+path = "basic_configuration.rs"
+
+[[example]]
+name = "batch_evaluation_comparison"
+path = "batch_evaluation_comparison.rs"
+
+[[example]]
+name = "complete_voice_pipeline"
+path = "complete_voice_pipeline.rs"
+
+[[example]]
+name = "comprehensive_testing_framework"
+path = "comprehensive_testing_framework.rs"
+
+[[example]]
+name = "desktop_integration_example"
+path = "desktop_integration_example.rs"
+
+[[example]]
+name = "emotion_control_example"
+path = "emotion_control_example.rs"
+
+[[example]]
+name = "examples_testing_framework"
+path = "examples_testing_framework.rs"
+
+[[example]]
+name = "game_integration_example"
+path = "game_integration_example.rs"
+
+[[example]]
+name = "hello_world"
+path = "hello_world.rs"
+
+[[example]]
+name = "iot_edge_synthesis_example"
+path = "iot_edge_synthesis_example.rs"
+
+[[example]]
+name = "production_pipeline_example"
+path = "production_pipeline_example.rs"
+
+[[example]]
+name = "production_whisper_example"
+path = "production_whisper_example.rs"
+
+[[example]]
+name = "realtime_voice_coach"
+path = "realtime_voice_coach.rs"
+
+[[example]]
+name = "singing_synthesis_example"
+path = "singing_synthesis_example.rs"
+
+[[example]]
+name = "spatial_audio_example"
+path = "spatial_audio_example.rs"
+
+[[example]]
+name = "voice_cloning_example"
+path = "voice_cloning_example.rs"
+
+[[example]]
+name = "voice_cloning_example_fixed"
+path = "voice_cloning_example_fixed.rs"
+
+[[example]]
+name = "voice_conversion_example"
+path = "voice_conversion_example.rs"
+
+[[example]]
+name = "vr_ar_immersive_example"
+path = "vr_ar_immersive_example.rs"
+
 [dependencies]
 voirs-integration-tests = { workspace = true }
 voirs-g2p = { workspace = true }
@@ -168,6 +244,9 @@ voirs-vocoder = { workspace = true }
 voirs-sdk = { workspace = true, features = ["emotion", "cloning", "conversion", "singing", "spatial"] }
 voirs-recognizer = { workspace = true, features = ["whisper-pure"] }
 voirs-evaluation = { workspace = true }
+voirs-feedback = { workspace = true, features = ["gamification"] }
+voirs-singing = { workspace = true }
+voirs-spatial = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
@@ -190,6 +269,7 @@ crossbeam = "0.8"
 
 [features]
 onnx = ["voirs-acoustic/onnx"]
+gamification = ["voirs-feedback/gamification"]
 
 # WebAssembly dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

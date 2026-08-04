@@ -11,11 +11,10 @@
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use tokio::process::Command;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -467,10 +466,10 @@ impl ExamplesTestFramework {
             self.calculate_quality_metrics(&compilation_result, &execution_result);
 
         // Adjust status based on metrics
-        if matches!(overall_status, TestStatus::Passed) {
-            if !performance_metrics.meets_requirements || !quality_metrics.meets_thresholds {
-                overall_status = TestStatus::Warning;
-            }
+        if matches!(overall_status, TestStatus::Passed)
+            && (!performance_metrics.meets_requirements || !quality_metrics.meets_thresholds)
+        {
+            overall_status = TestStatus::Warning;
         }
 
         println!(
@@ -496,7 +495,7 @@ impl ExamplesTestFramework {
     }
 
     async fn test_compilation(&self, example: &ExampleType) -> Result<CompilationResult> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
 
         match example {
             ExampleType::RustBinary {
@@ -1023,8 +1022,8 @@ impl ExamplesTestFramework {
             {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 for part in parts {
-                    if part.starts_with("-l") {
-                        libs.push(part[2..].to_string());
+                    if let Some(lib_name) = part.strip_prefix("-l") {
+                        libs.push(lib_name.to_string());
                     }
                 }
             }
@@ -1322,7 +1321,7 @@ impl ExamplesTestFramework {
 
             match result.overall_status {
                 TestStatus::Failed => {
-                    xml.push_str(">");
+                    xml.push('>');
                     xml.push_str(&format!(
                         r#"<failure message="Example test failed">{}</failure>"#,
                         result.compilation_result.errors.join("\n")
@@ -1330,7 +1329,7 @@ impl ExamplesTestFramework {
                     xml.push_str("</testcase>");
                 }
                 TestStatus::Warning => {
-                    xml.push_str(">");
+                    xml.push('>');
                     xml.push_str(&format!(
                         r#"<system-out>Warnings: {}</system-out>"#,
                         result.compilation_result.warnings_count

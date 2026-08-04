@@ -107,6 +107,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+// `audio_length`/`sample_rate` are captured for completeness (e.g. for a
+// caller that wants to inspect them via Debug); this demo's own summary only
+// prints `audio_duration`/`generation_time`/`rtf`.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct EvaluationMetrics {
     audio_duration: f32,

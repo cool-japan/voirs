@@ -28,8 +28,8 @@ use crate::audio::AudioLoader;
 use crate::ground_truth_dataset::{GroundTruthDataset, GroundTruthManager, GroundTruthSample};
 use crate::quality::QualityEvaluator;
 use crate::statistical::correlation::CorrelationAnalyzer;
-use crate::traits::{QualityEvaluationConfig, QualityMetric};
 use crate::traits::QualityEvaluator as QualityEvaluatorTrait;
+use crate::traits::{QualityEvaluationConfig, QualityMetric};
 
 /// Statistical test result structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -475,13 +475,12 @@ impl MetricReliabilityTester {
     ) -> Result<Option<AudioBuffer>, ReliabilityTestError> {
         match &sample.reference_path {
             None => Ok(None),
-            Some(path) => AudioLoader::from_file(path)
-                .await
-                .map(Some)
-                .map_err(|e| ReliabilityTestError::AudioLoadFailed {
+            Some(path) => AudioLoader::from_file(path).await.map(Some).map_err(|e| {
+                ReliabilityTestError::AudioLoadFailed {
                     sample_id: sample.id.clone(),
                     message: e.to_string(),
-                }),
+                }
+            }),
         }
     }
 
@@ -653,7 +652,8 @@ impl MetricReliabilityTester {
 
         // Calculate standard error of measurement
         let combined_std = self.calculate_combined_std(&test_scores, &retest_scores);
-        let standard_error_measurement = combined_std * (1.0 - intraclass_correlation).max(0.0).sqrt();
+        let standard_error_measurement =
+            combined_std * (1.0 - intraclass_correlation).max(0.0).sqrt();
 
         // Calculate minimum detectable change
         let minimum_detectable_change = standard_error_measurement * 2.77; // 95% confidence
@@ -816,7 +816,10 @@ impl MetricReliabilityTester {
             ));
         }
 
-        let rater_names: Vec<_> = rater_configs.iter().map(|(name, _)| (*name).to_string()).collect();
+        let rater_names: Vec<_> = rater_configs
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect();
         let mut correlations = Vec::new();
         let mut kendall_taus = Vec::new();
         let mut pairwise_correlations = HashMap::new();
@@ -865,7 +868,8 @@ impl MetricReliabilityTester {
         let mut rater_consistency = HashMap::new();
 
         let total_ratings: usize = rater_scores.values().map(Vec::len).sum();
-        let overall_mean = rater_scores.values().flatten().sum::<f64>() / total_ratings.max(1) as f64;
+        let overall_mean =
+            rater_scores.values().flatten().sum::<f64>() / total_ratings.max(1) as f64;
 
         for (rater_name, scores) in &rater_scores {
             let mean = scores.iter().sum::<f64>() / scores.len() as f64;
@@ -1033,8 +1037,8 @@ impl MetricReliabilityTester {
         let mean_inter_item_corr =
             (overall_clarity_corr + overall_naturalness_corr + clarity_naturalness_corr) / 3.0;
         let num_items = 3.0;
-        let cronbachs_alpha = (num_items * mean_inter_item_corr)
-            / (1.0 + (num_items - 1.0) * mean_inter_item_corr);
+        let cronbachs_alpha =
+            (num_items * mean_inter_item_corr) / (1.0 + (num_items - 1.0) * mean_inter_item_corr);
 
         // Item-total correlations (correlation of each item with sum of others)
         let mut item_total_correlations = HashMap::new();
@@ -1055,8 +1059,10 @@ impl MetricReliabilityTester {
 
         item_total_correlations.insert("overall".to_string(), f64::from(overall_item_total));
         item_total_correlations.insert("clarity".to_string(), f64::from(overall_clarity_corr));
-        item_total_correlations
-            .insert("naturalness".to_string(), f64::from(overall_naturalness_corr));
+        item_total_correlations.insert(
+            "naturalness".to_string(),
+            f64::from(overall_naturalness_corr),
+        );
 
         // Alpha if item deleted (2-item Spearman-Brown-style estimate using
         // the remaining pairwise correlation)
@@ -1123,10 +1129,11 @@ impl MetricReliabilityTester {
         dataset: &GroundTruthDataset,
     ) -> Result<ReproducibilityResults, ReliabilityTestError> {
         let cross_platform = self.test_cross_platform_reproducibility(dataset).await;
-        let cross_implementation = self.test_cross_implementation_reproducibility(dataset).await;
+        let cross_implementation = self
+            .test_cross_implementation_reproducibility(dataset)
+            .await;
         let temporal_reproducibility = self.test_temporal_reproducibility(dataset).await?;
-        let environmental_reproducibility =
-            self.test_environmental_reproducibility(dataset).await;
+        let environmental_reproducibility = self.test_environmental_reproducibility(dataset).await;
 
         Ok(ReproducibilityResults {
             cross_platform,
@@ -1223,8 +1230,7 @@ impl MetricReliabilityTester {
         };
 
         // Real least-squares linear trend of mean score vs. time-point index.
-        let (trend_coefficient, residual_variance, predicted) =
-            linear_trend(&temporal_means);
+        let (trend_coefficient, residual_variance, predicted) = linear_trend(&temporal_means);
 
         // Real autocorrelation of the mean-score series at lags 1..=min(4, n-1).
         let max_lag = (num_time_points.saturating_sub(1)).min(4);
@@ -1328,7 +1334,9 @@ impl MetricReliabilityTester {
             (
                 "temporal_reproducibility",
                 0.2,
-                reproducibility.temporal_reproducibility.temporal_correlation,
+                reproducibility
+                    .temporal_reproducibility
+                    .temporal_correlation,
             ),
         ];
         let total_weight: f64 = base_weights.iter().map(|(_, w, _)| w).sum();
@@ -1353,7 +1361,9 @@ impl MetricReliabilityTester {
         );
         metric_reliability_scores.insert(
             "temporal_reproducibility".to_string(),
-            reproducibility.temporal_reproducibility.temporal_correlation,
+            reproducibility
+                .temporal_reproducibility
+                .temporal_correlation,
         );
 
         let classification = self.classify_reliability(overall_score);
@@ -1526,7 +1536,9 @@ impl MetricReliabilityTester {
                 "- **Cross-Platform Correlation:** {:.3}\n",
                 cp.cross_platform_correlation
             )),
-            Err(reason) => report.push_str(&format!("- **Cross-Platform:** not evaluated ({reason})\n")),
+            Err(reason) => {
+                report.push_str(&format!("- **Cross-Platform:** not evaluated ({reason})\n"))
+            }
         }
         report.push_str(&format!(
             "- **Temporal Correlation:** {:.3}\n",
@@ -1705,7 +1717,10 @@ mod tests {
             (slope_rising - 0.1).abs() < 1e-9,
             "expected slope 0.1, got {slope_rising}"
         );
-        assert!(residual_var < 1e-9, "perfect line should have ~0 residual variance");
+        assert!(
+            residual_var < 1e-9,
+            "perfect line should have ~0 residual variance"
+        );
         assert_eq!(predicted.len(), rising.len());
     }
 
@@ -1716,8 +1731,16 @@ mod tests {
         let series = vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
         let acf = autocorrelation_series(&series, 2);
         assert_eq!(acf.len(), 2);
-        assert!(acf[0] < 0.0, "lag-1 autocorrelation should be negative, got {}", acf[0]);
-        assert!(acf[1] > 0.0, "lag-2 autocorrelation should be positive, got {}", acf[1]);
+        assert!(
+            acf[0] < 0.0,
+            "lag-1 autocorrelation should be negative, got {}",
+            acf[0]
+        );
+        assert!(
+            acf[1] > 0.0,
+            "lag-2 autocorrelation should be positive, got {}",
+            acf[1]
+        );
     }
 
     #[test]
@@ -1878,7 +1901,10 @@ mod tests {
         assert!(result.cross_implementation.is_err());
         assert!(result.environmental_reproducibility.is_err());
         // Temporal reproducibility, in contrast, is genuinely computed.
-        assert!(result.temporal_reproducibility.temporal_correlation.is_finite());
+        assert!(result
+            .temporal_reproducibility
+            .temporal_correlation
+            .is_finite());
     }
 
     #[tokio::test]
@@ -1901,6 +1927,9 @@ mod tests {
         // definitions differing from each other.
         let defs: Vec<&Vec<String>> = result.rater_definitions.values().collect();
         assert_ne!(defs[0], defs[1]);
-        assert!((0.0..=1.0).contains(&result.kendalls_concordance.abs()) || result.kendalls_concordance == 0.0);
+        assert!(
+            (0.0..=1.0).contains(&result.kendalls_concordance.abs())
+                || result.kendalls_concordance == 0.0
+        );
     }
 }

@@ -81,7 +81,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_creation() {
+        // This test exercises HTTP server/router construction, not synthesis
+        // quality, so opt explicitly into test mode to avoid real component
+        // initialization (model download) in CI/sandboxed environments.
         let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
             .build()
             .await
             .expect("Failed to build pipeline");

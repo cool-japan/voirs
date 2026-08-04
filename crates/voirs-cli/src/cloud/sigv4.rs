@@ -90,8 +90,9 @@ pub fn canonical_query_string(pairs: &[(&str, &str)]) -> String {
 
 /// Collapse any run of whitespace into a single space, matching the
 /// `CanonicalHeaders` trimming rule ("convert sequential spaces to a
-/// single space").
-fn collapse_whitespace(s: &str) -> String {
+/// single space"). Shared with [`crate::cloud::azure_backend`], which
+/// applies the textually identical rule for Azure's `CanonicalizedHeaders`.
+pub(crate) fn collapse_whitespace(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_was_space = false;
     for c in s.chars() {
@@ -185,10 +186,7 @@ impl SigV4Signer<'_> {
         headers.sort();
         headers.dedup_by(|a, b| a.0 == b.0);
 
-        let canonical_headers: String = headers
-            .iter()
-            .map(|(k, v)| format!("{k}:{v}\n"))
-            .collect();
+        let canonical_headers: String = headers.iter().map(|(k, v)| format!("{k}:{v}\n")).collect();
         let signed_headers = headers
             .iter()
             .map(|(k, _)| k.as_str())

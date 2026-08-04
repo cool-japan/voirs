@@ -893,14 +893,14 @@ impl HiFiGanVocoder {
         if let Some(config) = config {
             self.apply_synthesis_config(&mut samples, config, sample_rate);
         }
-        let mut audio = AudioBuffer::from_samples(samples, sample_rate);
+        let mut audio = AudioBuffer::from_samples(samples, sample_rate as f32);
         self.normalize_audio(&mut audio);
         Ok(audio)
     }
     /// Convert mel bin index to approximate frequency
     #[cfg(not(feature = "candle"))]
     fn mel_bin_to_frequency(&self, mel_bin: usize, n_mels: usize) -> f32 {
-        let mel_max = 2595.0 * (1.0 + 8000.0 / 700.0).log10();
+        let mel_max = 2595.0f32 * (1.0f32 + 8000.0f32 / 700.0f32).log10();
         let mel_value = (mel_bin as f32 / n_mels as f32) * mel_max;
         700.0 * ((mel_value / 2595.0).exp() - 1.0)
     }
@@ -985,7 +985,9 @@ impl HiFiGanVocoder {
             .fold(0.0f32, |acc, x| acc.max(x));
         if peak > 0.8 {
             let scale = 0.8 / peak;
-            for sample in samples {
+            // Reborrow (`iter_mut`) rather than moving `samples` into the
+            // loop, since it is needed again below.
+            for sample in samples.iter_mut() {
                 *sample *= scale;
             }
         }

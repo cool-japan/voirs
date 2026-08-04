@@ -11,7 +11,8 @@ This crate implements state-of-the-art neural acoustic models including VITS (Va
 
 - **VITS Implementation**: End-to-end variational autoencoder for high-quality synthesis
 - **FastSpeech2 Support**: Non-autoregressive transformer for fast and controllable synthesis  
-- **Multi-backend**: Candle (native Rust) and ONNX Runtime support
+- **Candle Backend**: Built on Candle (native Rust), always compiled in — this is not an optional/toggleable dependency
+- **Optional ONNX Runtime Backend**: Additional inference path via the `onnx` feature, used alongside (not instead of) Candle
 - **GPU Acceleration**: CUDA, Metal, and OpenCL backends for fast inference
 - **Speaker Control**: Multi-speaker models with speaker embedding and voice morphing
 - **Prosody Control**: Fine-grained control over pitch, duration, and energy
@@ -315,16 +316,21 @@ Add to your `Cargo.toml`:
 [dependencies]
 voirs-acoustic = "0.1"
 
-# Enable specific backends
+# Enable additional backends/acceleration on top of the always-on Candle backend
 [dependencies.voirs-acoustic]
 version = "0.1"
-features = ["candle", "onnx", "gpu"]
+features = ["onnx", "gpu"]
 ```
 
 ### Feature Flags
 
-- `candle`: Enable Candle backend (default)
-- `onnx`: Enable ONNX Runtime backend
+- `candle`: Kept only for backward compatibility with existing `--features candle` /
+  `required-features = ["candle"]` usages. Candle (`candle-core`/`candle-nn`/
+  `candle-transformers`) is a hard, always-on dependency of this crate — core modules
+  (e.g. the VITS implementation) reference it unconditionally, so it cannot actually be
+  disabled. This flag is an empty no-op; do not rely on it to exclude Candle from a build.
+- `onnx`: Enable the additional ONNX Runtime inference backend (genuinely optional, adds
+  to rather than replaces the Candle backend)
 - `gpu`: Enable GPU acceleration (CUDA/Metal)
 - `streaming`: Enable streaming synthesis
 - `training`: Enable model training capabilities

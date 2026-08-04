@@ -3,7 +3,6 @@
 //! This example demonstrates the actual voice cloning capabilities of VoiRS SDK
 //! using the real API instead of placeholder methods.
 
-use std::path::Path;
 use voirs_sdk::prelude::*;
 
 #[tokio::main]

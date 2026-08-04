@@ -6,6 +6,7 @@ use super::{
     definition::{Condition, Step, StepType, Workflow},
     retry::RetryManager,
     state::WorkflowState,
+    validation::WorkflowValidator,
     WorkflowStats,
 };
 use crate::error::CliError;
@@ -20,6 +21,12 @@ use std::time::Instant;
 /// infinite loops from misconfigured or ever-true/never-false conditions.
 const MAX_LOOP_ITERATIONS: u64 = 100_000;
 
+/// Maximum sub-workflow nesting depth (`Workflow`-type steps invoking other
+/// workflow files). Combined with `ExecutionContext::subworkflow_stack`'s
+/// cycle detection, this guards against both accidental cycles that
+/// round-trip through more than one file and simple runaway nesting.
+const MAX_SUBWORKFLOW_DEPTH: usize = 16;
+
 /// Execution context for a workflow
 #[derive(Clone)]
 pub struct ExecutionContext {
@@ -33,6 +40,12 @@ pub struct ExecutionContext {
     skipped: Vec<String>,
     /// Total retries performed
     retries: usize,
+    /// Canonicalized paths of sub-workflow files currently being executed,
+    /// outermost first. Used by `execute_subworkflow` to detect cycles
+    /// (a workflow transitively including itself) and to enforce
+    /// `MAX_SUBWORKFLOW_DEPTH`. Empty for the top-level workflow, which has
+    /// no source file of its own from `ExecutionContext`'s point of view.
+    subworkflow_stack: Vec<PathBuf>,
 }
 
 impl ExecutionContext {
@@ -59,7 +72,41 @@ impl ExecutionContext {
             completed: HashMap::new(),
             skipped: Vec::new(),
             retries: 0,
+            subworkflow_stack: Vec::new(),
         }
+    }
+
+    /// Create a child execution context for a sub-workflow invoked from
+    /// `path` (already canonicalized by the caller). Fails if `path` is
+    /// already on the stack (a cycle) or the stack is already at
+    /// `MAX_SUBWORKFLOW_DEPTH`, before doing any work on the sub-workflow
+    /// itself.
+    fn child_for_subworkflow(&self, sub_workflow: Workflow, path: &Path) -> Result<Self> {
+        if self.subworkflow_stack.iter().any(|p| p == path) {
+            let chain = self
+                .subworkflow_stack
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            return Err(CliError::Workflow(format!(
+                "sub-workflow cycle detected: '{}' is already being executed (chain: {} -> {})",
+                path.display(),
+                chain,
+                path.display()
+            )));
+        }
+        if self.subworkflow_stack.len() >= MAX_SUBWORKFLOW_DEPTH {
+            return Err(CliError::Workflow(format!(
+                "sub-workflow nesting exceeded the maximum depth of {}",
+                MAX_SUBWORKFLOW_DEPTH
+            )));
+        }
+
+        let mut child = Self::new(sub_workflow);
+        child.subworkflow_stack = self.subworkflow_stack.clone();
+        child.subworkflow_stack.push(path.to_path_buf());
+        Ok(child)
     }
 
     /// Get workflow reference
@@ -351,13 +398,16 @@ impl StepExecutor {
         // Execute based on step type
         let outcome = match step.step_type {
             StepType::Synthesize => self.execute_synthesize(step, &resolved_params).await,
-            StepType::Validate => self.execute_validate(step, &resolved_params).await,
+            StepType::Validate => self.execute_validate(step, &resolved_params, context).await,
             StepType::FileOp => self.execute_file_op(step, &resolved_params).await,
             StepType::Command => self.execute_command(step, &resolved_params).await,
             StepType::Script => self.execute_script(step, &resolved_params).await,
             StepType::Branch => self.execute_branch(step, &resolved_params, context).await,
             StepType::Loop => self.execute_loop(step, &resolved_params, context).await,
-            StepType::Workflow => self.execute_subworkflow(step, &resolved_params).await,
+            StepType::Workflow => {
+                self.execute_subworkflow(step, &resolved_params, context)
+                    .await
+            }
             StepType::Wait => self.execute_wait(step, &resolved_params).await,
             StepType::Notify => self.execute_notify(step, &resolved_params).await,
         }?;
@@ -472,20 +522,327 @@ impl StepExecutor {
 
     // Step type implementations
 
+    /// Run real text-to-speech synthesis through `VoirsPipeline` and write
+    /// the resulting audio to `output`. `text` and `output` are required;
+    /// `voice`, `quality`, `gpu`, `rate`, `pitch`, and `volume` are optional
+    /// overrides mirroring the CLI's `synthesize` command.
+    ///
+    /// `test_mode` (default `false`) maps directly to
+    /// `VoirsPipelineBuilder::with_test_mode`: when set, model
+    /// auto-download and validation are skipped, so synthesis falls back to
+    /// the SDK's built-in dummy G2P/acoustic/vocoder models whenever real
+    /// weights aren't already cached locally. This is meant for CI/smoke-test
+    /// workflows that need to exercise the synthesize step without network
+    /// access or downloaded models -- the audio produced in that case is
+    /// *not* production-quality speech, and workflow authors should not set
+    /// `test_mode: true` outside of testing.
     async fn execute_synthesize(
         &self,
-        _step: &Step,
-        _params: &HashMap<String, serde_json::Value>,
+        step: &Step,
+        params: &HashMap<String, serde_json::Value>,
     ) -> Result<StepOutcome> {
-        Ok(StepOutcome::message("Synthesis completed"))
+        let text = params
+            .get("text")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                CliError::Workflow(format!(
+                    "synthesize step '{}' requires a non-empty 'text' parameter",
+                    step.name
+                ))
+            })?;
+
+        let output_param = params
+            .get("output")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                CliError::Workflow(format!(
+                    "synthesize step '{}' requires an 'output' parameter (output audio file path)",
+                    step.name
+                ))
+            })?;
+
+        let cwd = resolve_cwd(params)?;
+        let output_path = resolve_path(&cwd, output_param);
+
+        let quality = match params.get("quality").and_then(|v| v.as_str()) {
+            Some(quality_str) => quality_str
+                .parse::<voirs_sdk::QualityLevel>()
+                .map_err(|e| {
+                    CliError::Workflow(format!(
+                        "synthesize step '{}' has an invalid 'quality' parameter: {e}",
+                        step.name
+                    ))
+                })?,
+            None => voirs_sdk::QualityLevel::default(),
+        };
+
+        let mut builder = voirs_sdk::VoirsPipeline::builder().with_quality(quality);
+        if let Some(voice) = params.get("voice").and_then(|v| v.as_str()) {
+            builder = builder.with_voice(voice);
+        }
+        if let Some(gpu) = params.get("gpu").and_then(|v| v.as_bool()) {
+            builder = builder.with_gpu_acceleration(gpu);
+        }
+        if let Some(test_mode) = params.get("test_mode").and_then(|v| v.as_bool()) {
+            builder = builder.with_test_mode(test_mode);
+        }
+
+        let pipeline = builder.build().await?;
+
+        let mut synth_config = voirs_sdk::SynthesisConfig {
+            quality,
+            ..Default::default()
+        };
+        if let Some(rate) = params.get("rate").and_then(|v| v.as_f64()) {
+            synth_config.speaking_rate = rate as f32;
+        }
+        if let Some(pitch) = params.get("pitch").and_then(|v| v.as_f64()) {
+            synth_config.pitch_shift = pitch as f32;
+        }
+        if let Some(volume) = params.get("volume").and_then(|v| v.as_f64()) {
+            synth_config.volume_gain = volume as f32;
+        }
+
+        let audio = pipeline.synthesize_with_config(text, &synth_config).await?;
+
+        ensure_parent_dir(&output_path)?;
+        let format = crate::utils::format_from_extension(&output_path).unwrap_or_default();
+        audio.save(&output_path, format)?;
+
+        let mut output = HashMap::new();
+        output.insert(
+            "output_path".to_string(),
+            serde_json::json!(output_path.display().to_string()),
+        );
+        output.insert(
+            "duration_seconds".to_string(),
+            serde_json::json!(audio.duration()),
+        );
+        output.insert(
+            "sample_rate".to_string(),
+            serde_json::json!(audio.sample_rate()),
+        );
+
+        Ok(StepOutcome::with_output(
+            format!(
+                "Synthesized {} character(s) to '{}' ({:.2}s audio)",
+                text.chars().count(),
+                output_path.display(),
+                audio.duration()
+            ),
+            output,
+        ))
     }
 
+    /// Validate referenced files/state against the checks specified in
+    /// `params`: file existence and size bounds (`path`, `min_size_bytes`,
+    /// `max_size_bytes`), WAV audio decodability and duration bounds
+    /// (`audio`/extension-inferred, `min_duration_secs`, `max_duration_secs`),
+    /// exact format/extension (`format`), JSON structural validity plus
+    /// required top-level keys (`required_fields`), and/or a condition
+    /// (step-level `condition` or a `condition` parameter, evaluated via the
+    /// same `Condition::evaluate` infrastructure `execute_branch` uses). At
+    /// least one check must be requested -- a validate step with nothing to
+    /// check is a configuration error, not a pass.
     async fn execute_validate(
         &self,
-        _step: &Step,
-        _params: &HashMap<String, serde_json::Value>,
+        step: &Step,
+        params: &HashMap<String, serde_json::Value>,
+        context: &mut ExecutionContext,
     ) -> Result<StepOutcome> {
-        Ok(StepOutcome::message("Validation passed"))
+        let mut checks_performed: Vec<&'static str> = Vec::new();
+        let mut output = HashMap::new();
+
+        if let Some(path_param) = params.get("path").and_then(|v| v.as_str()) {
+            let cwd = resolve_cwd(params)?;
+            let path = resolve_path(&cwd, path_param);
+
+            if !path.exists() {
+                return Err(CliError::Workflow(format!(
+                    "validate step '{}': path '{}' does not exist",
+                    step.name,
+                    path.display()
+                )));
+            }
+            checks_performed.push("exists");
+
+            let metadata = std::fs::metadata(&path)
+                .map_err(|e| CliError::file_operation("stat", &path.display().to_string(), e))?;
+            let size = metadata.len();
+            output.insert("size_bytes".to_string(), serde_json::json!(size));
+
+            if let Some(min_size) = params.get("min_size_bytes").and_then(|v| v.as_u64()) {
+                if size < min_size {
+                    return Err(CliError::Workflow(format!(
+                        "validate step '{}': '{}' is {} byte(s), below the required minimum of {}",
+                        step.name,
+                        path.display(),
+                        size,
+                        min_size
+                    )));
+                }
+                checks_performed.push("min_size_bytes");
+            }
+            if let Some(max_size) = params.get("max_size_bytes").and_then(|v| v.as_u64()) {
+                if size > max_size {
+                    return Err(CliError::Workflow(format!(
+                        "validate step '{}': '{}' is {} byte(s), above the allowed maximum of {}",
+                        step.name,
+                        path.display(),
+                        size,
+                        max_size
+                    )));
+                }
+                checks_performed.push("max_size_bytes");
+            }
+
+            let extension = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase());
+
+            if let Some(expected_format) = params.get("format").and_then(|v| v.as_str()) {
+                if extension.as_deref() != Some(expected_format.to_lowercase().as_str()) {
+                    return Err(CliError::Workflow(format!(
+                        "validate step '{}': '{}' does not have the expected '{}' extension",
+                        step.name,
+                        path.display(),
+                        expected_format
+                    )));
+                }
+                checks_performed.push("format");
+            }
+
+            let want_audio_check = params
+                .get("audio")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(matches!(extension.as_deref(), Some("wav")));
+            if want_audio_check {
+                if extension.as_deref() != Some("wav") {
+                    return Err(CliError::Workflow(format!(
+                        "validate step '{}': audio decodability check requested for '{}', but only WAV is currently supported for decode validation",
+                        step.name, path.display()
+                    )));
+                }
+
+                let reader = hound::WavReader::open(&path).map_err(|e| {
+                    CliError::Workflow(format!(
+                        "validate step '{}': '{}' is not decodable as WAV audio: {}",
+                        step.name,
+                        path.display(),
+                        e
+                    ))
+                })?;
+                let spec = reader.spec();
+                let duration_secs = if spec.sample_rate > 0 {
+                    reader.duration() as f64 / f64::from(spec.sample_rate)
+                } else {
+                    0.0
+                };
+                output.insert(
+                    "audio_duration_secs".to_string(),
+                    serde_json::json!(duration_secs),
+                );
+                output.insert(
+                    "audio_sample_rate".to_string(),
+                    serde_json::json!(spec.sample_rate),
+                );
+                output.insert(
+                    "audio_channels".to_string(),
+                    serde_json::json!(spec.channels),
+                );
+                checks_performed.push("audio_decodable");
+
+                if let Some(min_dur) = params.get("min_duration_secs").and_then(|v| v.as_f64()) {
+                    if duration_secs < min_dur {
+                        return Err(CliError::Workflow(format!(
+                            "validate step '{}': '{}' is {:.3}s, below the required minimum of {:.3}s",
+                            step.name, path.display(), duration_secs, min_dur
+                        )));
+                    }
+                    checks_performed.push("min_duration_secs");
+                }
+                if let Some(max_dur) = params.get("max_duration_secs").and_then(|v| v.as_f64()) {
+                    if duration_secs > max_dur {
+                        return Err(CliError::Workflow(format!(
+                            "validate step '{}': '{}' is {:.3}s, above the allowed maximum of {:.3}s",
+                            step.name, path.display(), duration_secs, max_dur
+                        )));
+                    }
+                    checks_performed.push("max_duration_secs");
+                }
+            }
+
+            if let Some(required_fields) = params.get("required_fields").and_then(|v| v.as_array())
+            {
+                let content = std::fs::read_to_string(&path).map_err(|e| {
+                    CliError::file_operation("read", &path.display().to_string(), e)
+                })?;
+                let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                    CliError::Workflow(format!(
+                        "validate step '{}': '{}' is not valid JSON: {}",
+                        step.name,
+                        path.display(),
+                        e
+                    ))
+                })?;
+                checks_performed.push("json_parses");
+
+                for field in required_fields {
+                    let field_name = field.as_str().ok_or_else(|| {
+                        CliError::Workflow(format!(
+                            "validate step '{}' has a non-string entry in 'required_fields'",
+                            step.name
+                        ))
+                    })?;
+                    if json.get(field_name).is_none() {
+                        return Err(CliError::Workflow(format!(
+                            "validate step '{}': '{}' is missing required field '{}'",
+                            step.name,
+                            path.display(),
+                            field_name
+                        )));
+                    }
+                }
+                checks_performed.push("required_fields");
+            }
+        }
+
+        if step.condition.is_some() || params.contains_key("condition") {
+            let condition = Self::step_condition(step, "validate")?;
+            let variables = context.get_variables();
+            if !condition.evaluate(&variables) {
+                return Err(CliError::Workflow(format!(
+                    "validate step '{}': condition was not satisfied",
+                    step.name
+                )));
+            }
+            checks_performed.push("condition");
+        }
+
+        if checks_performed.is_empty() {
+            return Err(CliError::Workflow(format!(
+                "validate step '{}' requires at least one check: a 'path' parameter (with optional \
+                 size/format/audio/required_fields checks) and/or a condition",
+                step.name
+            )));
+        }
+
+        output.insert(
+            "checks_performed".to_string(),
+            serde_json::json!(checks_performed),
+        );
+
+        Ok(StepOutcome::with_output(
+            format!(
+                "Validation passed for step '{}' ({} check(s): {})",
+                step.name,
+                checks_performed.len(),
+                checks_performed.join(", ")
+            ),
+            output,
+        ))
     }
 
     /// Real filesystem operation: `op` selects copy/move/delete/mkdir/write/
@@ -947,12 +1304,178 @@ impl StepExecutor {
         )))
     }
 
+    /// Load and recursively execute a referenced workflow file. The step's
+    /// `workflow_file` (or `path`) parameter names the sub-workflow file
+    /// (relative paths resolve against `cwd`, matching the other
+    /// file-touching step types); an optional `inputs` object seeds/overrides
+    /// the child workflow's variables with values already resolved against
+    /// the *parent's* variables (standard `${var}` substitution already ran
+    /// before this handler is called).
+    ///
+    /// Guarded against cycles and excessive nesting via
+    /// `ExecutionContext::child_for_subworkflow`, which tracks the
+    /// canonicalized chain of sub-workflow files currently executing.
+    ///
+    /// Runs the sub-workflow's steps sequentially in dependency order
+    /// (honoring `depends_on` and per-step `condition`s, see
+    /// `run_workflow_steps`) rather than delegating to `WorkflowEngine`:
+    /// `WorkflowEngine::execute` mints a brand-new `ExecutionContext` per
+    /// call, which would sever the ancestor chain this function needs for
+    /// cycle detection across more than one level of nesting.
     async fn execute_subworkflow(
         &self,
-        _step: &Step,
-        _params: &HashMap<String, serde_json::Value>,
+        step: &Step,
+        params: &HashMap<String, serde_json::Value>,
+        context: &mut ExecutionContext,
     ) -> Result<StepOutcome> {
-        Ok(StepOutcome::message("Sub-workflow completed"))
+        let path_param = params
+            .get("workflow_file")
+            .or_else(|| params.get("path"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                CliError::Workflow(format!(
+                    "workflow step '{}' requires a 'workflow_file' (or 'path') parameter naming \
+                     the sub-workflow file",
+                    step.name
+                ))
+            })?;
+
+        let cwd = resolve_cwd(params)?;
+        let resolved_path = resolve_path(&cwd, path_param);
+        let canonical_path = std::fs::canonicalize(&resolved_path).map_err(|e| {
+            CliError::file_operation("resolve", &resolved_path.display().to_string(), e)
+        })?;
+
+        let sub_workflow = Workflow::load_from_file(&canonical_path).await?;
+
+        let validation = WorkflowValidator::new().validate(&sub_workflow)?;
+        if !validation.valid {
+            let messages = validation
+                .errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(CliError::Workflow(format!(
+                "workflow step '{}': sub-workflow '{}' failed validation: {}",
+                step.name,
+                canonical_path.display(),
+                messages
+            )));
+        }
+
+        let mut child_context =
+            context.child_for_subworkflow(sub_workflow.clone(), &canonical_path)?;
+
+        if let Some(inputs) = params.get("inputs").and_then(|v| v.as_object()) {
+            for (key, value) in inputs {
+                child_context.set_variable(key.clone(), value.clone());
+            }
+        }
+
+        let (succeeded, failed) = self
+            .run_workflow_steps(&sub_workflow, &mut child_context)
+            .await?;
+
+        let mut output = HashMap::new();
+        output.insert(
+            "workflow_name".to_string(),
+            serde_json::json!(sub_workflow.metadata.name),
+        );
+        output.insert(
+            "workflow_file".to_string(),
+            serde_json::json!(canonical_path.display().to_string()),
+        );
+        output.insert("steps_succeeded".to_string(), serde_json::json!(succeeded));
+        output.insert("steps_failed".to_string(), serde_json::json!(failed));
+
+        Ok(StepOutcome::with_output(
+            format!(
+                "Sub-workflow '{}' ({}) completed: {} succeeded, {} failed",
+                sub_workflow.metadata.name,
+                canonical_path.display(),
+                succeeded,
+                failed
+            ),
+            output,
+        ))
+    }
+
+    /// Execute every step of `workflow` sequentially, in dependency order,
+    /// evaluating each step's condition first and skipping it if unmet.
+    ///
+    /// This mirrors the skip-on-condition check `WorkflowEngine::execute_steps`
+    /// performs before dispatching a step (that check lives in the engine's
+    /// per-step task body, not in `execute_step`/`execute_step_once`, so it
+    /// has to be reproduced here rather than inherited for free). Unlike the
+    /// engine, this does not run independent steps in parallel and does not
+    /// persist state to a `StateManager`; it exists purely to give
+    /// `execute_subworkflow` a self-contained, depth/cycle-guarded runner
+    /// built on the same `ExecutionContext`/`StepExecutor` machinery instead
+    /// of on `WorkflowEngine` (see `execute_subworkflow`'s doc comment for
+    /// why). Returns `(steps_succeeded, steps_failed)`.
+    async fn run_workflow_steps(
+        &self,
+        workflow: &Workflow,
+        context: &mut ExecutionContext,
+    ) -> Result<(usize, usize)> {
+        let mut pending: Vec<&Step> = workflow.steps.iter().collect();
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+
+        while !pending.is_empty() {
+            let ready: Vec<&Step> = pending
+                .iter()
+                .copied()
+                .filter(|step| {
+                    step.depends_on.iter().all(|dep| {
+                        context.completed_steps().contains_key(&dep.step_name)
+                            || context.skipped_steps().contains(&dep.step_name)
+                    })
+                })
+                .collect();
+
+            if ready.is_empty() {
+                return Err(CliError::Workflow(format!(
+                    "sub-workflow '{}' has unsatisfiable step dependencies",
+                    workflow.metadata.name
+                )));
+            }
+
+            for step in ready {
+                if let Some(ref condition) = step.condition {
+                    let variables = context.get_variables();
+                    if !condition.evaluate(&variables) {
+                        context.skip_step(&step.name, "Condition not met");
+                        continue;
+                    }
+                }
+
+                // `execute_step` transitively (via `execute_subworkflow`)
+                // calls back into `run_workflow_steps`, so this call must be
+                // boxed: an async fn that recurses into itself without
+                // indirection would require an infinitely-sized future.
+                let result: StepResult = Box::pin(self.execute_step(step, context)).await?;
+                if result.success {
+                    succeeded += 1;
+                } else {
+                    failed += 1;
+                    if !workflow.config.continue_on_error {
+                        return Err(CliError::Workflow(format!(
+                            "sub-workflow '{}' step '{}' failed: {}",
+                            workflow.metadata.name, step.name, result.message
+                        )));
+                    }
+                }
+            }
+
+            pending.retain(|step| {
+                !context.completed_steps().contains_key(&step.name)
+                    && !context.skipped_steps().contains(&step.name)
+            });
+        }
+
+        Ok((succeeded, failed))
     }
 
     async fn execute_wait(
@@ -968,12 +1491,130 @@ impl StepExecutor {
         Ok(StepOutcome::message("Wait completed"))
     }
 
+    /// Emit a workflow notification. A structured summary is always printed
+    /// to stdout (real local delivery, not a stand-in for a "real" channel),
+    /// and if `webhook_url` (or `url`) is set, the same information is also
+    /// POSTed as JSON to that URL via `reqwest`. A configured webhook that
+    /// can't be reached, or that responds with a non-2xx status, is a hard
+    /// error: this step type never reports success for a delivery that
+    /// didn't happen.
     async fn execute_notify(
         &self,
-        _step: &Step,
-        _params: &HashMap<String, serde_json::Value>,
+        step: &Step,
+        params: &HashMap<String, serde_json::Value>,
     ) -> Result<StepOutcome> {
-        Ok(StepOutcome::message("Notification sent"))
+        let message = params
+            .get("message")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                CliError::Workflow(format!(
+                    "notify step '{}' requires a 'message' parameter",
+                    step.name
+                ))
+            })?;
+
+        let channel = params.get("channel").and_then(|v| v.as_str());
+        let level = params
+            .get("level")
+            .and_then(|v| v.as_str())
+            .unwrap_or("info");
+        let timestamp = chrono::Utc::now();
+
+        // Always emit a local, structured notification. This is genuine
+        // delivery to the workflow's own output stream, not a placeholder.
+        println!(
+            "[notify:{}] {} - {}{}",
+            level,
+            timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+            message,
+            channel
+                .map(|c| format!(" (channel: {c})"))
+                .unwrap_or_default(),
+        );
+
+        let mut output = HashMap::new();
+        output.insert("message".to_string(), serde_json::json!(message));
+        output.insert("level".to_string(), serde_json::json!(level));
+        output.insert("delivered_stdout".to_string(), serde_json::json!(true));
+        if let Some(channel) = channel {
+            output.insert("channel".to_string(), serde_json::json!(channel));
+        }
+
+        let webhook_url = params
+            .get("webhook_url")
+            .or_else(|| params.get("url"))
+            .and_then(|v| v.as_str());
+
+        let Some(webhook_url) = webhook_url else {
+            return Ok(StepOutcome::with_output(
+                format!("Notification '{}' delivered to stdout", step.name),
+                output,
+            ));
+        };
+
+        // Install the pure-Rust rustls CryptoProvider before any TLS
+        // handshake (reqwest is built with `rustls-no-provider`).
+        // Once-guarded; safe to call on every notify step.
+        voirs_sdk::ensure_crypto_provider();
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .user_agent(concat!("voirs-cli/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| CliError::NetworkError(format!("failed to build HTTP client: {e}")))?;
+
+        let mut payload = serde_json::json!({
+            "step": step.name,
+            "message": message,
+            "level": level,
+            "timestamp": timestamp.to_rfc3339(),
+        });
+        if let Some(obj) = payload.as_object_mut() {
+            if let Some(channel) = channel {
+                obj.insert("channel".to_string(), serde_json::json!(channel));
+            }
+            if let Some(extra) = params.get("payload").and_then(|v| v.as_object()) {
+                for (key, value) in extra {
+                    obj.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
+        let response = client
+            .post(webhook_url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                CliError::NetworkError(format!(
+                    "notify step '{}' failed to reach webhook '{}': {}",
+                    step.name, webhook_url, e
+                ))
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(CliError::NetworkError(format!(
+                "notify step '{}': webhook '{}' responded with status {}: {}",
+                step.name, webhook_url, status, body
+            )));
+        }
+
+        output.insert("webhook_url".to_string(), serde_json::json!(webhook_url));
+        output.insert(
+            "webhook_status".to_string(),
+            serde_json::json!(status.as_u16()),
+        );
+        output.insert("delivered_webhook".to_string(), serde_json::json!(true));
+
+        Ok(StepOutcome::with_output(
+            format!(
+                "Notification '{}' delivered to stdout and webhook '{}' ({})",
+                step.name, webhook_url, status
+            ),
+            output,
+        ))
     }
 }
 
@@ -1019,402 +1660,4 @@ impl ExecutionResult {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workflow::definition::{ConditionOperator, StepType};
-
-    /// Build a minimal `Step` for tests, filling in the fields that are
-    /// irrelevant to the specific handler under test.
-    fn make_step(
-        name: &str,
-        step_type: StepType,
-        parameters: HashMap<String, serde_json::Value>,
-        condition: Option<Condition>,
-    ) -> Step {
-        Step {
-            name: name.to_string(),
-            step_type,
-            description: None,
-            parameters,
-            condition,
-            depends_on: Vec::new(),
-            retry: None,
-            for_each: None,
-            parallel: false,
-        }
-    }
-
-    fn unique_temp_path(label: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "voirs_executor_test_{label}_{}_{}",
-            std::process::id(),
-            fastrand::u64(..)
-        ))
-    }
-
-    #[test]
-    fn test_execution_context_creation() {
-        let workflow = Workflow::new("test", "1.0", "Test workflow");
-        let context = ExecutionContext::new(workflow);
-
-        assert_eq!(context.completed_steps().len(), 0);
-        assert_eq!(context.skipped_steps().len(), 0);
-        assert_eq!(context.total_retries(), 0);
-    }
-
-    #[test]
-    fn test_execution_context_variables() {
-        let mut workflow = Workflow::new("test", "1.0", "Test workflow");
-        workflow.add_variable(
-            "test_var".to_string(),
-            super::super::definition::Variable::String("test_value".to_string()),
-        );
-
-        let context = ExecutionContext::new(workflow);
-        let variables = context.get_variables();
-
-        assert_eq!(variables.len(), 1);
-        assert_eq!(
-            variables
-                .get("test_var")
-                .unwrap()
-                .as_str()
-                .unwrap_or_default(),
-            "test_value"
-        );
-    }
-
-    #[test]
-    fn test_step_result_creation() {
-        let result = StepResult::success("step1".to_string(), "Success".to_string(), 100);
-
-        assert!(result.success);
-        assert_eq!(result.step_name, "step1");
-        assert_eq!(result.duration_ms, 100);
-    }
-
-    #[test]
-    fn test_step_result_with_output() {
-        let result = StepResult::success("step1".to_string(), "Success".to_string(), 100)
-            .with_output("key1".to_string(), serde_json::json!("value1"));
-
-        assert_eq!(result.output.len(), 1);
-        assert_eq!(
-            result
-                .output
-                .get("key1")
-                .unwrap()
-                .as_str()
-                .unwrap_or_default(),
-            "value1"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_step_executor_creation() {
-        let _executor = StepExecutor::new();
-        // Verify creation works without panic
-    }
-
-    #[test]
-    fn test_execution_result_success() {
-        let stats = WorkflowStats::new();
-        let result = ExecutionResult::success("test".to_string(), "Done".to_string(), stats);
-
-        assert!(result.success);
-        assert_eq!(result.workflow_name, "test");
-    }
-
-    #[test]
-    fn test_execution_result_failure() {
-        let stats = WorkflowStats::new();
-        let result = ExecutionResult::failure("test".to_string(), "Failed".to_string(), stats);
-
-        assert!(!result.success);
-        assert_eq!(result.message, "Failed");
-    }
-
-    #[tokio::test]
-    async fn test_execute_file_op_write_then_read() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("file-op-test", "1.0", "Test file operations");
-        let mut context = ExecutionContext::new(workflow);
-
-        let temp_path = unique_temp_path("file_op");
-
-        let mut write_params = HashMap::new();
-        write_params.insert("op".to_string(), serde_json::json!("write"));
-        write_params.insert(
-            "path".to_string(),
-            serde_json::json!(temp_path.display().to_string()),
-        );
-        write_params.insert("content".to_string(), serde_json::json!("hello workflow"));
-        let write_step = make_step("write-step", StepType::FileOp, write_params, None);
-
-        let write_result = executor
-            .execute_step(&write_step, &mut context)
-            .await
-            .unwrap();
-        assert!(
-            write_result.success,
-            "write step failed: {}",
-            write_result.message
-        );
-        assert!(temp_path.exists());
-
-        let mut read_params = HashMap::new();
-        read_params.insert("op".to_string(), serde_json::json!("read"));
-        read_params.insert(
-            "path".to_string(),
-            serde_json::json!(temp_path.display().to_string()),
-        );
-        let read_step = make_step("read-step", StepType::FileOp, read_params, None);
-
-        let read_result = executor
-            .execute_step(&read_step, &mut context)
-            .await
-            .unwrap();
-        assert!(
-            read_result.success,
-            "read step failed: {}",
-            read_result.message
-        );
-        assert_eq!(
-            read_result.output.get("content").and_then(|v| v.as_str()),
-            Some("hello workflow")
-        );
-
-        let _ = std::fs::remove_file(&temp_path);
-    }
-
-    #[tokio::test]
-    async fn test_execute_file_op_unknown_op_errors() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("file-op-error-test", "1.0", "Test file op error path");
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert("op".to_string(), serde_json::json!("frobnicate"));
-        params.insert("path".to_string(), serde_json::json!("irrelevant.txt"));
-        let step = make_step("bad-op-step", StepType::FileOp, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(!result.success);
-        assert!(result.message.contains("frobnicate"));
-    }
-
-    #[tokio::test]
-    async fn test_execute_command_captures_stdout() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("command-test", "1.0", "Test command execution");
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert("command".to_string(), serde_json::json!("echo hello"));
-        let step = make_step("echo-step", StepType::Command, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(result.success, "command step failed: {}", result.message);
-        assert_eq!(
-            result.output.get("stdout").and_then(|v| v.as_str()),
-            Some("hello")
-        );
-        assert_eq!(
-            result.output.get("exit_code").and_then(|v| v.as_i64()),
-            Some(0)
-        );
-    }
-
-    #[tokio::test]
-    async fn test_execute_command_nonzero_exit_fails() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("command-fail-test", "1.0", "Test command failure path");
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert("command".to_string(), serde_json::json!("exit 7"));
-        let step = make_step("fail-step", StepType::Command, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(!result.success);
-        assert!(result.message.contains('7'));
-    }
-
-    #[tokio::test]
-    async fn test_execute_script_runs_body() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("script-test", "1.0", "Test script execution");
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert("script".to_string(), serde_json::json!("echo scripted"));
-        let step = make_step("script-step", StepType::Script, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(result.success, "script step failed: {}", result.message);
-        assert_eq!(
-            result.output.get("stdout").and_then(|v| v.as_str()),
-            Some("scripted")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_execute_branch_picks_path_from_condition() {
-        let executor = StepExecutor::new();
-        let mut workflow = Workflow::new("branch-test", "1.0", "Test branch evaluation");
-        workflow.add_variable(
-            "score".to_string(),
-            super::super::definition::Variable::Number(4.5),
-        );
-        let mut context = ExecutionContext::new(workflow);
-
-        // True branch: score (4.5) > 4.0
-        let true_step = make_step(
-            "branch-true",
-            StepType::Branch,
-            HashMap::new(),
-            Some(Condition::new(
-                "${score}".to_string(),
-                ConditionOperator::GreaterThan,
-                "4.0".to_string(),
-            )),
-        );
-        let true_result = executor
-            .execute_step(&true_step, &mut context)
-            .await
-            .unwrap();
-        assert!(true_result.success);
-        assert_eq!(
-            true_result.output.get("branch_taken"),
-            Some(&serde_json::json!(true))
-        );
-        assert_eq!(
-            context.get_variables().get("branch_taken"),
-            Some(&serde_json::json!(true))
-        );
-
-        // False branch: score (4.5) > 10.0 is false
-        let false_step = make_step(
-            "branch-false",
-            StepType::Branch,
-            HashMap::new(),
-            Some(Condition::new(
-                "${score}".to_string(),
-                ConditionOperator::GreaterThan,
-                "10.0".to_string(),
-            )),
-        );
-        let false_result = executor
-            .execute_step(&false_step, &mut context)
-            .await
-            .unwrap();
-        assert!(false_result.success);
-        assert_eq!(
-            false_result.output.get("branch_taken"),
-            Some(&serde_json::json!(false))
-        );
-    }
-
-    #[tokio::test]
-    async fn test_execute_branch_without_condition_errors() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("branch-missing-condition", "1.0", "Test missing condition");
-        let mut context = ExecutionContext::new(workflow);
-
-        let step = make_step("branch-no-cond", StepType::Branch, HashMap::new(), None);
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(!result.success);
-    }
-
-    #[tokio::test]
-    async fn test_execute_branch_condition_from_parameters() {
-        // Distinct code path from `test_execute_branch_picks_path_from_condition`:
-        // here the condition comes from a `condition` parameter (raw, unresolved
-        // at substitution time) instead of the step-level `condition` field.
-        let executor = StepExecutor::new();
-        let mut workflow = Workflow::new("branch-param-condition", "1.0", "Test param condition");
-        workflow.add_variable(
-            "score".to_string(),
-            super::super::definition::Variable::Number(4.5),
-        );
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert(
-            "condition".to_string(),
-            serde_json::json!({"left": "${score}", "operator": ">", "right": "4.0"}),
-        );
-        let step = make_step("branch-from-params", StepType::Branch, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(result.success, "branch step failed: {}", result.message);
-        assert_eq!(
-            result.output.get("branch_taken"),
-            Some(&serde_json::json!(true))
-        );
-    }
-
-    #[tokio::test]
-    async fn test_execute_loop_count_based() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("loop-count-test", "1.0", "Test count-based loop");
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert("count".to_string(), serde_json::json!(5));
-        let step = make_step("loop-step", StepType::Loop, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(result.success, "loop step failed: {}", result.message);
-        assert_eq!(result.output.get("iterations"), Some(&serde_json::json!(5)));
-
-        let variables = context.get_variables();
-        assert_eq!(
-            variables.get("loop-step_iterations"),
-            Some(&serde_json::json!(5))
-        );
-    }
-
-    #[tokio::test]
-    async fn test_execute_loop_count_exceeding_max_errors() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("loop-too-big-test", "1.0", "Test loop cap enforcement");
-        let mut context = ExecutionContext::new(workflow);
-
-        let mut params = HashMap::new();
-        params.insert(
-            "count".to_string(),
-            serde_json::json!(MAX_LOOP_ITERATIONS + 1),
-        );
-        let step = make_step("loop-too-big", StepType::Loop, params, None);
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(!result.success);
-    }
-
-    #[tokio::test]
-    async fn test_execute_loop_while_condition() {
-        let executor = StepExecutor::new();
-        let workflow = Workflow::new("loop-while-test", "1.0", "Test while-loop execution");
-        let mut context = ExecutionContext::new(workflow);
-
-        let step = make_step(
-            "while-step",
-            StepType::Loop,
-            HashMap::new(),
-            Some(Condition::new(
-                "${loop_counter}".to_string(),
-                ConditionOperator::LessThan,
-                "3".to_string(),
-            )),
-        );
-
-        let result = executor.execute_step(&step, &mut context).await.unwrap();
-        assert!(result.success, "while-loop step failed: {}", result.message);
-        assert_eq!(result.output.get("iterations"), Some(&serde_json::json!(3)));
-        assert_eq!(
-            context.get_variables().get("loop_counter"),
-            Some(&serde_json::json!(3))
-        );
-    }
-}
+mod tests;

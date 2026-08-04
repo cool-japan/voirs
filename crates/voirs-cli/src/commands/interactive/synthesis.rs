@@ -54,16 +54,24 @@ impl SynthesisEngine {
         })
     }
 
-    /// Load available voices from the system
+    /// Load available voices from the system's real voice registry.
+    ///
+    /// Queries `voirs_sdk::voice::VoiceRegistry` -- the same registry
+    /// `DefaultVoiceManager` resolves voices against when the SDK actually
+    /// builds a pipeline (see `create_pipeline` below) -- rather than an
+    /// independent hardcoded list. A hardcoded list here previously drifted
+    /// from the SDK's real default voice IDs, so selecting any of the
+    /// offered voices failed with "Voice not found" the moment
+    /// `create_pipeline` tried to build a real pipeline for it.
     async fn load_available_voices() -> Result<Vec<String>> {
-        // For now, return a list of common voices
-        // In a real implementation, this would query the VoiRS system
-        Ok(vec![
-            "en-us-female-01".to_string(),
-            "en-us-male-01".to_string(),
-            "en-gb-female-01".to_string(),
-            "ja-jp-female-01".to_string(),
-        ])
+        let registry = voirs_sdk::voice::VoiceRegistry::new();
+        let mut voices: Vec<String> = registry
+            .list_voices()
+            .into_iter()
+            .map(|voice| voice.id.clone())
+            .collect();
+        voices.sort();
+        Ok(voices)
     }
 
     /// Get list of available voices
@@ -143,31 +151,15 @@ impl SynthesisEngine {
                     Ok(audio_buffer.samples().to_vec())
                 }
                 Err(e) => {
-                    tracing::warn!("Synthesis failed, falling back to placeholder: {}", e);
-
-                    // Fallback to simple sine wave generation
-                    let sample_rate = 22050;
-                    let duration_ms = text.len() as f32 * 50.0; // Rough estimate
-                    let num_samples = (sample_rate as f32 * duration_ms / 1000.0) as usize;
-
-                    let frequency = 440.0; // A4 note
-                    let mut samples = Vec::with_capacity(num_samples);
-
-                    for i in 0..num_samples {
-                        let t = i as f32 / sample_rate as f32;
-                        let sample = (2.0 * std::f32::consts::PI * frequency * t).sin()
-                            * 0.1
-                            * self.current_volume;
-                        samples.push(sample);
-                    }
-
-                    // Simulate processing time for fallback
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        (text.len() as u64 * 10).min(500),
-                    ))
-                    .await;
-
-                    Ok(samples)
+                    // Propagate the real synthesis failure to the caller instead of
+                    // silently substituting fabricated audio (e.g. a sine-wave beep).
+                    // The REPL loop (see `shell.rs::run`) catches `Err` and prints it
+                    // to the user via `print_error`, so this is visible, not silent.
+                    tracing::warn!("Synthesis failed: {}", e);
+                    Err(VoirsCliError::SynthesisError(format!(
+                        "Failed to synthesize \"{}\": {}",
+                        text, e
+                    )))
                 }
             }
         } else {
@@ -252,5 +244,74 @@ impl SynthesisEngine {
     /// Check if synthesis engine is ready
     pub fn is_ready(&self) -> bool {
         self.pipeline.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthesize_never_reintroduces_the_sine_wave_fallback() {
+        // Regression test for the fabricated-audio finding: on a real
+        // synthesis failure, `synthesize()` must propagate a real `Err`,
+        // never silently substitute a 440Hz sine-wave beep as if it were
+        // the requested speech. Guard against the exact fabrication
+        // reappearing.
+        //
+        // Only the *production* code above `#[cfg(test)]` is scanned, so
+        // this self-inspecting check never trips over its own assertion
+        // strings (which would otherwise always "find" themselves).
+        let full_source = include_str!("synthesis.rs");
+        let production_code = full_source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("this file has a #[cfg(test)] section");
+
+        assert!(
+            !production_code.contains("440.0"),
+            "the fabricated 440Hz sine-wave fallback must not be reintroduced"
+        );
+        assert!(
+            !production_code
+                .to_lowercase()
+                .contains("fallback to simple sine"),
+            "the fabricated audio fallback must not be reintroduced"
+        );
+        // The only success return path for `synthesize()`'s body must be
+        // built from the real pipeline's own output -- never `Ok(samples)`
+        // constructed from anything else (e.g. a generated waveform).
+        assert_eq!(
+            production_code
+                .matches("Ok(audio_buffer.samples().to_vec())")
+                .count(),
+            1,
+            "synthesize() must have exactly one success path: the real pipeline's own output"
+        );
+    }
+
+    #[tokio::test]
+    async fn synthesize_without_a_selected_voice_returns_a_real_error() {
+        // The one failure path reachable without needing real model
+        // weights: no voice has been selected yet, so `pipeline` is
+        // `None`. This must return `Err`, never `Ok` with placeholder
+        // samples.
+        let engine = match SynthesisEngine::new().await {
+            Ok(engine) => engine,
+            Err(_) => {
+                // No default audio output device in this environment
+                // (e.g. headless CI) -- `AudioPlayer::new()` fails before
+                // synthesis logic is even reachable, so there is nothing
+                // further to exercise here.
+                return;
+            }
+        };
+        assert!(!engine.is_ready(), "no voice has been selected yet");
+
+        let result = engine.synthesize("hello").await;
+        assert!(
+            result.is_err(),
+            "synthesize() with no voice selected must return Err, not fabricated audio"
+        );
     }
 }

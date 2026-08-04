@@ -21,10 +21,15 @@ pub use bayesian::{
     BayesianABTestResult, BayesianAnalyzer, BayesianEstimation, BayesianModelComparison,
     PriorParameters, PriorType,
 };
+pub use causal_inference::{
+    covariate_balance, difference_in_differences, nearest_neighbor_matching, DidResult,
+    MatchingResult,
+};
 pub use correlation::{
     CorrelationAnalyzer, CorrelationMatrix, CorrelationMethod, CorrelationResult,
     PartialCorrelationResult,
 };
+pub use experimental_design::{minimum_detectable_effect, required_sample_size};
 pub use regression::*;
 pub use time_series::*;
 pub use types::*;

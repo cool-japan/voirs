@@ -46,7 +46,9 @@ pub fn autocorrelation(series: &[f64], max_lag: usize) -> Vec<f64> {
     (1..=max_lag)
         .filter(|&lag| lag < n)
         .map(|lag| {
-            let cov: f64 = (0..n - lag).map(|i| (series[i] - m) * (series[i + lag] - m)).sum();
+            let cov: f64 = (0..n - lag)
+                .map(|i| (series[i] - m) * (series[i + lag] - m))
+                .sum();
             cov / denom
         })
         .collect()
@@ -137,7 +139,11 @@ pub fn analyze_trend(series: &[f64]) -> EvaluationResult<TrendAnalysis> {
         numerator += dx * (y - y_mean);
         denominator += dx * dx;
     }
-    let slope = if denominator > 1e-12 { numerator / denominator } else { 0.0 };
+    let slope = if denominator > 1e-12 {
+        numerator / denominator
+    } else {
+        0.0
+    };
     let intercept = y_mean - slope * x_mean;
 
     let predicted: Vec<f64> = (0..n).map(|i| intercept + slope * i as f64).collect();
@@ -147,7 +153,11 @@ pub fn analyze_trend(series: &[f64]) -> EvaluationResult<TrendAnalysis> {
         .map(|(&y, &p)| (y - p).powi(2))
         .sum();
     let ss_tot: f64 = series.iter().map(|&y| (y - y_mean).powi(2)).sum();
-    let r_squared = if ss_tot > 1e-12 { (1.0 - ss_res / ss_tot).max(0.0) } else { 1.0 };
+    let r_squared = if ss_tot > 1e-12 {
+        (1.0 - ss_res / ss_tot).max(0.0)
+    } else {
+        1.0
+    };
 
     let series_std = super::utils::std_dev(series);
     let total_change = slope.abs() * (n_f - 1.0);

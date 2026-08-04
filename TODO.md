@@ -1,13 +1,80 @@
 # VoiRS Development Roadmap & TODO
 
-> **Status**: Current Version 0.1.0 - core TTS pipeline is real and tested, but see the
-> **Silent Fabrication Audit (2026-07-02)** below before calling anything beyond it "production ready" —
-> several advertised features (self-update, cloud storage, LMS/social integrations, the SDK's *default*
-> pipeline builder) were found to be non-functional facades.
-> **Last Updated**: 2026-07-02
+> **Status**: Current Version 0.1.0 - core TTS pipeline is real and tested. The **Silent Fabrication
+> Audit (2026-07-02)** below was remediated by the **Production-Grade Remediation Sprint (2026-08-03/04)**
+> — all three open audit items are closed (146 audited findings fixed, 500+ tests added, workspace
+> fmt/clippy(-D warnings, all features)/cargo-deny clean). Remaining honest limitations are listed in
+> the sprint section below.
+> **Last Updated**: 2026-08-04
 > **Next Milestone**: Version 0.2.0 - Advanced Neural Features & Production Optimization
 
-## ⚠️ Silent Fabrication Audit (2026-07-02) — dedicated remediation sprint needed
+## ✅ Production-Grade Remediation Sprint (2026-08-03/04)
+
+Full-workspace de-fabrication + production-hardening pass: a 12-agent parallel audit (all 16 crates)
+produced 146 triaged findings (P0:32 / P1:60 / P2:38 / P3:16); a 20-batch parallel implementation
+workflow (Sonnet-max / Opus agents, dependency-staged around voirs-sdk) fixed 146 findings and added
+505 tests; 7 follow-up agents closed every residual. Fix philosophy throughout: real local pure-Rust
+implementation first (real DSP via scirs2-fft, real syscalls, real HTTP via reqwest+rustls, real
+SigV4-signed S3, real candle/safetensors model paths); otherwise honest fail-closed typed errors —
+never fake success.
+
+**Headline fixes** (details in the per-item ✅ annotations under the audit section below):
+- voirs-sdk builder unification (the P0 dual-builder facade) + real model download/SHA-256 checksum.
+- voirs-cli: real S3 cloud storage (hand-rolled SigV4; Azure/GCP fail closed), real vocoder training
+  (real AdamW LR scheduling, global-norm grad clipping, checkpoint resume, config-file loading),
+  fail-closed acoustic/G2P training (upstream trainers have no real backward pass), de-fabricated
+  models/plugins/workflow/interactive/accuracy/performance/hardware/server/voices commands.
+- voirs-feedback: real DSP (MFCC/F0) + deterministic text features in deep-learning feedback, real
+  system metrics, real phoneme/coaching analysis, real significance stats (statrs), honest
+  social/LMS/GraphQL/k8s/notification paths.
+- voirs-ffi: real-pipeline synthesis C API (fake-audio path now requires explicit
+  `VOIRS_FFI_TEST_SYNTHESIS=dummy`), 13 memory-safety fixes, exported-symbol typo rename
+  (`voirs_synthesizeing*` → `voirs_synthesize_streaming*`, pre-release ABI break), docs rewritten
+  from the real 242-function export list.
+- voirs-sdk hang fix: all `Command::new` probe paths (GPU detect, memory, diagnostics) now
+  OnceLock-cached and/or hard-timeout-guarded (3 s) — `build()` can no longer hang on
+  `system_profiler`/`nvidia-smi`.
+- voirs-vocoder: `--no-default-features` build restored (candle made a hard dep like voirs-acoustic);
+  4 latent never-compiled bugs fixed.
+- Docs made honest: TRAINING.md rewritten from real clap surface (535→259 lines), root README,
+  CLAUDE.md version refs, PUBLISHING.md added, deny.toml modernized for current cargo-deny.
+
+**Known honest limitations (deliberate, documented — not fabrication):**
+- **No published model assets**: the default model repo (`huggingface.co/voirs/models`) answers
+  HTTP 401 to anonymous requests, so every real synthesis path needs either published assets or
+  credentials. CLI integration tests classify this as an explicit known-skip (narrow marker list;
+  any other failure still fails). Publishing real weights is a release task outside the codebase.
+- `voirs train acoustic|g2p` fail closed: voirs-acoustic VITS/FastSpeech2 trainers and voirs-g2p
+  LstmTrainer perform no real backward pass; implementing real training is 0.2.0-scale work.
+- voirs-recognizer Whisper refuses HF checkpoints up front: its layer naming matches neither the HF
+  nor OpenAI safetensors layout; a verified name-remap needs a real checkpoint (or delegate to
+  `candle_transformers::models::whisper`). Refusal beats silently-wrong weights.
+- voirs-ffi `python/audio_buffer.rs` `play()` family is still sleep+print (needs an
+  always-available audio-output dependency decision) and the numpy `clip` op ignores its args —
+  the two deferred items from the ffi-mem batch.
+- voirs-sdk `synthesize_stream` ignores caller-supplied `SynthesisConfig` (needs a
+  `synthesize_stream_with_config`); pre-existing, documented by the ffi-synthesis batch.
+- `voirs sing create-voice` default `--quality-threshold 0.8` rejects sustained tones (the SNR
+  heuristic scores steady content ~0 dB); lower the default or improve voirs-dataset's estimator.
+- `cargo bench -p voirs-ffi` now needs `VOIRS_FFI_TEST_SYNTHESIS=dummy` or real models (benches
+  previously rode the removed CI fake-audio path).
+- voirs-sdk `adapters/g2p.rs` Ja/JaJp language-code round-trip is normalized at the initializer;
+  cleaner fix is making the SDK aliases compare equal.
+
+**Final verification (2026-08-04, full workspace):**
+- `cargo fmt --all -- --check` → clean
+- `cargo clippy --all-targets --all-features -- -D warnings` → clean (exit 0)
+- `cargo nextest run --all-features --no-fail-fast` → **11133 tests run: 11133 passed, 0 failed, 27 skipped**
+  (test count grew 9748 → 11133 across the sprint; environment-dependent model-download CLI tests
+  pass via explicit known-skip paths — see `crates/voirs-cli/tests/common/mod.rs`)
+- `cargo deny check bans` → bans ok (deny.toml modernized for current cargo-deny schema)
+- Two all-features-only latent test issues found by the full run and fixed: voirs-sdk `http` tests
+  now explicitly opt into `.with_test_mode(true)` (the `http` feature is non-default, so per-crate
+  default runs never compiled them), and the voirs-cli FLAC fail-closed test is now a complementary
+  cfg-gated pair via a new `ffi-codecs` forwarding feature (workspace-level feature unification
+  activates voirs-dataset's `ffi-codecs`, falsifying the "encoder unavailable" premise).
+
+## ⚠️ Silent Fabrication Audit (2026-07-02) — remediated by the 2026-08-03/04 sprint above
 
 A `/ucont` due-diligence sweep (4 parallel read-only survey agents, one per crate not deeply covered by
 the prior 18-batch mock→real DSP sprint: `voirs-cli`, `voirs-ffi`, `voirs-sdk`, `voirs-feedback`) found
@@ -26,9 +93,10 @@ exception — see the checked item below.
 
 ### 🟠 SEVERE — advertised features are non-functional facades
 
-- [ ] **`voirs-sdk`: the default, publicly-exported `VoirsPipelineBuilder` always synthesizes a canned 440Hz sine tone**, regardless of voice/model/quality config. `lib.rs:292` re-exports `builder::VoirsPipelineBuilder`, whose `build()` path (`builder/async_init.rs`) discards resolved model paths and always instantiates `DummyG2p`/`DummyAcoustic`/`DummyVocoder`. A **second, differently-behaved type of the same name** — `pipeline::VoirsPipelineBuilder` (reachable only via `prelude`) — actually wires real components (`voirs_g2p::RuleBasedG2p`, Candle acoustic backend, `HiFiGanVocoder`) through `pipeline/init.rs`'s `PipelineInitializer`. Every doc example in `lib.rs` uses the fake one. Needs a design decision: collapse to one real implementation, or fix `async_init.rs`'s loaders to actually use resolved models. Even the "real" path has 2 more fabrications: `download_model()` writes literal text `"Dummy {name} model data"` instead of networking, and `verify_model_checksum()` never hashes anything.
+- [x] **`voirs-sdk`: the default, publicly-exported `VoirsPipelineBuilder` always synthesizes a canned 440Hz sine tone**, regardless of voice/model/quality config. `lib.rs:292` re-exports `builder::VoirsPipelineBuilder`, whose `build()` path (`builder/async_init.rs`) discards resolved model paths and always instantiates `DummyG2p`/`DummyAcoustic`/`DummyVocoder`. A **second, differently-behaved type of the same name** — `pipeline::VoirsPipelineBuilder` (reachable only via `prelude`) — actually wires real components (`voirs_g2p::RuleBasedG2p`, Candle acoustic backend, `HiFiGanVocoder`) through `pipeline/init.rs`'s `PipelineInitializer`. Every doc example in `lib.rs` uses the fake one. Needs a design decision: collapse to one real implementation, or fix `async_init.rs`'s loaders to actually use resolved models. Even the "real" path has 2 more fabrications: `download_model()` writes literal text `"Dummy {name} model data"` instead of networking, and `verify_model_checksum()` never hashes anything.
   - Priority: P0 | Scope: large (architectural — two builders sharing a name) | Files: `crates/voirs-sdk/src/lib.rs:292`, `builder/async_init.rs:283-651`, `pipeline/init.rs:309-347`
-- [ ] **`voirs-cli` self-updater / cloud / training / ONNX-tools / workflow / plugin commands report fabricated success with zero real work**:
+  - ✅ DONE 2026-08-03 (sdk-builder batch, Opus): builders unified into ONE real type — `builder::VoirsPipelineBuilder` now wires real components (RuleBasedG2p, Candle acoustic, HiFi-GAN) through `pipeline/init.rs`'s `PipelineInitializer`; `pipeline::VoirsPipelineBuilder` is a re-export of the same type (full fluent surface preserved incl. `with_gpu` for FFI). Dummy components are reachable ONLY via explicit `.with_test_mode(true)` / `ComponentOverrides` injection (`initialize_components_with`) — the implicit `test_mode: cfg!(test)` default was removed. `download_model()` does real HTTP (reqwest+rustls) and `verify_model_checksum()` real SHA-256 (sha2/hex now unconditional deps). voirs-ffi's 6 advanced/streaming/batch C API fns now build the real pipeline; the `env::var("CI")` fake-audio switch was replaced by the explicit `VOIRS_FFI_TEST_SYNTHESIS=dummy` opt-in. Follow-up agent fixed the `build()`-reachable hang class (OnceLock-cached, 3s-timeout-guarded device probes in `pipeline/state.rs`, `builder/validation.rs`, + every other `Command::new` site in the crate) with bounded-time regression tests. voirs-sdk 634/634 tests, clippy -D warnings clean.
+- [x] **`voirs-cli` self-updater / cloud / training / ONNX-tools / workflow / plugin commands report fabricated success with zero real work**:
   - `commands/train/{acoustic,vocoder}.rs` — never reads `--data`; feeds constant/empty tensors; on step failure silently swaps to a fake closed-form decaying-loss curve; prints "Real VITS/FastSpeech2 training completed!" and saves an untrained checkpoint.
   - `cloud/storage.rs` + `commands/cloud.rs:749` — AWS/Azure/GCP/S3 client creation, upload, download are `sleep()` + `Ok(())`; downloads return literal `"AWS content for {path}"`; hardcoded fake credentials (`"default_key"`). Reports "Successfully uploaded" with zero network I/O.
   - `commands/models/optimize.rs:841-1339` — "quantization"/"graph optimization" byte-samples and zero-pads the raw file (not the model structure) — **produces corrupted, unloadable model files** while printing fabricated `quality_preservation`/`nodes_removed`/`performance_gain` metrics.
@@ -42,7 +110,8 @@ exception — see the checked item below.
   - Confirmed clean/honest (spot-checked): `download.rs`, `convert_model.rs`, `checkpoint.rs`, `onnx_tools.rs`, `vocoder_inference.rs`, `kokoro/*`, `data_loader.rs`, `audio/effects.rs`, `audio/metadata.rs`, `telemetry/privacy.rs`, `dataset.rs`, `conversion.rs` (clearly labeled demo).
   - Priority: P1 (each item independently shippable) | Scope: large per-item (real cloud SDKs, real training loop, real ONNX quantization library, real workflow step handlers)
   - ✅ Partial 2026-07-08 (3 self-contained sub-items fixed; parent stays open for cloud/training/optimize/plugins/accuracy/etc.): `workflow/executor.rs` file-op/command/script/branch/loop handlers now do real work (thread `&mut ExecutionContext`, tokio process, temp-file scripts, `Condition::evaluate`, bounded loop) with per-handler tests; `ssml.rs::parse_pitch_value` Hz→semitone now logarithmic `12·log2(hz/200)` (was linear); `config.rs::migrate_config` now deserializes the whole config preserving every field + keeps the legacy `output_format` rename (also fixed a latent `CliConfig` duplicate-`[cli]` invalid-TOML serialization bug by un-flattening `core` into a `[core]` table). voirs-cli tests + clippy clean.
-- [ ] **`voirs-feedback`: dense cluster of fabricated features** (4-agent full-crate sweep, ~140 files):
+  - ✅ DONE 2026-08-03/04 (6 batches: cli-train / cli-cloud / cli-models / cli-cmds / cli-workflow-plugins / cli-dataset, + 1 follow-up agent): **cloud** — real S3-compatible client (hand-rolled pure-Rust SigV4 over reqwest+rustls: PUT/GET/HEAD/DELETE/ListObjectsV2/presigned URLs; AWS/MinIO/R2), Azure/GCP fail closed with typed errors; fake credentials/sleep+Ok deleted. **training** — `train vocoder diffwave|hifigan` is a real Candle AdamW loop reading real `--data`: LR scheduler/warmup genuinely calls `optimizer.set_learning_rate` (display reads back from the optimizer), real global-norm gradient clipping (both models; fake "Grad:" constant removed — real pre-clip L2 norm displayed), real `--resume` via `VarMap::load` (fail-closed on bad checkpoint; empirically verified loaded values are visible through pre-load tensor handles), real `--config` TOML/JSON loading with CLI-over-file precedence, real per-epoch loss tracking in summary/checkpoints, typed-error abort when >50%-of-batch steps fail; `train acoustic|g2p` fail closed (`CliError::NotImplemented`, exit code 19 — upstream trainers have no backward pass; real training is 0.2.0 work). **models/optimize** — no longer corrupts model files with byte-level fake "quantization". **plugins** — real dynamic loading (libloading, versioned C ABI) instead of unconditional MockPlugin. **workflow** — remaining synthesize/validate/notify/subworkflow steps real. **interactive** — no silent 440Hz-beep substitution on failure. **accuracy/performance/cross_lang_test/dashboard/capabilities/hardware/voices/monitoring/server** — de-fabricated (real measurement or honest typed errors). `CliError::exit_code()` un-deadened (Commands::Train propagates the real variant). TRAINING.md rewritten from the real clap surface. voirs-cli 881/881 tests (env-dependent model-download tests are explicit known-skips), clippy -D warnings clean.
+- [x] **`voirs-feedback`: dense cluster of fabricated features** (4-agent full-crate sweep, ~140 files):
   - `gamification/social.rs` — "peer comparison"/leaderboard/mentor-matching is invented: clones the querying user's own progress, perturbs it by a hash of the peer's UUID, presents it as a real peer; `calculate_mentor_compatibility` always 0.8. (Currently orphaned/no external callers.)
   - `deep_learning_feedback.rs` — entire `DeepLearningFeedbackSystem` is fake: `MockFeatureExtractor` fills MFCC/F0/embeddings with `random()` (audio never read); `TransformerFeedbackModel::load()` never reads the model file; non-Transformer paths route to a mock returning literal `0.8`. (Orphaned even if wired up.)
   - `realtime/performance.rs` — all 7 `get_*()` system-metric functions (CPU/memory/latency/throughput/error-rate/buffer/network) are zero-arg hardcoded constants shown to users.
@@ -59,6 +128,7 @@ exception — see the checked item below.
   - Confirmed genuinely real (do not re-flag): `quality_monitor.rs` SMTP+webhook alerting (real `lettre`/`reqwest`), `performance_monitoring.rs` (`/proc/*` parsing), `integration/zoom.rs` (honestly `cfg`-gated), `visualization/*` (honestly `cfg`-gated empty shims), `data_quality.rs`/`data_anonymization.rs`.
   - Priority: P1 | Scope: large (most items need a real backing service/ML model; some — GDPR delete gap, hardcoded metrics — are quick, honest, self-contained fixes)
   - ✅ Partial 2026-07-08 (GDPR delete gap fixed; parent stays open for the ML/service-backed items): `persistence/backends/memory.rs::delete_user_data` now erases feedback history too — added `AtomicFeedbackStorage::delete_user_feedback` (atomic begin/end guard, sequential lock ordering) and call it after releasing the storage lock; removed the "we'll leave it" skip comment. Regression test proves progress+preferences+sessions+feedback all gone post-erasure. voirs-feedback tests + clippy clean.
+  - ✅ DONE 2026-08-03/04 (3 batches: fb-realtime / fb-data / fb-services): **social** — peer comparison/mentor matching now consumes REAL caller-supplied peer/mentor progress (`&HashMap<Uuid, UserProgress>` params; honest omission of absent users; no more UUID-hash-perturbed self-clones). **deep_learning_feedback** — split into `deep_learning_feedback/{mod,dsp,models,text,types}.rs`: real MFCC/F0 DSP feature extraction from actual audio, deterministic text feature extraction/sentiment; mock `random()` extractors deleted. **realtime/performance** — the 7 `get_*()` metrics are real (sysinfo-class/OS-backed) not constants; **realtime/phoneme** — `detect_phonemes` reads its audio argument (real confidence/formants); **ai_coaching** — skill assessment reads the real `user_model`; **progress significance** — real Student-t p-values via statrs (no hardcoded `p=0.05`); **challenges** — streaks have real date checks. **platform/offline** — real offline detection + real cached-model bytes or honest errors; **notifications** — real delivery paths where implementable, honest typed errors elsewhere (fake random-failure injection removed). **cloud_deployment** — K8s deploy emits a real manifest + kubectl subprocess path or a typed error (no sleep-and-flip-flag). **LMS/GraphQL/google_classroom** — real HTTP submission paths or fail-closed (no hardcoded "John Doe"/"mock-assignment-id"). **secure_sharing/data_retention/data_management/voice_control/sync/web/load_balancer/sharding/tts_integration** — de-fabricated per the same standard. voirs-feedback 1066/1066 tests (gamification features on), clippy -D warnings (all features) clean.
 - [x] **`voirs-ffi` platform-detection layer: 9 confirmed hardcoded/fake values** — `platform/mod.rs:137-142` (Windows `get_total_memory()` always 8GB, never queries OS), `platform/mod.rs:187-211` (`supports_hardware_acceleration()` always `true` on macOS/Windows, no query), `{macos,windows,linux}.rs` `PerformanceMonitor::get_metrics()` (all 3 platforms hardcoded constants, comments admit "for now return placeholder" — Linux sibling code in the same file proves real `/proc` checks were feasible), `linux.rs:260-302` (`LinuxALSA::enumerate_cards()` fabricates a fake "HDA Intel PCH"+"USB Audio" pair instead of reading `/proc/asound/cards`, unconditional on any real Linux box), `linux.rs:315-349` (`LinuxALSA::test_device()` fixed fake capability lists, args unused), `macos.rs:61-161` (real cpal enumeration exists but is gated behind non-default `macos-platform` feature — default builds silently fall through to a hardcoded 2-device list), `macos.rs:197-217` (`get_system_volume()` always `0.8`), `macos.rs:325-354` (`get_system_language()`/`get_system_appearance()` always `"en-US"`/`"light"` despite doc comments naming real NSLocale/NSApp APIs). NUMA-topology code (`voirs-ffi/src/perf/{threading,memory}.rs`) was flagged as **unaudited, not cleared** — out of scope for this pass. `c_api/`/`python/`/`node/` FFI binding layers (pass-through-vs-dummy-data risk) were also not covered by this pass — only `platform/*.rs` got a full sweep.
   - Priority: P2 | Scope: medium (mostly real syscalls/API calls that were simply never wired up)
   - ✅ DONE 2026-07-08: all 8 sub-values de-fabricated across `platform/{mod,linux,macos,windows}.rs` + new `platform/parsers.rs` (pure-Rust default; Command/`/proc`/`windows` crate). Windows `get_total_memory` → real `GlobalMemoryStatusEx`; `supports_hardware_acceleration` → honest SIMD (avx2/sse2/neon); `get_metrics` real per-OS; ALSA `enumerate_cards`/`test_device` parse `/proc/asound` (full query behind `linux-platform`); macOS audio devices via `system_profiler`, volume via `osascript`, locale/appearance via `defaults read`. ~40 pure-parser unit tests; live-verified on macOS (volume/locale/total_memory). voirs-ffi 359/359 tests + clippy clean.

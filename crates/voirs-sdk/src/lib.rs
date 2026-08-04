@@ -297,6 +297,7 @@ pub mod performance;
 pub mod pipeline;
 pub mod plugins;
 pub mod prelude;
+mod process_probe;
 pub mod profiling;
 pub mod streaming;
 pub mod traits;

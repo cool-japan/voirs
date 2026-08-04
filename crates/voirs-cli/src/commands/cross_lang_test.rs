@@ -250,41 +250,73 @@ async fn check_binding_availability(
     Ok(status)
 }
 
-/// Check C API availability
-async fn check_c_api_availability() -> BindingStatus {
-    // Check if FFI library exists
-    let lib_paths = [
-        "target/debug/libvoirs_ffi.so",
-        "target/debug/libvoirs_ffi.dylib",
-        "target/debug/voirs_ffi.dll",
-        "../voirs-ffi/target/debug/libvoirs_ffi.so",
-        "../voirs-ffi/target/debug/libvoirs_ffi.dylib",
-        "../voirs-ffi/target/debug/voirs_ffi.dll",
-    ];
+/// Absolute path to the `voirs-ffi` crate directory, anchored to *this*
+/// build's source tree via the compile-time `CARGO_MANIFEST_DIR` rather than
+/// a guess relative to the current working directory. This tool is
+/// inherently a development-time diagnostic for a specific checkout (it
+/// compares bindings *this same workspace* built), so anchoring to the
+/// workspace layout the running binary was compiled from is the reliable
+/// choice; the caller still falls back to CWD-relative guesses afterward for
+/// the (rarer) case of a relocated build.
+fn voirs_ffi_crate_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../voirs-ffi")
+}
 
-    for path in &lib_paths {
-        if Path::new(path).exists() {
-            return BindingStatus {
-                available: true,
-                version: Some("latest".to_string()),
-                error: None,
-                build_info: Some(format!("Found at: {}", path)),
-            };
+/// Check C API availability by looking for the real compiled artifact.
+///
+/// `voirs-ffi`'s `[lib] name` is `voirs` (see `crates/voirs-ffi/Cargo.toml`),
+/// so the linked artifact is `libvoirs.{so,dylib}` / `voirs.dll` -- *not*
+/// `libvoirs_ffi.*`, which never existed under any build profile.
+async fn check_c_api_availability() -> BindingStatus {
+    let ffi_dir = voirs_ffi_crate_dir();
+    let candidate_dirs = [
+        ffi_dir.join("../../target/debug"),
+        ffi_dir.join("../../target/release"),
+        PathBuf::from("target/debug"),
+        PathBuf::from("target/release"),
+        PathBuf::from("../voirs-ffi/target/debug"),
+        PathBuf::from("../voirs-ffi/target/release"),
+    ];
+    let file_names = ["libvoirs.dylib", "libvoirs.so", "voirs.dll"];
+
+    for dir in &candidate_dirs {
+        for file_name in &file_names {
+            let path = dir.join(file_name);
+            if path.exists() {
+                return BindingStatus {
+                    available: true,
+                    version: Some("latest".to_string()),
+                    error: None,
+                    build_info: Some(format!("Found at: {}", path.display())),
+                };
+            }
         }
     }
 
     BindingStatus {
         available: false,
         version: None,
-        error: Some("FFI library not found. Run 'cargo build' in voirs-ffi directory.".to_string()),
+        error: Some(
+            "voirs-ffi cdylib not found (looked for libvoirs.{dylib,so}/voirs.dll under \
+             target/{debug,release}). Run 'cargo build -p voirs-ffi' first."
+                .to_string(),
+        ),
         build_info: None,
     }
 }
 
-/// Check Python bindings availability
+/// Check Python bindings availability.
+///
+/// The distributed package is named `voirs` (see
+/// `crates/voirs-ffi/pyproject.toml`'s `name`/`module-name`), not
+/// `voirs_ffi` -- `import voirs_ffi` can never succeed even when the
+/// bindings are correctly installed.
 async fn check_python_availability() -> BindingStatus {
     let output = Command::new("python3")
-        .args(["-c", "import voirs_ffi; print(voirs_ffi.__version__ if hasattr(voirs_ffi, '__version__') else 'unknown')"])
+        .args([
+            "-c",
+            "import voirs; print(getattr(voirs, '__version__', 'unknown'))",
+        ])
         .output();
 
     match output {
@@ -294,7 +326,7 @@ async fn check_python_availability() -> BindingStatus {
                 available: true,
                 version: Some(version),
                 error: None,
-                build_info: Some("Python bindings available".to_string()),
+                build_info: Some("Python 'voirs' package importable".to_string()),
             }
         }
         Ok(result) => {
@@ -302,7 +334,7 @@ async fn check_python_availability() -> BindingStatus {
             BindingStatus {
                 available: false,
                 version: None,
-                error: Some(format!("Import failed: {}", error)),
+                error: Some(format!("Import failed: {}", error.trim())),
                 build_info: None,
             }
         }
@@ -315,25 +347,35 @@ async fn check_python_availability() -> BindingStatus {
     }
 }
 
-/// Check Node.js bindings availability
+/// Check Node.js bindings availability by requiring the real crate directory
+/// (which Node resolves via `crates/voirs-ffi/package.json`'s `"main":
+/// "index.js"`) rather than a `./voirs-ffi` path relative to the current
+/// working directory, which only ever existed by coincidence.
 async fn check_nodejs_availability() -> BindingStatus {
-    let output = Command::new("node")
-        .args(["-e", "try { const voirs = require('./voirs-ffi'); console.log('available'); } catch(e) { console.error(e.message); process.exit(1); }"])
-        .output();
+    let module_path = voirs_ffi_crate_dir();
+    let module_path_str = module_path.to_string_lossy();
+    let script = format!(
+        "try {{ const voirs = require({}); \
+         console.log(typeof voirs.VoirsPipeline === 'function' ? 'available' : 'missing exports'); \
+         }} catch(e) {{ console.error(e.message); process.exit(1); }}",
+        json_string_literal(&module_path_str)
+    );
+
+    let output = Command::new("node").args(["-e", &script]).output();
 
     match output {
         Ok(result) if result.status.success() => BindingStatus {
             available: true,
             version: Some("latest".to_string()),
             error: None,
-            build_info: Some("Node.js bindings available".to_string()),
+            build_info: Some(format!("Node.js module loadable from {}", module_path_str)),
         },
         Ok(result) => {
             let error = String::from_utf8_lossy(&result.stderr);
             BindingStatus {
                 available: false,
                 version: None,
-                error: Some(format!("Node.js binding failed: {}", error)),
+                error: Some(format!("Node.js binding failed: {}", error.trim())),
                 build_info: None,
             }
         }
@@ -346,14 +388,18 @@ async fn check_nodejs_availability() -> BindingStatus {
     }
 }
 
-/// Check WebAssembly bindings availability
+/// Check WebAssembly bindings availability (file presence only -- actually
+/// invoking a WASM module requires a browser or a JS engine driving it,
+/// which this native CLI harness cannot provide; see `invoke_wasm_synthesis`
+/// for the honest skip this leads to during actual synthesis comparison).
 async fn check_wasm_availability() -> BindingStatus {
+    let ffi_dir = voirs_ffi_crate_dir();
     let wasm_files = [
-        "../voirs-ffi/pkg/voirs_ffi.js",
-        "../voirs-ffi/pkg/voirs_ffi_bg.wasm",
+        ffi_dir.join("pkg/voirs_ffi.js"),
+        ffi_dir.join("pkg/voirs_ffi_bg.wasm"),
     ];
 
-    let available = wasm_files.iter().all(|path| Path::new(path).exists());
+    let available = wasm_files.iter().all(|path| path.exists());
 
     if available {
         BindingStatus {
@@ -372,6 +418,16 @@ async fn check_wasm_availability() -> BindingStatus {
             build_info: None,
         }
     }
+}
+
+/// Encode `text` as a JSON string literal, which is also a valid Python and
+/// JavaScript string literal for the escape sequences either language
+/// actually uses (`\"`, `\\`, `\n`, `\t`, `\r`, `\u00XX`). Used to safely
+/// embed arbitrary CLI-provided `--text` into a generated `-c`/`-e` script
+/// without a hand-rolled (and injection-prone) escaping scheme.
+fn json_string_literal(text: &str) -> String {
+    // `serde_json::to_string` on a `&str` cannot fail.
+    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 /// Run synthesis consistency tests
@@ -393,9 +449,7 @@ async fn run_synthesis_consistency_tests(
         let test_name = format!("synthesis_consistency_{}", i + 1);
         let start_time = Instant::now();
 
-        // This would normally synthesize using each binding and compare results
-        // For now, we'll simulate the test
-        let test_result = simulate_synthesis_test(text, available_bindings).await;
+        let test_result = run_real_synthesis_test(text, available_bindings, global).await;
 
         let duration = start_time.elapsed();
 
@@ -411,10 +465,40 @@ async fn run_synthesis_consistency_tests(
     Ok(results)
 }
 
-/// Test synthesis consistency across language bindings
-async fn simulate_synthesis_test(
+/// Real result of actually invoking a language binding's synthesis API in a
+/// subprocess, or the concrete reason it could not be obtained.
+type BindingSynthesisOutcome = std::result::Result<RealInvocationResult, String>;
+
+/// Real, per-binding synthesis measurement.
+#[derive(Debug, Clone)]
+struct RealInvocationResult {
+    /// Real wall-clock time for the subprocess to run and report its result.
+    duration: Duration,
+    /// Real audio duration (seconds) as reported by the binding itself.
+    /// Chosen as the cross-binding comparison metric because it is
+    /// format-independent -- Python's `voirs` package returns f32 samples
+    /// while the Node.js N-API module returns i16 samples, so comparing raw
+    /// sample/byte counts directly would conflate encoding differences with
+    /// real inconsistencies.
+    duration_s: Option<f64>,
+    /// Real sample rate (Hz) as reported by the binding.
+    sample_rate: Option<u32>,
+    /// Real peak resident set size (MB) for the subprocess, measured via
+    /// `/usr/bin/time` when that tool exists on this platform. `None`
+    /// (never a fabricated constant) when it could not be measured.
+    #[allow(dead_code)] // surfaced through `run_memory_analysis`
+    peak_memory_mb: Option<f64>,
+}
+
+/// Actually synthesize `text` through every binding that can be driven from
+/// this native harness (`python`, `nodejs`), compare their real reported
+/// audio duration and sample rate, and report bindings that fundamentally
+/// cannot be invoked here (`c_api`, `wasm`) as skipped with a concrete
+/// reason instead of a fabricated pass or a silently-omitted comparison.
+async fn run_real_synthesis_test(
     text: &str,
     bindings: &[String],
+    global: &GlobalOptions,
 ) -> (
     TestStatus,
     Option<String>,
@@ -443,268 +527,295 @@ async fn simulate_synthesis_test(
         );
     }
 
-    // Test synthesis parameter consistency
-    let mut parameter_consistency = true;
-
-    // Check if all bindings support the same basic parameters
+    let mut outcomes: HashMap<String, BindingSynthesisOutcome> = HashMap::new();
     for binding in bindings {
-        match binding.as_str() {
-            "c_api" => {
-                // Test C API synthesis parameters
-                if !test_c_api_synthesis_parameters(text) {
-                    parameter_consistency = false;
-                }
-            }
-            "python" => {
-                // Test Python binding synthesis parameters
-                if !test_python_synthesis_parameters(text) {
-                    parameter_consistency = false;
-                }
-            }
-            "nodejs" => {
-                // Test Node.js binding synthesis parameters
-                if !test_nodejs_synthesis_parameters(text) {
-                    parameter_consistency = false;
-                }
-            }
-            "wasm" => {
-                // Test WebAssembly binding synthesis parameters
-                if !test_wasm_synthesis_parameters(text) {
-                    parameter_consistency = false;
-                }
-            }
-            _ => {
-                parameter_consistency = false;
+        let outcome: BindingSynthesisOutcome = invoke_binding_synthesis(binding, text).await;
+        if !global.quiet {
+            match &outcome {
+                Ok(result) => println!(
+                    "    {binding}: synthesized in {:.1}ms (audio duration={:.3}s, sample_rate={:?})",
+                    result.duration.as_secs_f64() * 1000.0,
+                    result.duration_s.unwrap_or(0.0),
+                    result.sample_rate
+                ),
+                Err(reason) => println!("    {binding}: skipped ({reason})"),
             }
         }
+        outcomes.insert(binding.clone(), outcome);
     }
 
-    // Test audio output consistency (mock implementation)
-    let audio_consistency = test_audio_output_consistency(text, bindings);
+    for (binding, outcome) in &outcomes {
+        details.insert(
+            format!("{binding}_result"),
+            match outcome {
+                Ok(r) => serde_json::json!({
+                    "ok": true,
+                    "duration_s": r.duration_s,
+                    "sample_rate": r.sample_rate,
+                    "wall_clock_ms": r.duration.as_secs_f64() * 1000.0,
+                }),
+                Err(reason) => serde_json::json!({ "ok": false, "reason": reason }),
+            },
+        );
+    }
 
-    // Test metadata consistency
-    let metadata_consistency = test_metadata_consistency(text, bindings);
-
-    details.insert(
-        "parameter_consistency".to_string(),
-        serde_json::Value::Bool(parameter_consistency),
-    );
-    details.insert(
-        "audio_consistency".to_string(),
-        serde_json::Value::Bool(audio_consistency),
-    );
-    details.insert(
-        "metadata_consistency".to_string(),
-        serde_json::Value::Bool(metadata_consistency),
-    );
-
-    let overall_consistency = parameter_consistency && audio_consistency && metadata_consistency;
-    let consistency_score = if overall_consistency {
-        0.98
-    } else {
-        let score = [
-            parameter_consistency,
-            audio_consistency,
-            metadata_consistency,
-        ]
+    let succeeded: Vec<(&String, &RealInvocationResult)> = outcomes
         .iter()
-        .map(|&x| if x { 1.0 } else { 0.0 })
-        .sum::<f64>()
-            / 3.0;
-        score * 0.9 // Reduce score for inconsistencies
+        .filter_map(|(name, outcome)| outcome.as_ref().ok().map(|r| (name, r)))
+        .collect();
+
+    if succeeded.len() < 2 {
+        let reasons: Vec<String> = outcomes
+            .iter()
+            .filter_map(|(name, outcome)| outcome.as_ref().err().map(|e| format!("{name}: {e}")))
+            .collect();
+        return (
+            TestStatus::Skipped,
+            Some(format!(
+                "Fewer than 2 bindings could be actually invoked for comparison ({} succeeded): {}",
+                succeeded.len(),
+                reasons.join("; ")
+            )),
+            details,
+        );
+    }
+
+    let durations: Vec<f64> = succeeded.iter().filter_map(|(_, r)| r.duration_s).collect();
+    let sample_rates: Vec<u32> = succeeded
+        .iter()
+        .filter_map(|(_, r)| r.sample_rate)
+        .collect();
+
+    let duration_consistent = match (
+        durations.iter().copied().reduce(f64::min),
+        durations.iter().copied().reduce(f64::max),
+    ) {
+        (Some(min), Some(max)) if min > 0.0 => (max - min) / min <= 0.15, // real values within 15%
+        _ => false,
     };
+    let sample_rate_consistent =
+        !sample_rates.is_empty() && sample_rates.windows(2).all(|w| w[0] == w[1]);
 
     details.insert(
-        "consistency_score".to_string(),
-        serde_json::Value::Number(
-            serde_json::Number::from_f64(consistency_score)
-                .unwrap_or_else(|| serde_json::Number::from(0)),
-        ),
+        "duration_consistent".to_string(),
+        serde_json::Value::Bool(duration_consistent),
+    );
+    details.insert(
+        "sample_rate_consistent".to_string(),
+        serde_json::Value::Bool(sample_rate_consistent),
     );
 
-    if overall_consistency {
+    let binding_names: Vec<&str> = succeeded.iter().map(|(n, _)| n.as_str()).collect();
+    if duration_consistent && sample_rate_consistent {
         (
             TestStatus::Passed,
-            Some("Synthesis outputs consistent between bindings".to_string()),
+            Some(format!(
+                "Real synthesis outputs consistent across {} binding(s): {}",
+                succeeded.len(),
+                binding_names.join(", ")
+            )),
             details,
         )
     } else {
         (
             TestStatus::Failed,
-            Some("Synthesis outputs inconsistent between bindings".to_string()),
+            Some(format!(
+                "Real synthesis outputs diverged between bindings {} (duration_consistent={duration_consistent}, sample_rate_consistent={sample_rate_consistent})",
+                binding_names.join(", ")
+            )),
             details,
         )
     }
 }
 
-/// Test C API synthesis parameters
-fn test_c_api_synthesis_parameters(text: &str) -> bool {
-    // Check if text length is supported by C API
-    if text.len() > 10000 {
-        return false;
-    }
-
-    // Check for unsupported characters
-    if text.contains('\0') {
-        return false;
-    }
-
-    true
+/// Why the C API binding cannot be exercised by this harness: doing so
+/// safely would require either hand-mirroring voirs-ffi's `#[repr(C)]`
+/// structs (undefined behavior the moment their real layout drifts from
+/// this copy) or generated bindings that do not exist here.
+fn invoke_c_api_synthesis_unavailable_reason() -> String {
+    "cannot safely invoke the C API from this harness without generated bindings or \
+     hand-mirrored (and UB-risking) #[repr(C)] structs; run voirs-ffi's own \
+     `cargo test -p voirs-ffi` for real C API coverage"
+        .to_string()
 }
 
-/// Test Python synthesis parameters
-fn test_python_synthesis_parameters(text: &str) -> bool {
-    // Check if text length is supported by Python bindings
-    if text.len() > 50000 {
-        return false;
-    }
-
-    // Python bindings support Unicode
-    true
+/// Why the WASM binding cannot be exercised by this harness: running a WASM
+/// module requires a browser or a JS engine driving it, neither of which
+/// this native CLI process provides.
+fn invoke_wasm_synthesis_unavailable_reason() -> String {
+    "cannot execute a WASM module without a browser or JS engine driving it; not available \
+     in this native CLI harness"
+        .to_string()
 }
 
-/// Test Node.js synthesis parameters
-fn test_nodejs_synthesis_parameters(text: &str) -> bool {
-    // Check if text length is supported by Node.js bindings
-    if text.len() > 25000 {
-        return false;
+/// Actually run `program` with `args`, wrapped in `/usr/bin/time` when that
+/// tool exists (for a real peak-memory measurement), and parse a trailing
+/// JSON line from its real stdout. `program` is expected to print exactly
+/// one JSON object with `duration_s`/`sample_rate` keys.
+async fn invoke_timed_subprocess(program: &str, args: &[String]) -> BindingSynthesisOutcome {
+    let has_time_tool = std::path::Path::new("/usr/bin/time").exists();
+    let time_flag = if cfg!(target_os = "macos") {
+        "-l"
+    } else {
+        "-v"
+    };
+
+    let start = Instant::now();
+    let output = if has_time_tool {
+        tokio::process::Command::new("/usr/bin/time")
+            .arg(time_flag)
+            .arg(program)
+            .args(args)
+            .output()
+            .await
+    } else {
+        tokio::process::Command::new(program)
+            .args(args)
+            .output()
+            .await
+    }
+    .map_err(|e| format!("failed to launch {program}: {e}"))?;
+    let duration = start.elapsed();
+
+    if !output.status.success() {
+        return Err(format!(
+            "{program} exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
 
-    // Node.js bindings support UTF-8
-    true
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json_line = stdout
+        .lines()
+        .rev()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("{program} produced no parseable JSON line on stdout: {stdout}"))?
+        .to_string();
+    let parsed: serde_json::Value = serde_json::from_str(&json_line)
+        .map_err(|e| format!("{program} produced invalid JSON ({e}): {json_line}"))?;
+
+    let peak_memory_mb = if has_time_tool {
+        parse_usr_bin_time_peak_rss_mb(&String::from_utf8_lossy(&output.stderr))
+    } else {
+        None
+    };
+
+    Ok(RealInvocationResult {
+        duration,
+        duration_s: parsed.get("duration_s").and_then(serde_json::Value::as_f64),
+        sample_rate: parsed
+            .get("sample_rate")
+            .and_then(serde_json::Value::as_u64)
+            .map(|v| v as u32),
+        peak_memory_mb,
+    })
 }
 
-/// Test WebAssembly synthesis parameters
-fn test_wasm_synthesis_parameters(text: &str) -> bool {
-    // Check if text length is supported by WASM bindings
-    if text.len() > 5000 {
-        return false;
-    }
-
-    // WASM has more restrictions on special characters
-    if text.contains(['\u{0000}', '\u{FFFF}']) {
-        return false;
-    }
-
-    true
-}
-
-/// Test audio output consistency between bindings
-fn test_audio_output_consistency(text: &str, bindings: &[String]) -> bool {
-    // Mock test for audio output consistency
-    // In a real implementation, this would synthesize audio and compare outputs
-
-    // Check if all bindings produce similar audio characteristics
-    let expected_duration = estimate_audio_duration(text);
-
-    for binding in bindings {
-        let estimated_duration = match binding.as_str() {
-            "c_api" => expected_duration,
-            "python" => expected_duration * 1.02, // Slight overhead
-            "nodejs" => expected_duration * 1.05, // More overhead
-            "wasm" => expected_duration * 1.1,    // Most overhead
-            _ => expected_duration * 2.0,         // Unknown binding
-        };
-
-        // Check if duration is within acceptable range (±15%)
-        if (estimated_duration - expected_duration).abs() / expected_duration > 0.15 {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Test metadata consistency between bindings
-fn test_metadata_consistency(text: &str, bindings: &[String]) -> bool {
-    // Mock test for metadata consistency
-    // In a real implementation, this would check metadata fields
-
-    let expected_metadata = generate_expected_metadata(text);
-
-    for binding in bindings {
-        let binding_metadata = match binding.as_str() {
-            "c_api" => expected_metadata.clone(),
-            "python" => expected_metadata.clone(),
-            "nodejs" => expected_metadata.clone(),
-            "wasm" => expected_metadata.clone(),
-            _ => return false,
-        };
-
-        // Check if metadata matches expected values
-        if binding_metadata != expected_metadata {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Estimate audio duration for text
-fn estimate_audio_duration(text: &str) -> f64 {
-    // Simple estimation: ~150 words per minute, ~5 characters per word
-    let words = text.len() as f64 / 5.0;
-    let duration_minutes = words / 150.0;
-    duration_minutes * 60.0 // Convert to seconds
-}
-
-/// Generate expected metadata for text
-fn generate_expected_metadata(text: &str) -> HashMap<String, String> {
-    let mut metadata = HashMap::new();
-    metadata.insert("text_length".to_string(), text.len().to_string());
-    metadata.insert(
-        "estimated_duration".to_string(),
-        estimate_audio_duration(text).to_string(),
+/// Actually synthesize `text` through the real Python `voirs` package
+/// (`voirs.synthesize_text`, see `crates/voirs-ffi/python/voirs/__init__.py`).
+async fn invoke_python_synthesis(text: &str) -> BindingSynthesisOutcome {
+    let script = format!(
+        "import json\n\
+         import voirs\n\
+         audio = voirs.synthesize_text({text})\n\
+         print(json.dumps({{\"duration_s\": audio.duration(), \"sample_rate\": audio.sample_rate(), \"sample_count\": audio.length()}}))\n",
+        text = json_string_literal(text),
     );
-    metadata.insert("language".to_string(), "en".to_string());
-    metadata.insert("voice_id".to_string(), "default".to_string());
-    metadata
+    invoke_timed_subprocess("python3", &["-c".to_string(), script]).await
 }
 
-/// Run error handling consistency tests
+/// Actually synthesize `text` through the real Node.js `voirs-ffi` N-API
+/// module (`VoirsPipeline.synthesize`, see `crates/voirs-ffi/index.d.ts`).
+async fn invoke_nodejs_synthesis(text: &str) -> BindingSynthesisOutcome {
+    let module_path = voirs_ffi_crate_dir();
+    let script = format!(
+        "const voirs = require({module_path});\n\
+         const pipeline = new voirs.VoirsPipeline();\n\
+         pipeline.synthesize({text}).then((audio) => {{\n\
+         \x20 console.log(JSON.stringify({{ duration_s: audio.duration, sample_rate: audio.sampleRate, sample_bytes: audio.samples ? audio.samples.length : null }}));\n\
+         }}).catch((e) => {{ console.error(e && e.message ? e.message : String(e)); process.exit(1); }});\n",
+        module_path = json_string_literal(&module_path.to_string_lossy()),
+        text = json_string_literal(text),
+    );
+    invoke_timed_subprocess("node", &["-e".to_string(), script]).await
+}
+
+/// Parse the real peak resident-set-size line out of `/usr/bin/time`
+/// output, handling both the BSD/macOS `-l` format
+/// (`"   1234567  maximum resident set size"`, bytes) and the GNU `-v`
+/// format (`"Maximum resident set size (kbytes): 12345"`, kilobytes).
+/// Returns `None` (never a fabricated constant) when neither line is
+/// present or parseable.
+fn parse_usr_bin_time_peak_rss_mb(stderr: &str) -> Option<f64> {
+    for line in stderr.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Maximum resident set size (kbytes):") {
+            return rest.trim().parse::<f64>().ok().map(|kb| kb / 1024.0);
+        }
+        if let Some(bytes_str) = trimmed.strip_suffix("maximum resident set size") {
+            return bytes_str
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .map(|b| b / (1024.0 * 1024.0));
+        }
+    }
+    None
+}
+
+/// One error-handling scenario to probe for cross-binding consistency. Each
+/// variant drives a real, deliberately-invalid invocation of the binding's
+/// own API -- never a hardcoded table of what a binding is assumed to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ErrorScenario {
+    /// Synthesize the empty string.
+    EmptyText,
+    /// Select a voice ID that does not exist, then synthesize.
+    InvalidVoiceId,
+    /// Pass a null/None value where the API expects a text string.
+    NullParameter,
+}
+
+impl ErrorScenario {
+    const ALL: [ErrorScenario; 3] = [
+        ErrorScenario::EmptyText,
+        ErrorScenario::InvalidVoiceId,
+        ErrorScenario::NullParameter,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            ErrorScenario::EmptyText => "empty_text",
+            ErrorScenario::InvalidVoiceId => "invalid_voice",
+            ErrorScenario::NullParameter => "null_parameter",
+        }
+    }
+}
+
+/// Run error handling consistency tests: for each scenario, actually invoke
+/// every binding that can be driven from this harness with real
+/// deliberately-invalid input and check whether they agree on whether it was
+/// accepted or rejected.
 async fn run_error_handling_tests(
     available_bindings: &[String],
     global: &GlobalOptions,
 ) -> Result<Vec<TestResult>> {
-    let error_cases = vec![
-        ("", "empty_text"),
-        ("Invalid voice ID test", "invalid_voice"),
-        ("Null parameter test", "null_parameter"),
-    ];
-
     let mut results = Vec::new();
 
-    for (text, case_name) in error_cases {
-        let test_name = format!("error_handling_{}", case_name);
+    for scenario in ErrorScenario::ALL {
+        let test_name = format!("error_handling_{}", scenario.name());
         let start_time = Instant::now();
 
-        // Simulate error handling test
-        let consistency = check_error_consistency(text, available_bindings).await;
+        let (status, message, details) =
+            check_error_consistency(scenario, available_bindings, global).await;
         let duration = start_time.elapsed();
-
-        let mut details = HashMap::new();
-        details.insert(
-            "test_case".to_string(),
-            serde_json::Value::String(case_name.to_string()),
-        );
-        details.insert(
-            "error_consistency".to_string(),
-            serde_json::Value::Bool(consistency),
-        );
 
         results.push(TestResult {
             test_name,
-            status: if consistency {
-                TestStatus::Passed
-            } else {
-                TestStatus::Failed
-            },
+            status,
             duration,
-            message: Some(if consistency {
-                "Error handling consistent across bindings".to_string()
-            } else {
-                "Error handling inconsistent between bindings".to_string()
-            }),
+            message: Some(message),
             details: Some(details),
         });
     }
@@ -712,172 +823,249 @@ async fn run_error_handling_tests(
     Ok(results)
 }
 
-/// Check error handling consistency across bindings
-async fn check_error_consistency(text: &str, bindings: &[String]) -> bool {
-    if bindings.len() < 2 {
-        return false;
+/// Given each *actually probed* binding's real Ok(accepted)/Err(rejected)
+/// outcome, decide whether the bindings agree. Pure decision logic, kept
+/// separate from the I/O above so it can be exercised directly in tests
+/// without spawning a subprocess: `None` when fewer than 2 bindings could be
+/// probed, otherwise `Some(true)` iff every probed binding rejected the
+/// input or every one accepted it.
+fn error_consistency_verdict(probed: &[(String, bool)]) -> Option<bool> {
+    if probed.len() < 2 {
+        return None;
     }
-
-    // Test different error scenarios across bindings
-    let mut all_consistent = true;
-
-    // Test empty text handling
-    if text.is_empty() {
-        all_consistent &= test_empty_text_error_consistency(bindings);
-    }
-
-    // Test invalid parameter handling
-    if text.contains("Invalid voice ID") {
-        all_consistent &= test_invalid_voice_error_consistency(bindings);
-    }
-
-    // Test null parameter handling
-    if text.contains("Null parameter") {
-        all_consistent &= test_null_parameter_error_consistency(bindings);
-    }
-
-    // Test oversized input handling
-    if text.len() > 100000 {
-        all_consistent &= test_oversized_input_error_consistency(bindings);
-    }
-
-    // Test special character handling
-    if text.contains(['\0', '\u{FFFF}']) {
-        all_consistent &= test_special_character_error_consistency(bindings);
-    }
-
-    all_consistent
+    let all_rejected = probed.iter().all(|(_, rejected)| *rejected);
+    let all_accepted = probed.iter().all(|(_, rejected)| !*rejected);
+    Some(all_rejected || all_accepted)
 }
 
-/// Test empty text error handling consistency
-fn test_empty_text_error_consistency(bindings: &[String]) -> bool {
-    // All bindings should handle empty text consistently
-    let expected_error_types = vec!["InvalidInput", "EmptyText"];
+/// Actually invoke `scenario` against every binding that can be driven from
+/// this harness (`python`, `nodejs`) and check whether they agree on whether
+/// the real (deliberately invalid) input was accepted or rejected. Bindings
+/// that cannot be invoked here (`c_api`, `wasm`) are reported per-binding but
+/// architecturally can never be probed for a specific scenario, so they do
+/// not count toward the consistency verdict.
+async fn check_error_consistency(
+    scenario: ErrorScenario,
+    bindings: &[String],
+    global: &GlobalOptions,
+) -> (TestStatus, String, HashMap<String, serde_json::Value>) {
+    let mut details = HashMap::new();
+    details.insert(
+        "scenario".to_string(),
+        serde_json::Value::String(scenario.name().to_string()),
+    );
 
+    let mut outcomes: HashMap<String, BindingSynthesisOutcome> = HashMap::new();
     for binding in bindings {
-        let error_type = match binding.as_str() {
-            "c_api" => "InvalidInput",
-            "python" => "InvalidInput",
-            "nodejs" => "InvalidInput",
-            "wasm" => "InvalidInput",
-            _ => "Unknown",
-        };
+        let outcome = probe_error_scenario(binding, scenario).await;
+        if !global.quiet {
+            match &outcome {
+                Ok(_) => println!("    {binding}: {} was accepted (no error)", scenario.name()),
+                Err(reason) => println!("    {binding}: {} -> {reason}", scenario.name()),
+            }
+        }
+        outcomes.insert(binding.clone(), outcome);
+    }
 
-        if !expected_error_types.contains(&error_type) {
-            return false;
+    for (binding, outcome) in &outcomes {
+        details.insert(
+            format!("{binding}_result"),
+            match outcome {
+                Ok(_) => serde_json::json!({ "rejected": false }),
+                Err(reason) => serde_json::json!({ "rejected": true, "reason": reason }),
+            },
+        );
+    }
+
+    // Only bindings that can actually be driven from this harness count
+    // toward the verdict -- c_api/wasm always report `Err` for an
+    // architectural reason unrelated to this scenario (see
+    // `invoke_c_api_synthesis_unavailable_reason`/`invoke_wasm_synthesis_unavailable_reason`),
+    // so folding them in would make every scenario look "inconsistent" for a
+    // reason that has nothing to do with real error handling.
+    let probed: Vec<(String, bool)> = outcomes
+        .iter()
+        .filter(|(name, _)| name.as_str() == "python" || name.as_str() == "nodejs")
+        .map(|(name, outcome)| (name.clone(), outcome.is_err()))
+        .collect();
+
+    match error_consistency_verdict(&probed) {
+        None => (
+            TestStatus::Skipped,
+            format!(
+                "Fewer than 2 probeable bindings (python/nodejs) available for '{}'",
+                scenario.name()
+            ),
+            details,
+        ),
+        Some(consistent) => {
+            details.insert(
+                "consistent".to_string(),
+                serde_json::Value::Bool(consistent),
+            );
+            let summary: Vec<String> = probed
+                .iter()
+                .map(|(name, rejected)| {
+                    format!("{name}={}", if *rejected { "rejected" } else { "accepted" })
+                })
+                .collect();
+            if consistent {
+                (
+                    TestStatus::Passed,
+                    format!(
+                        "Real invocation of '{}' agrees across bindings: {}",
+                        scenario.name(),
+                        summary.join(", ")
+                    ),
+                    details,
+                )
+            } else {
+                (
+                    TestStatus::Failed,
+                    format!(
+                        "Real invocation of '{}' diverges across bindings: {}",
+                        scenario.name(),
+                        summary.join(", ")
+                    ),
+                    details,
+                )
+            }
         }
     }
-
-    true
 }
 
-/// Test invalid voice ID error handling consistency
-fn test_invalid_voice_error_consistency(bindings: &[String]) -> bool {
-    // All bindings should handle invalid voice IDs consistently
-    let expected_error_types = vec!["VoiceNotFound", "InvalidVoiceId"];
-
-    for binding in bindings {
-        let error_type = match binding.as_str() {
-            "c_api" => "VoiceNotFound",
-            "python" => "VoiceNotFound",
-            "nodejs" => "VoiceNotFound",
-            "wasm" => "VoiceNotFound",
-            _ => "Unknown",
-        };
-
-        if !expected_error_types.contains(&error_type) {
-            return false;
-        }
+/// Dispatch a real, deliberately-invalid invocation of `scenario` to
+/// `binding`, or return the concrete reason it cannot be probed here.
+async fn probe_error_scenario(binding: &str, scenario: ErrorScenario) -> BindingSynthesisOutcome {
+    match (binding, scenario) {
+        ("python", ErrorScenario::EmptyText) => invoke_python_synthesis("").await,
+        ("nodejs", ErrorScenario::EmptyText) => invoke_nodejs_synthesis("").await,
+        ("python", ErrorScenario::InvalidVoiceId) => invoke_python_invalid_voice_probe().await,
+        ("nodejs", ErrorScenario::InvalidVoiceId) => invoke_nodejs_invalid_voice_probe().await,
+        ("python", ErrorScenario::NullParameter) => invoke_python_null_parameter_probe().await,
+        ("nodejs", ErrorScenario::NullParameter) => invoke_nodejs_null_parameter_probe().await,
+        ("c_api", _) => Err(invoke_c_api_synthesis_unavailable_reason()),
+        ("wasm", _) => Err(invoke_wasm_synthesis_unavailable_reason()),
+        (other, _) => Err(format!("unknown binding '{other}'")),
     }
-
-    true
 }
 
-/// Test null parameter error handling consistency
-fn test_null_parameter_error_consistency(bindings: &[String]) -> bool {
-    // All bindings should handle null parameters consistently
-    let expected_error_types = vec!["NullPointer", "InvalidInput"];
+/// A voice ID that will never legitimately exist, used to really exercise
+/// each binding's invalid-voice error path (rather than asserting a
+/// hardcoded expectation about what that path returns).
+const INVALID_VOICE_PROBE_ID: &str = "__voirs_cross_lang_test_invalid_voice_id__";
 
-    for binding in bindings {
-        let error_type = match binding.as_str() {
-            "c_api" => "NullPointer",
-            "python" => "InvalidInput", // Python doesn't have null pointers
-            "nodejs" => "InvalidInput", // Node.js converts nulls
-            "wasm" => "NullPointer",
-            _ => "Unknown",
-        };
+/// Actually select a nonexistent voice, then attempt to synthesize, through
+/// the real Python `voirs` package.
+async fn invoke_python_invalid_voice_probe() -> BindingSynthesisOutcome {
+    let script = format!(
+        "import json\n\
+         import voirs\n\
+         pipeline = voirs.VoirsPipeline()\n\
+         pipeline.set_voice({voice})\n\
+         audio = pipeline.synthesize('probe')\n\
+         print(json.dumps({{\"duration_s\": audio.duration(), \"sample_rate\": audio.sample_rate()}}))\n",
+        voice = json_string_literal(INVALID_VOICE_PROBE_ID),
+    );
+    invoke_timed_subprocess("python3", &["-c".to_string(), script]).await
+}
 
-        if !expected_error_types.contains(&error_type) {
-            return false;
-        }
+/// Actually select a nonexistent voice, then attempt to synthesize, through
+/// the real Node.js N-API module.
+async fn invoke_nodejs_invalid_voice_probe() -> BindingSynthesisOutcome {
+    let module_path = voirs_ffi_crate_dir();
+    let script = format!(
+        "try {{\n\
+         \x20 const voirs = require({module_path});\n\
+         \x20 const pipeline = new voirs.VoirsPipeline();\n\
+         \x20 pipeline.setVoice({voice}).then(() => pipeline.synthesize('probe')).then((audio) => {{\n\
+         \x20\x20 console.log(JSON.stringify({{ duration_s: audio.duration, sample_rate: audio.sampleRate }}));\n\
+         \x20 }}).catch((e) => {{ console.error(e && e.message ? e.message : String(e)); process.exit(1); }});\n\
+         }} catch (e) {{ console.error(e && e.message ? e.message : String(e)); process.exit(1); }}\n",
+        module_path = json_string_literal(&module_path.to_string_lossy()),
+        voice = json_string_literal(INVALID_VOICE_PROBE_ID),
+    );
+    invoke_timed_subprocess("node", &["-e".to_string(), script]).await
+}
+
+/// Actually pass `None` where the real Python API expects a `str`.
+async fn invoke_python_null_parameter_probe() -> BindingSynthesisOutcome {
+    let script = "import json\n\
+         import voirs\n\
+         pipeline = voirs.VoirsPipeline()\n\
+         audio = pipeline.synthesize(None)\n\
+         print(json.dumps({\"duration_s\": audio.duration(), \"sample_rate\": audio.sample_rate()}))\n"
+        .to_string();
+    invoke_timed_subprocess("python3", &["-c".to_string(), script]).await
+}
+
+/// Actually pass `null` where the real Node.js API expects a `string`.
+async fn invoke_nodejs_null_parameter_probe() -> BindingSynthesisOutcome {
+    let module_path = voirs_ffi_crate_dir();
+    let script = format!(
+        "try {{\n\
+         \x20 const voirs = require({module_path});\n\
+         \x20 const pipeline = new voirs.VoirsPipeline();\n\
+         \x20 pipeline.synthesize(null).then((audio) => {{\n\
+         \x20\x20 console.log(JSON.stringify({{ duration_s: audio.duration, sample_rate: audio.sampleRate }}));\n\
+         \x20 }}).catch((e) => {{ console.error(e && e.message ? e.message : String(e)); process.exit(1); }});\n\
+         }} catch (e) {{ console.error(e && e.message ? e.message : String(e)); process.exit(1); }}\n",
+        module_path = json_string_literal(&module_path.to_string_lossy()),
+    );
+    invoke_timed_subprocess("node", &["-e".to_string(), script]).await
+}
+
+/// Dispatch a real synthesis invocation to the binding named `binding`, or
+/// return the concrete reason it cannot be invoked from this harness.
+/// Shared by the synthesis-consistency, performance, and memory tests so
+/// they all exercise exactly the same real invocation path.
+async fn invoke_binding_synthesis(binding: &str, text: &str) -> BindingSynthesisOutcome {
+    match binding {
+        "python" => invoke_python_synthesis(text).await,
+        "nodejs" => invoke_nodejs_synthesis(text).await,
+        "c_api" => Err(invoke_c_api_synthesis_unavailable_reason()),
+        "wasm" => Err(invoke_wasm_synthesis_unavailable_reason()),
+        other => Err(format!("unknown binding '{other}'")),
     }
-
-    true
 }
 
-/// Test oversized input error handling consistency
-fn test_oversized_input_error_consistency(bindings: &[String]) -> bool {
-    // All bindings should handle oversized inputs consistently
-    let expected_error_types = vec!["InputTooLarge", "OutOfMemory"];
-
-    for binding in bindings {
-        let error_type = match binding.as_str() {
-            "c_api" => "InputTooLarge",
-            "python" => "InputTooLarge",
-            "nodejs" => "InputTooLarge",
-            "wasm" => "OutOfMemory", // WASM has stricter memory limits
-            _ => "Unknown",
-        };
-
-        if !expected_error_types.contains(&error_type) {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Test special character error handling consistency
-fn test_special_character_error_consistency(bindings: &[String]) -> bool {
-    // All bindings should handle special characters consistently
-    let expected_error_types = vec!["InvalidCharacter", "EncodingError"];
-
-    for binding in bindings {
-        let error_type = match binding.as_str() {
-            "c_api" => "InvalidCharacter",
-            "python" => "EncodingError", // Python handles Unicode differently
-            "nodejs" => "EncodingError", // Node.js handles UTF-8
-            "wasm" => "InvalidCharacter",
-            _ => "Unknown",
-        };
-
-        if !expected_error_types.contains(&error_type) {
-            return false;
-        }
-    }
-
-    true
-}
-
-/// Run performance comparison
+/// Run performance comparison using real invocations of every binding that
+/// can actually be driven from this harness (`python`, `nodejs`). Bindings
+/// that cannot be invoked here (`c_api`, `wasm`) are simply absent from the
+/// result maps rather than populated with an estimate.
 async fn run_performance_comparison(
     available_bindings: &[String],
     global: &GlobalOptions,
 ) -> Result<PerformanceComparison> {
+    let test_text = "This is a standard test sentence for performance measurement.";
     let mut synthesis_times = HashMap::new();
     let mut memory_usage = HashMap::new();
     let mut throughput = HashMap::new();
 
-    // Simulate performance measurements for each binding
     for binding in available_bindings {
-        // In real implementation, would measure actual performance
-        let (time, memory, throughput_val) = simulate_performance_test(binding).await;
-        synthesis_times.insert(binding.clone(), time);
-        memory_usage.insert(binding.clone(), memory);
-        throughput.insert(binding.clone(), throughput_val);
+        match invoke_binding_synthesis(binding, test_text).await {
+            Ok(result) => {
+                synthesis_times.insert(binding.clone(), result.duration);
+                if let Some(mb) = result.peak_memory_mb {
+                    memory_usage.insert(binding.clone(), mb);
+                }
+                let secs = result.duration.as_secs_f64();
+                if secs > 0.0 {
+                    throughput.insert(binding.clone(), 1.0 / secs);
+                }
+            }
+            Err(reason) => {
+                if !global.quiet {
+                    println!("    {binding}: performance comparison skipped ({reason})");
+                }
+            }
+        }
     }
 
-    // Find fastest and most efficient
+    // Fastest/most-efficient are computed only over bindings that were
+    // actually measured; `unwrap_or_default()` yields an empty string when
+    // nothing could be measured, which `display_results` shows as-is rather
+    // than a fabricated winner.
     let fastest_binding = synthesis_times
         .iter()
         .min_by_key(|(_, time)| *time)
@@ -899,77 +1087,62 @@ async fn run_performance_comparison(
     })
 }
 
-/// Simulate performance test with realistic characteristics
-async fn simulate_performance_test(binding: &str) -> (Duration, f64, f64) {
-    // Simulate performance test for standard text synthesis
-    let test_text = "This is a standard test sentence for performance measurement.";
-    let base_time = Duration::from_millis(100);
-    let base_memory = 50.0; // MB
-    let base_throughput = 16.0; // sentences per second
-
-    // Add realistic variation and binding-specific characteristics
-    let (time_multiplier, memory_multiplier, throughput_multiplier) = match binding {
-        "c_api" => {
-            // C API is fastest with lowest memory usage
-            (0.5, 0.8, 1.3)
-        }
-        "python" => {
-            // Python has overhead but good optimization
-            (1.2, 1.4, 0.9)
-        }
-        "nodejs" => {
-            // Node.js has moderate overhead
-            (0.9, 1.1, 1.1)
-        }
-        "wasm" => {
-            // WebAssembly has good performance but memory constraints
-            (0.7, 0.9, 0.8)
-        }
-        _ => {
-            // Unknown binding - conservative estimates
-            (1.5, 1.6, 0.7)
-        }
-    };
-
-    // Calculate performance metrics with some realistic variation
-    let synthesis_time =
-        Duration::from_millis((base_time.as_millis() as f64 * time_multiplier) as u64);
-
-    let memory_usage = base_memory * memory_multiplier;
-    let throughput = base_throughput * throughput_multiplier;
-
-    // Add small random variation to make it more realistic
-    let variation = match binding {
-        "c_api" => 0.95,  // Most consistent
-        "python" => 0.85, // Some variation due to GC
-        "nodejs" => 0.90, // Event loop variation
-        "wasm" => 0.88,   // Memory management variation
-        _ => 0.80,        // Unknown - more variation
-    };
-
-    let final_time = Duration::from_millis((synthesis_time.as_millis() as f64 * variation) as u64);
-    let final_memory = memory_usage * variation;
-    let final_throughput = throughput * variation;
-
-    (final_time, final_memory, final_throughput)
-}
-
-/// Run memory analysis
+/// Run memory analysis using real peak-RSS measurements (via
+/// `/usr/bin/time`) of actually invoking each binding that can be driven
+/// from this harness. Bindings whose memory could not be measured (no
+/// `/usr/bin/time` on this platform, or the binding cannot be invoked here
+/// at all) are simply absent from the result maps -- never populated with
+/// an estimate.
+///
+/// True memory-*leak* detection would require repeated calls into the same
+/// long-lived process, watching memory grow over time. This harness spawns
+/// a fresh subprocess per measurement, so `memory_leaks` instead reports a
+/// real delta between two independent invocations' peak RSS -- a real
+/// number, but not proof of a leak in a long-running process -- and is left
+/// without an entry (not a zero-filled one) for any binding where even that
+/// delta could not be measured.
 async fn run_memory_analysis(
     available_bindings: &[String],
     global: &GlobalOptions,
 ) -> Result<MemoryAnalysis> {
+    let test_text = "This is a standard test sentence for memory analysis.";
     let mut baseline_memory = HashMap::new();
     let mut peak_memory = HashMap::new();
     let mut memory_leaks = HashMap::new();
 
     for binding in available_bindings {
-        let (baseline, peak, leak) = simulate_memory_test(binding).await;
-        baseline_memory.insert(binding.clone(), baseline);
-        peak_memory.insert(binding.clone(), peak);
-        memory_leaks.insert(binding.clone(), leak);
+        let first = match invoke_binding_synthesis(binding, test_text).await {
+            Ok(result) => result,
+            Err(reason) => {
+                if !global.quiet {
+                    println!("    {binding}: memory analysis skipped ({reason})");
+                }
+                continue;
+            }
+        };
+        let Some(first_mb) = first.peak_memory_mb else {
+            if !global.quiet {
+                println!(
+                    "    {binding}: peak memory not measurable (no /usr/bin/time on this platform)"
+                );
+            }
+            continue;
+        };
+        baseline_memory.insert(binding.clone(), first_mb);
+        peak_memory.insert(binding.clone(), first_mb);
+
+        // A second real invocation gives a real (if crude, single-sample)
+        // delta between two independent fresh-process measurements.
+        if let Ok(second) = invoke_binding_synthesis(binding, test_text).await {
+            if let Some(second_mb) = second.peak_memory_mb {
+                peak_memory.insert(binding.clone(), first_mb.max(second_mb));
+                memory_leaks.insert(binding.clone(), (second_mb - first_mb).max(0.0));
+            }
+        }
     }
 
+    // Vacuously true when nothing was measured (empty map); `display_results`
+    // notes that explicitly rather than presenting an empty map as a pass.
     let leak_threshold_met = memory_leaks.values().all(|&leak| leak < 10.0); // 10MB threshold
 
     Ok(MemoryAnalysis {
@@ -978,79 +1151,6 @@ async fn run_memory_analysis(
         memory_leaks,
         leak_threshold_met,
     })
-}
-
-/// Simulate memory test with realistic memory patterns
-async fn simulate_memory_test(binding: &str) -> (f64, f64, f64) {
-    // Simulate memory usage patterns for different synthesis workloads
-    let base_baseline = 25.0; // MB baseline memory
-    let base_peak = 80.0; // MB peak memory during synthesis
-    let base_leak = 3.0; // MB potential leak per synthesis cycle
-
-    let (baseline_multiplier, peak_multiplier, leak_multiplier) = match binding {
-        "c_api" => {
-            // C API has lowest memory usage and best control
-            (0.8, 0.8, 0.5)
-        }
-        "python" => {
-            // Python has higher baseline due to interpreter overhead
-            (1.4, 1.2, 1.5) // GC can help but creates spikes
-        }
-        "nodejs" => {
-            // Node.js has moderate overhead with V8 optimizations
-            (1.2, 1.0, 1.0)
-        }
-        "wasm" => {
-            // WebAssembly has good memory control but linear memory model
-            (1.0, 0.9, 0.3) // Very low leaks due to controlled environment
-        }
-        _ => {
-            // Unknown binding - conservative high estimates
-            (1.6, 1.4, 2.0)
-        }
-    };
-
-    // Calculate realistic memory usage patterns
-    let baseline_memory = base_baseline * baseline_multiplier;
-    let peak_memory = base_peak * peak_multiplier;
-    let potential_leak = base_leak * leak_multiplier;
-
-    // Add binding-specific memory behavior
-    let (final_baseline, final_peak, final_leak) = match binding {
-        "c_api" => {
-            // C API: consistent, predictable
-            (baseline_memory, peak_memory, potential_leak)
-        }
-        "python" => {
-            // Python: GC spikes, higher baseline
-            (baseline_memory, peak_memory * 1.1, potential_leak * 0.8) // GC helps with leaks
-        }
-        "nodejs" => {
-            // Node.js: event loop memory patterns
-            (baseline_memory, peak_memory, potential_leak)
-        }
-        "wasm" => {
-            // WebAssembly: linear memory with good control
-            (baseline_memory, peak_memory, potential_leak)
-        }
-        _ => {
-            // Unknown: higher variability
-            (baseline_memory, peak_memory * 1.2, potential_leak * 1.5)
-        }
-    };
-
-    // Simulate memory leak reduction over time (garbage collection effects)
-    let leak_reduction_factor = match binding {
-        "c_api" => 1.0,  // Manual memory management
-        "python" => 0.6, // GC helps significantly
-        "nodejs" => 0.7, // V8 GC helps
-        "wasm" => 0.4,   // Linear memory model prevents most leaks
-        _ => 0.9,        // Unknown - assume minimal GC
-    };
-
-    let final_leak_adjusted = final_leak * leak_reduction_factor;
-
-    (final_baseline, final_peak, final_leak_adjusted)
 }
 
 /// Display test results
@@ -1094,28 +1194,40 @@ fn display_results(results: &CrossLangTestResults, duration: Duration, global: &
 
     // Display performance comparison
     if let Some(perf) = &results.performance_comparison {
-        println!("Performance Comparison:");
-        println!("  Fastest: {} 🏃", perf.fastest_binding);
-        println!("  Most Efficient: {} 💾", perf.most_efficient_binding);
-        for (binding, time) in &perf.synthesis_times {
-            println!("  {}: {:.2}ms", binding, time.as_millis());
+        println!("Performance Comparison (real per-binding invocation timing):");
+        if perf.synthesis_times.is_empty() {
+            println!(
+                "  (no binding could be actually invoked -- see per-binding skip reasons above)"
+            );
+        } else {
+            println!("  Fastest: {} 🏃", perf.fastest_binding);
+            println!("  Most Efficient: {} 💾", perf.most_efficient_binding);
+            for (binding, time) in &perf.synthesis_times {
+                println!("  {}: {:.2}ms", binding, time.as_millis());
+            }
         }
         println!();
     }
 
     // Display memory analysis
     if let Some(memory) = &results.memory_analysis {
-        println!("Memory Analysis:");
-        println!(
-            "  Leak Threshold Met: {}",
-            if memory.leak_threshold_met {
-                "✅"
-            } else {
-                "❌"
+        println!("Memory Analysis (real /usr/bin/time peak RSS, when available):");
+        if memory.memory_leaks.is_empty() {
+            println!(
+                "  (not measured in this environment -- no /usr/bin/time, or no invocable binding)"
+            );
+        } else {
+            println!(
+                "  Leak Threshold Met: {}",
+                if memory.leak_threshold_met {
+                    "✅"
+                } else {
+                    "❌"
+                }
+            );
+            for (binding, leak) in &memory.memory_leaks {
+                println!("  {} leak: {:.1}MB", binding, leak);
             }
-        );
-        for (binding, leak) in &memory.memory_leaks {
-            println!("  {} leak: {:.1}MB", binding, leak);
         }
         println!();
     }
@@ -1177,4 +1289,185 @@ fn save_test_report(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voirs_ffi_crate_dir_resolves_to_the_real_sibling_crate() {
+        // Regression test for the wrong-filename/wrong-path findings: this
+        // must anchor to the *real* voirs-ffi crate directory in this
+        // checkout, not merely construct a plausible-looking string.
+        let dir = voirs_ffi_crate_dir();
+        assert!(
+            dir.join("Cargo.toml").exists(),
+            "expected a real voirs-ffi/Cargo.toml at {}",
+            dir.display()
+        );
+        let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(
+            manifest.contains("name = \"voirs-ffi\""),
+            "resolved directory does not look like the voirs-ffi crate: {manifest}"
+        );
+    }
+
+    #[test]
+    fn json_string_literal_is_safe_for_python_and_js_embedding() {
+        // Regression test: text containing quotes/backslashes/newlines must
+        // round-trip safely when embedded in a generated -c/-e script,
+        // proving this isn't a naive/injectable string interpolation.
+        let text = "hello \"world\"\\ with a\nnewline and a 'tab'\ttab";
+        let literal = json_string_literal(text);
+
+        // Must be a valid JSON string literal that decodes back exactly.
+        let decoded: String = serde_json::from_str(&literal).expect("must be valid JSON string");
+        assert_eq!(decoded, text);
+
+        // Must not contain a raw, unescaped double quote in the middle
+        // (which would break out of the target script's string literal).
+        assert!(literal.starts_with('"') && literal.ends_with('"'));
+        let inner = &literal[1..literal.len() - 1];
+        assert!(!inner.contains("\\\"\\\""), "escaping should not double up");
+    }
+
+    #[test]
+    fn parse_usr_bin_time_peak_rss_mb_handles_gnu_format() {
+        let stderr = "\tElapsed (wall clock) time: 0:00.12\n\
+             \tMaximum resident set size (kbytes): 40960\n\
+             \tExit status: 0\n";
+        assert_eq!(parse_usr_bin_time_peak_rss_mb(stderr), Some(40.0));
+    }
+
+    #[test]
+    fn parse_usr_bin_time_peak_rss_mb_handles_bsd_format() {
+        let stderr = "        0.12 real         0.05 user         0.02 sys\n\
+             41943040  maximum resident set size\n\
+                     0  average shared memory size\n";
+        assert_eq!(parse_usr_bin_time_peak_rss_mb(stderr), Some(40.0));
+    }
+
+    #[test]
+    fn parse_usr_bin_time_peak_rss_mb_handles_missing_data() {
+        assert_eq!(
+            parse_usr_bin_time_peak_rss_mb("no useful output here"),
+            None
+        );
+        assert_eq!(parse_usr_bin_time_peak_rss_mb(""), None);
+    }
+
+    #[test]
+    fn parse_usr_bin_time_peak_rss_mb_varies_with_real_input() {
+        // Regression test for "never a fabricated constant": different
+        // real inputs must produce different real outputs.
+        let small = "Maximum resident set size (kbytes): 1024\n";
+        let large = "Maximum resident set size (kbytes): 102400\n";
+        let small_mb = parse_usr_bin_time_peak_rss_mb(small).unwrap();
+        let large_mb = parse_usr_bin_time_peak_rss_mb(large).unwrap();
+        assert!(large_mb > small_mb);
+        assert!((small_mb - 1.0).abs() < 0.001);
+        assert!((large_mb - 100.0).abs() < 0.001);
+    }
+
+    #[tokio::test]
+    async fn invoke_c_api_and_wasm_synthesis_always_fail_closed() {
+        // Regression test: these bindings must never report a fabricated
+        // "Ok" synthesis result -- they are architecturally unable to be
+        // invoked from this native harness, and must say so.
+        let c_api = invoke_binding_synthesis("c_api", "hello").await;
+        assert!(c_api.is_err());
+        assert!(c_api.unwrap_err().to_lowercase().contains("c api"));
+
+        let wasm = invoke_binding_synthesis("wasm", "hello").await;
+        assert!(wasm.is_err());
+        assert!(wasm.unwrap_err().to_lowercase().contains("wasm"));
+
+        let unknown = invoke_binding_synthesis("some_future_binding", "hello").await;
+        assert!(unknown.is_err());
+    }
+
+    #[test]
+    fn check_c_api_availability_paths_use_the_real_lib_name() {
+        // Regression test for the `libvoirs_ffi.so` bug: `voirs-ffi`'s
+        // `[lib] name` is `voirs` (see its Cargo.toml), so the real linked
+        // artifact is `libvoirs.{dylib,so}` / `voirs.dll`. Assert the crate
+        // manifest actually says so, keeping this test honest about *why*
+        // the detector's filenames are correct rather than asserting a
+        // hardcoded expectation independent of the real crate.
+        let ffi_manifest = std::fs::read_to_string(voirs_ffi_crate_dir().join("Cargo.toml"))
+            .expect("voirs-ffi/Cargo.toml should exist in this checkout");
+        assert!(
+            ffi_manifest.contains("name = \"voirs\""),
+            "voirs-ffi's [lib] name changed; check_c_api_availability's file_names must be updated to match: {ffi_manifest}"
+        );
+    }
+
+    // -- Regression tests for the fabricated `check_error_consistency`
+    // finding: it used to grade every binding against a hand-written table
+    // of "expected" error type strings (e.g. `"c_api" => "VoiceNotFound"`)
+    // without ever invoking anything, so it could never detect a real
+    // divergence. `error_consistency_verdict` is the actual decision logic
+    // that replaced it; it is deliberately pure (no subprocess I/O) so it
+    // can be exercised directly here.
+
+    #[test]
+    fn error_consistency_verdict_requires_at_least_two_probed_bindings() {
+        assert_eq!(error_consistency_verdict(&[]), None);
+        assert_eq!(
+            error_consistency_verdict(&[("python".to_string(), true)]),
+            None
+        );
+    }
+
+    #[test]
+    fn error_consistency_verdict_true_when_all_reject() {
+        let probed = vec![("python".to_string(), true), ("nodejs".to_string(), true)];
+        assert_eq!(error_consistency_verdict(&probed), Some(true));
+    }
+
+    #[test]
+    fn error_consistency_verdict_true_when_all_accept() {
+        let probed = vec![("python".to_string(), false), ("nodejs".to_string(), false)];
+        assert_eq!(error_consistency_verdict(&probed), Some(true));
+    }
+
+    #[test]
+    fn error_consistency_verdict_false_when_bindings_disagree() {
+        // This is the exact case the old hardcoded table could never
+        // report: one real binding rejects an invalid input while another
+        // real binding silently accepts it.
+        let probed = vec![("python".to_string(), true), ("nodejs".to_string(), false)];
+        assert_eq!(error_consistency_verdict(&probed), Some(false));
+    }
+
+    #[tokio::test]
+    async fn probe_error_scenario_c_api_and_wasm_always_fail_closed_for_every_scenario() {
+        // Regression test: c_api/wasm must never report a fabricated "Ok"
+        // for any error scenario -- they are architecturally unprobeable
+        // from this harness for every scenario, not just synthesis.
+        for scenario in ErrorScenario::ALL {
+            for binding in ["c_api", "wasm"] {
+                let outcome = probe_error_scenario(binding, scenario).await;
+                assert!(
+                    outcome.is_err(),
+                    "{binding} must fail closed for scenario {:?}",
+                    scenario
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn error_scenario_names_are_distinct_and_stable() {
+        // `ErrorScenario::name()` feeds directly into `TestResult::test_name`
+        // (as `error_handling_<name>`), which report consumers may match on;
+        // guard against accidental collisions/renames.
+        let names: Vec<&str> = ErrorScenario::ALL.iter().map(|s| s.name()).collect();
+        assert_eq!(names, ["empty_text", "invalid_voice", "null_parameter"]);
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "scenario names must be unique");
+    }
 }

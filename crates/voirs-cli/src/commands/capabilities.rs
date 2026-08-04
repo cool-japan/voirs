@@ -6,6 +6,7 @@
 use crate::error::CliError;
 use crate::output::OutputFormatter;
 use clap::Subcommand;
+use cpal::traits::HostTrait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use voirs_sdk::config::AppConfig;
@@ -425,25 +426,52 @@ async fn get_system_info() -> Result<SystemInfo, CliError> {
     })
 }
 
-/// Get available memory in MB
+/// Get available (currently free, not total) memory in MB via the real
+/// platform detectors in `crate::platform::hardware` (`/proc/meminfo` on
+/// Linux, `sysctl`/`host_statistics64` on macOS, WMI on Windows).
 fn get_available_memory() -> Option<u64> {
-    // This is a simplified implementation
-    // In a real implementation, you'd use system APIs
-    None
+    let memory_info = crate::platform::hardware::get_memory_info();
+    if memory_info.total == 0 {
+        // The underlying platform query itself failed/returned nothing --
+        // report that honestly rather than a fabricated zero-as-if-measured.
+        None
+    } else {
+        Some(memory_info.available / (1024 * 1024))
+    }
 }
 
-/// Check GPU availability
+/// Check GPU availability using the real per-platform detectors in
+/// `crate::platform::hardware` (`system_profiler`/Metal on macOS,
+/// `lspci`/`nvidia-smi` on Linux, WMI on Windows) instead of a hardcoded
+/// `false`.
 fn check_gpu_availability() -> bool {
-    // This is a simplified implementation
-    // In a real implementation, you'd check for CUDA, OpenCL, etc.
-    false
+    crate::platform::hardware::get_gpu_info()
+        .iter()
+        .any(|gpu| gpu.cuda_support || gpu.opencl_support || gpu.vulkan_support)
 }
 
-/// Get GPU information
+/// Get real GPU information strings from `crate::platform::hardware`,
+/// filtering out its "nothing detected" sentinel entry (unknown vendor with
+/// no acceleration support at all) so this only reports GPUs that were
+/// genuinely identified.
 fn get_gpu_info() -> Vec<String> {
-    // This is a simplified implementation
-    // In a real implementation, you'd query GPU drivers
-    vec![]
+    crate::platform::hardware::get_gpu_info()
+        .into_iter()
+        .filter(|gpu| {
+            gpu.vendor != "Unknown" || gpu.cuda_support || gpu.opencl_support || gpu.vulkan_support
+        })
+        .map(|gpu| {
+            format!(
+                "{} ({}) - CUDA: {}, OpenCL: {}, Vulkan: {}, VRAM: {} MB",
+                gpu.name,
+                gpu.vendor,
+                gpu.cuda_support,
+                gpu.opencl_support,
+                gpu.vulkan_support,
+                gpu.vram / (1024 * 1024)
+            )
+        })
+        .collect()
 }
 
 /// Analyze configuration status
@@ -764,7 +792,13 @@ fn output_feature_config(
     Ok(())
 }
 
-/// Test feature functionality
+/// Test feature functionality.
+///
+/// Each branch performs a real, minimal smoke test of that feature's actual
+/// public entry point (constructing its real engine/processor type, or for
+/// "synthesis", actually building a pipeline and synthesizing audio) instead
+/// of printing a canned checklist. Features not compiled into this build
+/// honestly report that rather than a fabricated checkmark.
 async fn test_feature_functionality(
     feature: &str,
     verbose: bool,
@@ -772,39 +806,13 @@ async fn test_feature_functionality(
 ) -> Result<(), CliError> {
     output_formatter.info(&format!("Testing feature '{}'...", feature));
 
-    // This would perform actual functional tests
-    // For now, we'll just simulate the testing
-    match feature {
-        "synthesis" => {
-            output_formatter.info("  ✓ Basic synthesis functionality available");
-            output_formatter.info("  ✓ Audio output devices accessible");
-            output_formatter.info("  ✓ Voice models loadable");
-        }
-        "emotion" => {
-            output_formatter.info("  ✓ Emotion model loading");
-            output_formatter.info("  ✓ Emotion parameter validation");
-            output_formatter.info("  ✓ Emotion synthesis pipeline");
-        }
-        "cloning" => {
-            output_formatter.info("  ✓ Voice cloning model loading");
-            output_formatter.info("  ✓ Speaker embedding extraction");
-            output_formatter.info("  ✓ Voice adaptation pipeline");
-        }
-        "conversion" => {
-            output_formatter.info("  ✓ Voice conversion model loading");
-            output_formatter.info("  ✓ Voice transformation pipeline");
-            output_formatter.info("  ✓ Real-time conversion capability");
-        }
-        "singing" => {
-            output_formatter.info("  ✓ Singing model loading");
-            output_formatter.info("  ✓ Music score processing");
-            output_formatter.info("  ✓ Singing synthesis pipeline");
-        }
-        "spatial" => {
-            output_formatter.info("  ✓ Spatial audio model loading");
-            output_formatter.info("  ✓ HRTF processing");
-            output_formatter.info("  ✓ 3D audio rendering");
-        }
+    let passed = match feature {
+        "synthesis" => test_synthesis_feature(verbose, output_formatter).await,
+        "emotion" => test_emotion_feature(verbose, output_formatter),
+        "cloning" => test_cloning_feature(verbose, output_formatter),
+        "conversion" => test_conversion_feature(verbose, output_formatter),
+        "singing" => test_singing_feature(verbose, output_formatter).await,
+        "spatial" => test_spatial_feature(verbose, output_formatter).await,
         _ => {
             output_formatter.error(&format!("Unknown feature: {}", feature));
             return Err(CliError::InvalidArgument(format!(
@@ -812,8 +820,295 @@ async fn test_feature_functionality(
                 feature
             )));
         }
+    };
+
+    if passed {
+        output_formatter.info("✓ All tests passed");
+        Ok(())
+    } else {
+        output_formatter.error("✗ Some tests failed");
+        Err(CliError::ValidationError(format!(
+            "Feature '{feature}' failed functional testing"
+        )))
+    }
+}
+
+/// Real synthesis smoke test: build an actual `VoirsPipeline` and synthesize
+/// real text through it, checking the returned audio is not silence. Bounded
+/// by a timeout so a missing network connection (needed to fetch a default
+/// voice's model weights) fails fast and honestly instead of hanging.
+async fn test_synthesis_feature(verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    let has_output_device = cpal::default_host().default_output_device().is_some();
+    if has_output_device {
+        output_formatter.info("  ✓ Audio output device detected");
+    } else if verbose {
+        output_formatter
+            .info("  (no audio output device detected -- synthesis itself does not require one)");
     }
 
-    output_formatter.info("✓ All tests passed");
-    Ok(())
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        voirs_sdk::VoirsPipeline::builder().build(),
+    )
+    .await
+    {
+        Ok(Ok(pipeline)) => {
+            output_formatter.info("  ✓ Synthesis pipeline built");
+            match pipeline.synthesize("Capability test.").await {
+                Ok(audio) => {
+                    let has_signal = audio.samples().iter().any(|&s| s.abs() > 1e-6);
+                    if has_signal {
+                        output_formatter.info(&format!(
+                            "  ✓ Synthesis produced {} non-silent samples at {} Hz",
+                            audio.samples().len(),
+                            audio.sample_rate()
+                        ));
+                        true
+                    } else {
+                        output_formatter.error("  ✗ Synthesis produced only silence");
+                        false
+                    }
+                }
+                Err(e) => {
+                    output_formatter.error(&format!("  ✗ Synthesis failed: {e}"));
+                    false
+                }
+            }
+        }
+        Ok(Err(e)) => {
+            output_formatter.error(&format!("  ✗ Could not build a synthesis pipeline: {e}"));
+            if verbose {
+                output_formatter
+                    .info("    (this usually means no default voice/model is available offline)");
+            }
+            false
+        }
+        Err(_) => {
+            output_formatter.error(
+                "  ✗ Building the synthesis pipeline timed out after 15s \
+                 (likely blocked on a model download)",
+            );
+            false
+        }
+    }
+}
+
+/// Real emotion-processor construction smoke test.
+#[cfg(feature = "emotion")]
+fn test_emotion_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    match std::panic::catch_unwind(voirs_emotion::EmotionProcessor::new) {
+        Ok(Ok(_processor)) => {
+            output_formatter.info("  ✓ Emotion processor constructed with default configuration");
+            true
+        }
+        Ok(Err(e)) => {
+            output_formatter.error(&format!("  ✗ Emotion processor construction failed: {e}"));
+            false
+        }
+        Err(_) => {
+            output_formatter.error("  ✗ Emotion processor construction panicked");
+            false
+        }
+    }
+}
+#[cfg(not(feature = "emotion"))]
+fn test_emotion_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    output_formatter
+        .error("  ✗ Feature not compiled into this build (rebuild with --features emotion)");
+    false
+}
+
+/// Real voice-cloner construction smoke test.
+#[cfg(feature = "cloning")]
+fn test_cloning_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    match std::panic::catch_unwind(voirs_cloning::VoiceCloner::new) {
+        Ok(Ok(_cloner)) => {
+            output_formatter.info("  ✓ Voice cloner constructed with default configuration");
+            true
+        }
+        Ok(Err(e)) => {
+            output_formatter.error(&format!("  ✗ Voice cloner construction failed: {e}"));
+            false
+        }
+        Err(_) => {
+            output_formatter.error("  ✗ Voice cloner construction panicked");
+            false
+        }
+    }
+}
+#[cfg(not(feature = "cloning"))]
+fn test_cloning_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    output_formatter
+        .error("  ✗ Feature not compiled into this build (rebuild with --features cloning)");
+    false
+}
+
+/// Real voice-converter construction smoke test.
+#[cfg(feature = "conversion")]
+fn test_conversion_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    match std::panic::catch_unwind(voirs_conversion::VoiceConverter::new) {
+        Ok(Ok(_converter)) => {
+            output_formatter.info("  ✓ Voice converter constructed with default configuration");
+            true
+        }
+        Ok(Err(e)) => {
+            output_formatter.error(&format!("  ✗ Voice converter construction failed: {e}"));
+            false
+        }
+        Err(_) => {
+            output_formatter.error("  ✗ Voice converter construction panicked");
+            false
+        }
+    }
+}
+#[cfg(not(feature = "conversion"))]
+fn test_conversion_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    output_formatter
+        .error("  ✗ Feature not compiled into this build (rebuild with --features conversion)");
+    false
+}
+
+/// Real singing-engine construction smoke test. Runs on a spawned task so a
+/// panic inside the dependency is caught as a `JoinError` instead of
+/// crashing this process.
+#[cfg(feature = "singing")]
+async fn test_singing_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    let result = tokio::spawn(async {
+        voirs_singing::SingingEngine::new(voirs_singing::SingingConfig::default()).await
+    })
+    .await;
+    match result {
+        Ok(Ok(_engine)) => {
+            output_formatter.info("  ✓ Singing engine constructed with default configuration");
+            true
+        }
+        Ok(Err(e)) => {
+            output_formatter.error(&format!("  ✗ Singing engine construction failed: {e}"));
+            false
+        }
+        Err(join_err) => {
+            output_formatter.error(&format!(
+                "  ✗ Singing engine construction {}",
+                if join_err.is_panic() {
+                    "panicked"
+                } else {
+                    "was cancelled"
+                }
+            ));
+            false
+        }
+    }
+}
+#[cfg(not(feature = "singing"))]
+async fn test_singing_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    output_formatter
+        .error("  ✗ Feature not compiled into this build (rebuild with --features singing)");
+    false
+}
+
+/// Real spatial-processor construction smoke test (loads the built-in
+/// default HRTF database). Runs on a spawned task so a panic inside the
+/// dependency is caught as a `JoinError` instead of crashing this process.
+#[cfg(feature = "spatial")]
+async fn test_spatial_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    let result = tokio::spawn(async {
+        voirs_spatial::SpatialProcessor::new(voirs_spatial::SpatialConfig::default()).await
+    })
+    .await;
+    match result {
+        Ok(Ok(_processor)) => {
+            output_formatter.info("  ✓ Spatial processor constructed with default configuration");
+            true
+        }
+        Ok(Err(e)) => {
+            output_formatter.error(&format!("  ✗ Spatial processor construction failed: {e}"));
+            false
+        }
+        Err(join_err) => {
+            output_formatter.error(&format!(
+                "  ✗ Spatial processor construction {}",
+                if join_err.is_panic() {
+                    "panicked"
+                } else {
+                    "was cancelled"
+                }
+            ));
+            false
+        }
+    }
+}
+#[cfg(not(feature = "spatial"))]
+async fn test_spatial_feature(_verbose: bool, output_formatter: &OutputFormatter) -> bool {
+    output_formatter
+        .error("  ✗ Feature not compiled into this build (rebuild with --features spatial)");
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_available_memory_is_no_longer_hardcoded_none() {
+        // Regression test for the always-`None` finding: on a machine
+        // where `crate::platform::hardware::get_memory_info` can obtain a
+        // real total (which every macOS/Linux/Windows dev/CI box can),
+        // this must report a real, positive, magnitude -- not the old
+        // hardcoded `None`.
+        let memory_mb = get_available_memory();
+        assert!(
+            memory_mb.is_some(),
+            "a real memory query should succeed on this platform"
+        );
+        assert!(
+            memory_mb.unwrap() > 0,
+            "available memory should be a positive real measurement"
+        );
+    }
+
+    #[test]
+    fn check_gpu_availability_and_get_gpu_info_are_consistent_and_real() {
+        // Regression test for the hardcoded `false`/`vec![]` finding: both
+        // must be derived from the same real detector
+        // (`crate::platform::hardware::get_gpu_info`), not independent
+        // hardcoded stubs.
+        let available = check_gpu_availability();
+        let info = get_gpu_info();
+        if available {
+            assert!(
+                !info.is_empty(),
+                "if GPU acceleration was detected, get_gpu_info() must list at least one entry"
+            );
+        }
+        // Every string is built from a real `GpuInfo` struct (proven by
+        // containing the VRAM field this code always appends), not typed
+        // by hand.
+        for entry in &info {
+            assert!(
+                entry.contains("VRAM:"),
+                "unexpected gpu_info entry shape: {entry}"
+            );
+        }
+    }
+
+    #[cfg(feature = "emotion")]
+    #[test]
+    fn test_emotion_feature_actually_constructs_a_real_processor() {
+        let formatter = OutputFormatter::new(false, false);
+        assert!(test_emotion_feature(false, &formatter));
+    }
+
+    #[cfg(feature = "cloning")]
+    #[test]
+    fn test_cloning_feature_actually_constructs_a_real_cloner() {
+        let formatter = OutputFormatter::new(false, false);
+        assert!(test_cloning_feature(false, &formatter));
+    }
+
+    #[cfg(feature = "conversion")]
+    #[test]
+    fn test_conversion_feature_actually_constructs_a_real_converter() {
+        let formatter = OutputFormatter::new(false, false);
+        assert!(test_conversion_feature(false, &formatter));
+    }
 }

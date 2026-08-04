@@ -49,8 +49,8 @@ impl From<VoiceInfo> for PyVoiceInfo {
 mod tests {
     use super::*;
     use voirs_sdk::types::{
-        AgeRange, DeviceRequirements, Gender, LanguageCode, ModelConfig, ModelFormat,
-        QualityLevel, SpeakingStyle, VoiceCharacteristics, VoiceConfig,
+        AgeRange, DeviceRequirements, Gender, LanguageCode, ModelConfig, ModelFormat, QualityLevel,
+        SpeakingStyle, VoiceCharacteristics, VoiceConfig,
     };
 
     fn test_voice_config(status: Option<&str>) -> VoiceConfig {

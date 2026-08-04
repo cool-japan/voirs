@@ -243,7 +243,10 @@ mod tests {
                 0
             };
             let result = voirs_set_allocator(allocator_type, block_size, blocks_per_chunk, 0);
-            assert_eq!(result, 0, "Setting allocator {allocator_type} should succeed");
+            assert_eq!(
+                result, 0,
+                "Setting allocator {allocator_type} should succeed"
+            );
 
             let name_ptr = voirs_get_allocator_name();
             assert!(!name_ptr.is_null(), "Allocator name should not be null");

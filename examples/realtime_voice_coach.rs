@@ -19,7 +19,7 @@ use uuid::Uuid;
 // VoiRS imports
 use voirs_evaluation::prelude::*;
 #[cfg(feature = "gamification")]
-use voirs_feedback::gamification::AchievementSystem;
+use voirs_feedback::gamification::achievements::AchievementSystem;
 use voirs_feedback::prelude::*;
 use voirs_feedback::{Exercise, FocusArea};
 use voirs_g2p::ssml::dictionary::DifficultyLevel;
@@ -55,6 +55,11 @@ async fn main() -> Result<()> {
 }
 
 /// Real-time voice coaching system
+// `adaptive_engine`/`audio_processor` are constructed for architectural
+// completeness; this simplified demo doesn't route per-session calls back
+// through `self` for them yet (`progress_tracker` *is* used, in
+// `update_session_progress`).
+#[allow(dead_code)]
 pub struct VoiceCoach {
     // Core components
     realtime_feedback: RealtimeFeedbackSystem,
@@ -80,7 +85,7 @@ impl VoiceCoach {
         let adaptive_engine = AdaptiveFeedbackEngine::new().await?;
         let progress_tracker = ProgressAnalyzer::new().await?;
         #[cfg(feature = "gamification")]
-        let achievement_system = AchievementSystem::new().await?;
+        let achievement_system = AchievementSystem::new();
         let trainer = InteractiveTrainer::new().await?;
 
         let audio_processor = RealTimeAudioProcessor::new().await?;
@@ -121,7 +126,10 @@ impl VoiceCoach {
 
         // Store session
         {
-            let mut sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
+            let mut sessions = self
+                .active_sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             sessions.insert(session.session_id.clone(), session.clone());
         }
 
@@ -147,7 +155,7 @@ impl VoiceCoach {
         // Start real-time processing
         let processing_handle = tokio::spawn({
             let realtime_feedback = self.realtime_feedback.clone();
-            let session_id = session.session_id.clone();
+            let _session_id = session.session_id.clone();
             let tx = feedback_tx.clone();
 
             async move {
@@ -250,28 +258,46 @@ impl VoiceCoach {
     }
 
     async fn update_session_progress(&self, session_id: &str) -> Result<()> {
-        let sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(session) = sessions.get(session_id) {
-            let elapsed = session.start_time.elapsed();
-            println!("⏱️  Session Progress: {:.0}s elapsed", elapsed.as_secs());
+        // Clone what's needed and drop the std Mutex guard before the first
+        // `.await` below: holding a std `MutexGuard` across an await point can
+        // stall the async runtime (or deadlock it), so the session data is
+        // extracted first instead.
+        let session = {
+            let sessions = self
+                .active_sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            sessions.get(session_id).cloned()
+        };
 
-            // Simulate getting current stats
-            let current_score = 75.0 + (elapsed.as_secs() as f32 * 0.5) % 25.0;
-            println!("📊 Current Performance: {current_score:.1}%");
+        let Some(session) = session else {
+            return Ok(());
+        };
 
-            // Check for achievements
-            self.check_real_time_achievements(&session.user_id).await?;
-        }
+        let elapsed = session.start_time.elapsed();
+        println!("⏱️  Session Progress: {:.0}s elapsed", elapsed.as_secs());
+
+        // Real current performance: this user's tracked average score from the
+        // progress analyzer (not a value derived from elapsed wall-clock time).
+        let current_score = self
+            .progress_tracker
+            .get_user_progress_impl(&session.user_id)
+            .await
+            .map(|progress| progress.average_scores.overall_score * 100.0)
+            .unwrap_or(0.0);
+        println!("📊 Current Performance: {current_score:.1}%");
+
+        // Check for achievements based on the real measured score.
+        self.check_real_time_achievements(&session.user_id, current_score)
+            .await?;
 
         Ok(())
     }
 
-    async fn check_real_time_achievements(&self, user_id: &str) -> Result<()> {
-        // Simulate achievement checking
-        use fastrand;
-
-        if fastrand::f32() < 0.1 {
-            // 10% chance of achievement
+    async fn check_real_time_achievements(&self, _user_id: &str, current_score: f32) -> Result<()> {
+        // Deterministic recognition tied to real measured performance, not chance.
+        const STEADY_PROGRESS_THRESHOLD: f32 = 90.0;
+        if current_score >= STEADY_PROGRESS_THRESHOLD {
             println!("🎉 Achievement Unlocked: 'Steady Progress' - Keep up the great work!");
         }
 
@@ -282,7 +308,10 @@ impl VoiceCoach {
         println!("\n🏁 Ending coaching session...");
 
         // Generate session summary
-        let sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let sessions = self
+            .active_sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(session) = sessions.get(session_id) {
             let duration = session.start_time.elapsed();
 
@@ -300,7 +329,10 @@ impl VoiceCoach {
 
         // Remove session
         drop(sessions);
-        let mut sessions = self.active_sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let mut sessions = self
+            .active_sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         sessions.remove(session_id);
 
         Ok(())
@@ -308,6 +340,9 @@ impl VoiceCoach {
 }
 
 /// Real-time audio processor
+// Fields configure the processor at construction time; this demo doesn't
+// re-read them afterward.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct RealTimeAudioProcessor {
     sample_rate: u32,
@@ -322,7 +357,7 @@ impl RealTimeAudioProcessor {
         })
     }
 
-    pub async fn process_chunk(&self, chunk: &AudioChunk) -> Result<ProcessedAudio> {
+    pub async fn process_chunk(&self, _chunk: &AudioChunk) -> Result<ProcessedAudio> {
         // Simulate real-time audio processing
         sleep(Duration::from_millis(5)).await;
 
@@ -354,7 +389,7 @@ impl FeedbackRenderer {
         }
     }
 
-    pub async fn render_realtime_feedback(&self, session_id: &str, feedback: &RealtimeFeedback) {
+    pub async fn render_realtime_feedback(&self, _session_id: &str, feedback: &RealtimeFeedback) {
         let mut last = self.last_render.lock().unwrap_or_else(|e| e.into_inner());
 
         // Throttle rendering to avoid spam

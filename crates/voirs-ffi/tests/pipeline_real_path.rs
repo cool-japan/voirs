@@ -25,8 +25,42 @@ use voirs::c_api::core::*;
 use voirs::c_api::voice::*;
 use voirs::{voirs_clear_error, voirs_get_last_error, voirs_has_error};
 
+/// Serializes every `#[test]` in this file against every other one.
+///
+/// All four tests below touch genuinely global, process-wide state: the real
+/// `PIPELINE_MANAGER` (`voirs_get_pipeline_count()`/`voirs_is_pipeline_valid()`
+/// observe every pipeline in the process, not just the current test's), and
+/// two of them additionally mutate the `VOIRS_BENCHMARK_MODE` process
+/// environment variable, which `voirs_create_pipeline()` reads. `cargo
+/// nextest run` (this workspace's preferred/documented runner -- see
+/// `CLAUDE.md`) gives every `#[test]` its own process, so this is a no-op
+/// there; plain `cargo test` (also used by this workspace, e.g. `cargo test
+/// --all-features`) runs every `#[test]` in one process across multiple
+/// threads by default, where an unguarded env var write/removal or a
+/// concurrent pipeline count mutation from another test in this same file
+/// would be a genuine, if narrow, data race. A `Mutex<()>` held for each
+/// test's full body removes that race without weakening what any single
+/// test actually verifies.
+static TEST_SERIALIZATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Acquire [`TEST_SERIALIZATION`], recovering from poisoning.
+///
+/// A poisoned lock here means an *earlier* test in this file panicked (i.e.
+/// already failed and was already reported) while holding it -- that must
+/// not cascade into every later test additionally failing with an opaque
+/// "lock poisoned" error instead of running and reporting its own real
+/// result.
+fn serialize_test() -> std::sync::MutexGuard<'static, ()> {
+    TEST_SERIALIZATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Read and clear the current thread's last-error message, if any.
 fn take_last_error() -> Option<String> {
+    // SAFETY: voirs_get_last_error() returns either null or a pointer to a
+    // just-allocated, null-terminated CString owned by this call; we read it
+    // once via CStr::from_ptr and free it exactly once via voirs_free_string.
     unsafe {
         let ptr = voirs_get_last_error();
         if ptr.is_null() {
@@ -46,52 +80,64 @@ fn take_last_error() -> Option<String> {
 /// nothing.
 #[test]
 fn test_real_pipeline_creation_contract() {
-    unsafe {
-        voirs_clear_error();
-        let pipeline_id = voirs_create_pipeline();
+    let _guard = serialize_test();
+    voirs_clear_error();
+    let pipeline_id = voirs_create_pipeline();
 
-        if pipeline_id == 0 {
-            // Honest failure: a diagnostic must be available explaining why
-            // (e.g. no network access to fetch model weights in this
-            // environment), never a silent/unexplained 0.
-            assert_ne!(voirs_has_error(), 0, "a failed creation must set an error");
-            let message = take_last_error();
-            assert!(
-                message.is_some() && !message.as_deref().unwrap_or_default().is_empty(),
-                "voirs_get_last_error() must be non-empty after a failed creation"
-            );
-            assert_eq!(voirs_is_pipeline_valid(0), 0);
-            return;
-        }
-
-        // Honest success: the handle must behave like a real, trackable
-        // pipeline through its whole lifecycle.
-        assert_eq!(
-            voirs_is_pipeline_valid(pipeline_id),
-            1,
-            "a successfully created pipeline must be valid"
+    if pipeline_id == 0 {
+        // Honest failure: a diagnostic must be available explaining why
+        // (e.g. no network access to fetch model weights in this
+        // environment), never a silent/unexplained 0.
+        assert_ne!(voirs_has_error(), 0, "a failed creation must set an error");
+        let message = take_last_error().unwrap_or_default();
+        assert!(
+            !message.is_empty(),
+            "voirs_get_last_error() must be non-empty after a failed creation"
         );
-        assert_eq!(
-            voirs_is_pipeline_benchmark_placeholder(pipeline_id),
-            0,
-            "a normally-created (non-VOIRS_BENCHMARK_MODE) pipeline must not \
-             be reported as a benchmark placeholder"
+        // Regression check for the "outer wrapper clobbers create_pipeline_impl's
+        // specific diagnostic with a generic VoirsErrorCode-only message" bug:
+        // this exact string is what the clobbering bug would have produced for
+        // every failure alike (e.g. a real, observed failure in this environment
+        // is "Pipeline creation failed: Download failed for '...': HTTP 401
+        // Unauthorized" -- reduced to this uninformative text by the bug).
+        assert_ne!(
+            message, "Failed to create pipeline: InitializationFailed",
+            "the specific underlying diagnostic must survive to the caller, \
+             not be clobbered by the generic VoirsErrorCode-only fallback \
+             (this exact message is only possible if create_pipeline_impl's \
+             own set_last_error call was silently overwritten)"
         );
-        assert!(voirs_get_pipeline_count() >= 1);
-
-        assert_eq!(
-            voirs_destroy_pipeline(pipeline_id),
-            0,
-            "destroying a just-created pipeline must succeed"
-        );
-        assert_eq!(
-            voirs_is_pipeline_valid(pipeline_id),
-            0,
-            "a destroyed pipeline must become invalid"
-        );
-        // Destroying it again must honestly fail, not silently "succeed".
-        assert_ne!(voirs_destroy_pipeline(pipeline_id), 0);
+        assert_eq!(voirs_is_pipeline_valid(0), 0);
+        return;
     }
+
+    // Honest success: the handle must behave like a real, trackable
+    // pipeline through its whole lifecycle.
+    assert_eq!(
+        voirs_is_pipeline_valid(pipeline_id),
+        1,
+        "a successfully created pipeline must be valid"
+    );
+    assert_eq!(
+        voirs_is_pipeline_benchmark_placeholder(pipeline_id),
+        0,
+        "a normally-created (non-VOIRS_BENCHMARK_MODE) pipeline must not \
+         be reported as a benchmark placeholder"
+    );
+    assert!(voirs_get_pipeline_count() >= 1);
+
+    assert_eq!(
+        voirs_destroy_pipeline(pipeline_id),
+        0,
+        "destroying a just-created pipeline must succeed"
+    );
+    assert_eq!(
+        voirs_is_pipeline_valid(pipeline_id),
+        0,
+        "a destroyed pipeline must become invalid"
+    );
+    // Destroying it again must honestly fail, not silently "succeed".
+    assert_ne!(voirs_destroy_pipeline(pipeline_id), 0);
 }
 
 /// A never-issued pipeline ID must be honestly rejected by `voirs_set_voice`/
@@ -99,28 +145,27 @@ fn test_real_pipeline_creation_contract() {
 /// lookup, with a generic (non-placeholder) diagnostic message.
 #[test]
 fn test_real_voice_operations_reject_unknown_pipeline() {
+    let _guard = serialize_test();
     let never_issued_id = 0xFFFF_FF00u32;
 
-    unsafe {
-        voirs_clear_error();
-        let voice_id = CString::new("default").expect("no interior NUL");
-        let result = voirs_set_voice(never_issued_id, voice_id.as_ptr());
-        assert_ne!(result, 0, "setting voice on an unknown pipeline must fail");
-        let message = take_last_error().unwrap_or_default();
-        assert!(
-            message.contains(&never_issued_id.to_string()),
-            "error message should reference the offending pipeline ID: {message}"
-        );
-        assert!(
-            !message.contains("VOIRS_BENCHMARK_MODE"),
-            "a never-issued ID is not a benchmark placeholder, so the message \
-             must be the generic invalid-ID message, not the placeholder-specific \
-             one: {message}"
-        );
+    voirs_clear_error();
+    let voice_id = CString::new("default").expect("no interior NUL");
+    let result = voirs_set_voice(never_issued_id, voice_id.as_ptr());
+    assert_ne!(result, 0, "setting voice on an unknown pipeline must fail");
+    let message = take_last_error().unwrap_or_default();
+    assert!(
+        message.contains(&never_issued_id.to_string()),
+        "error message should reference the offending pipeline ID: {message}"
+    );
+    assert!(
+        !message.contains("VOIRS_BENCHMARK_MODE"),
+        "a never-issued ID is not a benchmark placeholder, so the message \
+         must be the generic invalid-ID message, not the placeholder-specific \
+         one: {message}"
+    );
 
-        let voice_ptr = voirs_get_voice(never_issued_id);
-        assert!(voice_ptr.is_null());
-    }
+    let voice_ptr = voirs_get_voice(never_issued_id);
+    assert!(voice_ptr.is_null());
 }
 
 /// End-to-end test of `VOIRS_BENCHMARK_MODE=1` through the REAL production
@@ -137,46 +182,45 @@ fn test_real_voice_operations_reject_unknown_pipeline() {
 /// typo'd handle.
 #[test]
 fn test_benchmark_mode_placeholder_is_honestly_distinct() {
+    let _guard = serialize_test();
     std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
 
-    unsafe {
-        let pipeline_id = voirs_create_pipeline();
-        assert_ne!(
-            pipeline_id, 0,
-            "VOIRS_BENCHMARK_MODE creation must deterministically succeed \
-             (no model loading involved)"
-        );
+    let pipeline_id = voirs_create_pipeline();
+    assert_ne!(
+        pipeline_id, 0,
+        "VOIRS_BENCHMARK_MODE creation must deterministically succeed \
+         (no model loading involved)"
+    );
 
-        // Passes validity checks (by design -- it's a real, trackable handle)...
-        assert_eq!(voirs_is_pipeline_valid(pipeline_id), 1);
-        // ...but is honestly distinguishable as a placeholder...
-        assert_eq!(
-            voirs_is_pipeline_benchmark_placeholder(pipeline_id),
-            1,
-            "a VOIRS_BENCHMARK_MODE handle must be reported as a placeholder"
-        );
-        assert!(voirs_get_pipeline_count() >= 1);
+    // Passes validity checks (by design -- it's a real, trackable handle)...
+    assert_eq!(voirs_is_pipeline_valid(pipeline_id), 1);
+    // ...but is honestly distinguishable as a placeholder...
+    assert_eq!(
+        voirs_is_pipeline_benchmark_placeholder(pipeline_id),
+        1,
+        "a VOIRS_BENCHMARK_MODE handle must be reported as a placeholder"
+    );
+    assert!(voirs_get_pipeline_count() >= 1);
 
-        // ...and honestly refuses real voice operations with a SPECIFIC
-        // diagnostic, not a fabricated success and not an indistinguishable
-        // generic error.
-        voirs_clear_error();
-        let voice_id = CString::new("default").expect("no interior NUL");
-        let result = voirs_set_voice(pipeline_id, voice_id.as_ptr());
-        assert_ne!(
-            result, 0,
-            "a benchmark placeholder must not silently succeed at voice operations"
-        );
-        let message = take_last_error().unwrap_or_default();
-        assert!(
-            message.contains("VOIRS_BENCHMARK_MODE") || message.contains("placeholder"),
-            "error message must specifically explain this is a benchmark \
-             placeholder, not a generic invalid-ID message: {message}"
-        );
+    // ...and honestly refuses real voice operations with a SPECIFIC
+    // diagnostic, not a fabricated success and not an indistinguishable
+    // generic error.
+    voirs_clear_error();
+    let voice_id = CString::new("default").expect("no interior NUL");
+    let result = voirs_set_voice(pipeline_id, voice_id.as_ptr());
+    assert_ne!(
+        result, 0,
+        "a benchmark placeholder must not silently succeed at voice operations"
+    );
+    let message = take_last_error().unwrap_or_default();
+    assert!(
+        message.contains("VOIRS_BENCHMARK_MODE") || message.contains("placeholder"),
+        "error message must specifically explain this is a benchmark \
+         placeholder, not a generic invalid-ID message: {message}"
+    );
 
-        assert_eq!(voirs_destroy_pipeline(pipeline_id), 0);
-        assert_eq!(voirs_is_pipeline_valid(pipeline_id), 0);
-    }
+    assert_eq!(voirs_destroy_pipeline(pipeline_id), 0);
+    assert_eq!(voirs_is_pipeline_valid(pipeline_id), 0);
 
     std::env::remove_var("VOIRS_BENCHMARK_MODE");
 }
@@ -186,28 +230,27 @@ fn test_benchmark_mode_placeholder_is_honestly_distinct() {
 /// value (the mock branch, by contrast, always returns `1`).
 #[test]
 fn test_real_pipeline_count_tracks_creation_and_destruction() {
+    let _guard = serialize_test();
     std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
 
-    unsafe {
-        let before = voirs_get_pipeline_count();
+    let before = voirs_get_pipeline_count();
 
-        let id1 = voirs_create_pipeline();
-        assert_ne!(id1, 0);
-        let after_one = voirs_get_pipeline_count();
-        assert_eq!(after_one, before + 1);
+    let id1 = voirs_create_pipeline();
+    assert_ne!(id1, 0);
+    let after_one = voirs_get_pipeline_count();
+    assert_eq!(after_one, before + 1);
 
-        let id2 = voirs_create_pipeline();
-        assert_ne!(id2, 0);
-        assert_ne!(id1, id2, "each pipeline must get a distinct ID");
-        let after_two = voirs_get_pipeline_count();
-        assert_eq!(after_two, before + 2);
+    let id2 = voirs_create_pipeline();
+    assert_ne!(id2, 0);
+    assert_ne!(id1, id2, "each pipeline must get a distinct ID");
+    let after_two = voirs_get_pipeline_count();
+    assert_eq!(after_two, before + 2);
 
-        assert_eq!(voirs_destroy_pipeline(id1), 0);
-        assert_eq!(voirs_get_pipeline_count(), before + 1);
+    assert_eq!(voirs_destroy_pipeline(id1), 0);
+    assert_eq!(voirs_get_pipeline_count(), before + 1);
 
-        assert_eq!(voirs_destroy_pipeline(id2), 0);
-        assert_eq!(voirs_get_pipeline_count(), before);
-    }
+    assert_eq!(voirs_destroy_pipeline(id2), 0);
+    assert_eq!(voirs_get_pipeline_count(), before);
 
     std::env::remove_var("VOIRS_BENCHMARK_MODE");
 }

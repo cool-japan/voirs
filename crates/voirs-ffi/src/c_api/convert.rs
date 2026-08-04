@@ -1121,15 +1121,19 @@ mod tests {
         // 4 samples at 22050 Hz mono.
         let mut buffer = make_test_buffer(&[1.0, 2.0, 3.0, 4.0], 22050, 1);
 
-        let result =
-            unsafe { voirs_audio_convert_format(&mut buffer, VoirsSampleFormat::Float32, 1, 44100) };
+        let result = unsafe {
+            voirs_audio_convert_format(&mut buffer, VoirsSampleFormat::Float32, 1, 44100)
+        };
         assert_eq!(result, VoirsErrorCode::Success);
 
         // Real resampling must actually change sample_rate and length --
         // proving the Float32 path still performs the real conversion (only
         // non-Float32 targets are rejected).
         assert_eq!(buffer.sample_rate, 44100);
-        assert_eq!(buffer.length, 8, "doubling the rate should double the sample count");
+        assert_eq!(
+            buffer.length, 8,
+            "doubling the rate should double the sample count"
+        );
 
         unsafe {
             buffer.free();
@@ -1140,8 +1144,9 @@ mod tests {
     fn test_convert_format_float32_actually_rechannels() {
         let mut buffer = make_test_buffer(&[0.5, -0.5, 1.0], 44100, 1);
 
-        let result =
-            unsafe { voirs_audio_convert_format(&mut buffer, VoirsSampleFormat::Float32, 2, 44100) };
+        let result = unsafe {
+            voirs_audio_convert_format(&mut buffer, VoirsSampleFormat::Float32, 2, 44100)
+        };
         assert_eq!(result, VoirsErrorCode::Success);
 
         assert_eq!(buffer.channels, 2);

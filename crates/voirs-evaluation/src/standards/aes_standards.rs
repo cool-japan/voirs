@@ -589,4 +589,145 @@ mod tests {
         let thd_val = thd_n.unwrap();
         assert!((0.0..=100.0).contains(&thd_val));
     }
+
+    /// Deterministic broadband "noise" signal (no `rand` dependency) via a
+    /// simple linear-congruential generator: real, non-tonal energy spread
+    /// across the whole passband.
+    fn lcg_noise(seed: u64, len: usize, amplitude: f32) -> Vec<f32> {
+        let mut state = seed;
+        (0..len)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let unit = (state >> 33) as f32 / (1u64 << 31) as f32; // in [0, 1)
+                (2.0 * unit - 1.0) * amplitude
+            })
+            .collect()
+    }
+
+    /// A deliberately, strongly *tilted* multi-tone signal: harmonically
+    /// unrelated tones spanning the passband whose amplitude halves every
+    /// time the frequency doubles (a steep, unmistakable low-pass tilt), so
+    /// the 5th-95th percentile magnitude spread is large by construction.
+    fn tilted_multitone(sample_rate: f32, len: usize) -> Vec<f32> {
+        let tones = [
+            (150.0_f32, 1.0_f32),
+            (300.0, 0.5),
+            (600.0, 0.25),
+            (1_200.0, 0.125),
+            (2_400.0, 0.0625),
+            (4_800.0, 0.031_25),
+            (9_600.0, 0.015_625),
+            (16_000.0, 0.007_812_5),
+        ];
+        (0..len)
+            .map(|i| {
+                let t = i as f32 / sample_rate;
+                tones
+                    .iter()
+                    .map(|&(freq, amp)| amp * (2.0 * std::f32::consts::PI * freq * t).sin())
+                    .sum::<f32>()
+                    * 0.1
+            })
+            .collect()
+    }
+
+    /// `calculate_frequency_response_flatness` must be a real, audio-dependent
+    /// measurement, not the old hardcoded `0.3` dB placeholder: a deliberately
+    /// steeply-tilted spectrum must report a materially larger dB spread than
+    /// a broadband, roughly-flat-spectrum signal of the same duration.
+    #[test]
+    fn test_frequency_response_flatness_varies_with_spectral_shape() {
+        let aes = AesStandards::new(48000).unwrap();
+        let sample_rate = 48_000.0_f32;
+        // Several FFT-analysis frames' worth of signal so the averaged
+        // periodogram is meaningful for both cases.
+        let len = 48_000 * 2;
+
+        let flat_ish = lcg_noise(0xC0FF_EE01, len, 0.3);
+        let tilted = tilted_multitone(sample_rate, len);
+
+        let flat_db = aes
+            .calculate_frequency_response_flatness(&flat_ish)
+            .expect("broadband noise should yield a measurable flatness");
+        let tilted_db = aes
+            .calculate_frequency_response_flatness(&tilted)
+            .expect("tilted multitone should yield a measurable flatness");
+
+        assert!(
+            flat_db >= 0.0,
+            "flatness must be non-negative, got {flat_db}"
+        );
+        assert!(
+            tilted_db >= 0.0,
+            "flatness must be non-negative, got {tilted_db}"
+        );
+        assert!(
+            tilted_db > flat_db,
+            "a steeply-tilted spectrum ({tilted_db} dB spread) must measure a larger flatness \
+             figure than a broadband, roughly-flat signal ({flat_db} dB spread) -- this must \
+             depend on the actual audio, not return a fixed constant"
+        );
+        // The old fabricated implementation always returned exactly 0.3 dB
+        // regardless of input; a genuine measurement on a signal engineered
+        // for a strong tilt should clear that fixed value by a wide margin.
+        assert!(
+            tilted_db > 0.3,
+            "a deliberately steep spectral tilt should measure well above the old fabricated \
+             constant of 0.3 dB, got {tilted_db}"
+        );
+    }
+
+    /// Too few samples to run even a single analysis frame must fail closed
+    /// with a typed error, never silently return a placeholder number.
+    #[test]
+    fn test_frequency_response_flatness_too_few_samples_errors() {
+        let aes = AesStandards::new(48000).unwrap();
+        let tiny = vec![0.1_f32; 10];
+        assert!(aes.calculate_frequency_response_flatness(&tiny).is_err());
+    }
+
+    /// The AES17 rollup's frequency-response compliance sub-check
+    /// (`frequency_response_flatness_db > 0.5` dB) must be able to actually
+    /// fail for real audio with a genuinely poor frequency response --
+    /// disproving the old always-passes (`0.3` dB constant) behavior.
+    #[test]
+    fn test_aes17_flags_noncompliant_frequency_response_for_real_tilted_audio() {
+        let aes = AesStandards::new(48000).unwrap();
+        let sample_rate = 48_000.0_f32;
+        let samples = tilted_multitone(sample_rate, 48_000 * 2);
+        let audio = AudioBuffer::new(samples, 48_000, 1);
+
+        let measurements = aes
+            .measure_aes17(&audio)
+            .expect("measurement should succeed for a well-formed signal");
+
+        assert!(
+            measurements.frequency_response_flatness_db > 0.5,
+            "the deliberately tilted test signal should measure a flatness figure above the \
+             ±0.5 dB compliance threshold, got {}",
+            measurements.frequency_response_flatness_db
+        );
+        // Re-derives the same `> 0.5 dB` threshold `measure_aes17` applies
+        // internally (see the `if frequency_response_flatness_db > 0.5`
+        // compliance check above in this file) -- with the old hardcoded
+        // `0.3` dB constant this branch could never be reached at all.
+        assert!(
+            measurements
+                .notes
+                .iter()
+                .any(|note| note.contains("Frequency response flatness")),
+            "a genuinely out-of-tolerance frequency response must produce a compliance note, \
+             got notes: {:?}",
+            measurements.notes
+        );
+        assert_ne!(
+            measurements.compliance_level,
+            super::super::ComplianceLevel::FullyCompliant,
+            "overall AES17 compliance must not report FullyCompliant when the frequency \
+             response check fails, given notes: {:?}",
+            measurements.notes
+        );
+    }
 }

@@ -5,11 +5,9 @@
 
 use anyhow::Result;
 use std::f32::consts::PI;
-use std::time::Duration;
-use voirs::*;
+use voirs_sdk::prelude::*;
 use voirs_spatial::position::{Listener, SoundSource};
-use voirs_spatial::types::{BinauraAudio, SpatialEffect};
-use voirs_spatial::{Position3D, SpatialConfig, SpatialProcessor};
+use voirs_spatial::{Position3D, SpatialConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,18 +17,9 @@ async fn main() -> Result<()> {
     // Ensure output directories exist
     ensure_output_dirs()?;
 
-    // Create components using bridge pattern
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
-    // Create pipeline with spatial audio components
-    let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
-        .build()
-        .await?;
+    // Create pipeline with spatial audio components (unified builder wires the
+    // default G2P/acoustic model/vocoder automatically)
+    let pipeline = VoirsPipelineBuilder::new().build().await?;
 
     // Example 1: Basic 3D positioning
     println!("\n1. Basic 3D Positioning");
@@ -53,10 +42,10 @@ async fn main() -> Result<()> {
 
 async fn basic_3d_positioning_demo(pipeline: &VoirsPipeline) -> Result<()> {
     // Create a basic spatial configuration
-    let spatial_config = SpatialConfig::default();
+    let _spatial_config = SpatialConfig::default();
 
     // Create a listener at the origin
-    let listener = Listener::new();
+    let _listener = Listener::new();
     println!("Created listener at origin position");
 
     // Create sound sources at different positions
@@ -68,7 +57,7 @@ async fn basic_3d_positioning_demo(pipeline: &VoirsPipeline) -> Result<()> {
     ];
 
     for (name, position) in positions {
-        let source = SoundSource::new_point(name.to_string(), position);
+        let _source = SoundSource::new_point(name.to_string(), position);
 
         println!(
             "Created sound source '{}' at position ({:.1}, {:.1}, {:.1})",
@@ -98,7 +87,7 @@ async fn multiple_sources_demo(pipeline: &VoirsPipeline) -> Result<()> {
         let position = Position3D::new(radius * angle.cos(), 0.0, radius * angle.sin());
 
         let source_name = format!("source_{}", i + 1);
-        let source = SoundSource::new_point(source_name.clone(), position);
+        let _source = SoundSource::new_point(source_name.clone(), position);
 
         println!(
             "Created source {} at angle {:.1}° (pos: {:.1}, {:.1}, {:.1})",
@@ -125,7 +114,7 @@ async fn multiple_sources_demo(pipeline: &VoirsPipeline) -> Result<()> {
 async fn listener_movement_demo(pipeline: &VoirsPipeline) -> Result<()> {
     // Simulate listener moving past a stationary source
     let source_position = Position3D::new(0.0, 0.0, 0.0);
-    let source = SoundSource::new_point("stationary_source".to_string(), source_position);
+    let _source = SoundSource::new_point("stationary_source".to_string(), source_position);
 
     println!("Created stationary source at origin");
 

@@ -4,6 +4,9 @@
 //! based on input location, allowing the model to capture location-dependent
 //! patterns in the signal.
 
+// `LVCBlock`/`ResLVCBlock` (below) are only defined when the `candle`
+// feature is enabled, and they are the only users of `Result` in this file.
+#[cfg(feature = "candle")]
 use crate::Result;
 use serde::{Deserialize, Serialize};
 

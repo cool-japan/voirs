@@ -7,9 +7,27 @@ use std::time::{Duration, Instant};
 use voirs::c_api::config::*;
 use voirs::c_api::core::*;
 
+/// Serializes the tests in this file that mutate the process-wide
+/// `VOIRS_BENCHMARK_MODE` environment variable.
+///
+/// `cargo nextest run` (this workspace's preferred/documented runner) gives
+/// every `#[test]` its own process, making this a no-op there; plain `cargo
+/// test` runs every `#[test]` in this file as threads within one process by
+/// default, where an unguarded concurrent `set_var`/`remove_var` from two of
+/// these tests would race (see `voirs-ffi/tests/pipeline_real_path.rs`'s
+/// identical guard for the full rationale).
+static TEST_SERIALIZATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serialize_test() -> std::sync::MutexGuard<'static, ()> {
+    TEST_SERIALIZATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 #[allow(unused_unsafe)]
 fn test_pipeline_creation_performance() {
+    let _guard = serialize_test();
     // Enable benchmark mode for faster pipeline creation testing
     std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
 
@@ -91,6 +109,7 @@ fn test_pipeline_validation_performance() {
     // test_pipeline_creation_performance above) to get a handle without
     // paying for real model loading, which would make this a network/model-
     // cache availability test rather than a validation-speed test.
+    let _guard = serialize_test();
     std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
 
     #[allow(unused_unsafe)]
@@ -178,6 +197,7 @@ fn test_concurrent_access_performance() {
     // allocation, table locking), not real model loading, so use
     // VOIRS_BENCHMARK_MODE to avoid 400 real pipeline builds (4 threads *
     // 100 iterations) each requiring model weights / network access.
+    let _guard = serialize_test();
     std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
 
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -301,6 +321,7 @@ mod performance_validation {
         // plumbing, not real model loading (which would make "quick" and
         // "30 second threshold to account for slower CI" mean "requires
         // network access to a model host", an unrelated concern).
+        let _guard = serialize_test();
         std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
 
         let start = Instant::now();

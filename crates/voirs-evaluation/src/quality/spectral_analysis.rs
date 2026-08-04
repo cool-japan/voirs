@@ -46,6 +46,12 @@ use voirs_sdk::AudioBuffer;
 /// isolation, while the FFT-dependent descriptors remain methods below.
 mod spectral_analysis_dsp;
 
+/// Hearing-aid and cochlear-implant simulation methods on [`SpectralAnalyzer`].
+///
+/// Kept in a sibling module (rather than inline below) so this file stays
+/// within the 2000-line limit.
+mod hearing_aid_ci;
+
 /// Advanced spectral analysis configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpectralAnalysisConfig {
@@ -505,13 +511,15 @@ impl SpectralAnalyzer {
         let noise_reduction_db = self.assess_noise_reduction(samples, sample_rate)?;
 
         // Speech intelligibility improvement
-        let intelligibility_improvement = self.assess_intelligibility_improvement(samples)?;
+        let intelligibility_improvement =
+            self.assess_intelligibility_improvement(samples, sample_rate)?;
 
         // Loudness comfort
-        let loudness_comfort = self.assess_loudness_comfort(samples)?;
+        let loudness_comfort = self.assess_loudness_comfort(samples, sample_rate)?;
 
         // Audibility index
-        let audibility_index = self.calculate_audibility_index(samples, &frequency_gains)?;
+        let audibility_index =
+            self.calculate_audibility_index(samples, sample_rate, &frequency_gains)?;
 
         // Distortion analysis
         let distortion_metrics = self.analyze_hearing_aid_distortion(samples, sample_rate)?;
@@ -1395,68 +1403,15 @@ impl SpectralAnalyzer {
         ))
     }
 
-    // Hearing aid simulation methods
-    fn calculate_hearing_aid_gains(&self) -> Result<Vec<f32>, EvaluationError> {
-        Ok(vec![10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0])
-    }
-    fn calculate_compression_ratios(&self) -> Result<Vec<f32>, EvaluationError> {
-        Ok(vec![2.0, 3.0, 4.0, 3.5, 3.0, 2.5, 2.0, 1.5])
-    }
-    fn assess_noise_reduction(
-        &self,
-        _samples: &[f32],
-        _sample_rate: f32,
-    ) -> Result<f32, EvaluationError> {
-        Ok(6.0)
-    }
-    fn assess_intelligibility_improvement(&self, _samples: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.15)
-    }
-    fn assess_loudness_comfort(&self, _samples: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.8)
-    }
-    fn calculate_audibility_index(
-        &self,
-        _samples: &[f32],
-        _gains: &[f32],
-    ) -> Result<f32, EvaluationError> {
-        Ok(0.7)
-    }
-
-    fn analyze_hearing_aid_distortion(
-        &self,
-        _samples: &[f32],
-        _sample_rate: f32,
-    ) -> Result<HearingAidDistortion, EvaluationError> {
-        Ok(HearingAidDistortion {
-            thd_percent: 1.5,
-            intermod_distortion: 0.8,
-            phase_distortion: 2.0,
-            frequency_deviation: 1.2,
-        })
-    }
-
-    // Cochlear implant methods
-    fn assess_fine_structure_preservation(
-        &self,
-        _responses: &[GammatoneChannelResponse],
-    ) -> Result<f32, EvaluationError> {
-        Ok(0.3)
-    }
-    fn estimate_ci_spectral_resolution(&self, num_electrodes: usize, num_channels: usize) -> f32 {
-        num_electrodes as f32 / num_channels as f32
-    }
-    fn calculate_dynamic_range_usage(&self, _levels: &[f32]) -> Result<f32, EvaluationError> {
-        Ok(0.6)
-    }
-    fn model_channel_interactions(
-        &self,
-        num_electrodes: usize,
-    ) -> Result<Vec<Vec<f32>>, EvaluationError> {
-        Ok((0..num_electrodes)
-            .map(|_| vec![0.1; num_electrodes])
-            .collect())
-    }
+    // Hearing-aid and cochlear-implant simulation methods
+    // (`calculate_hearing_aid_gains`, `calculate_compression_ratios`,
+    // `assess_noise_reduction`, `assess_intelligibility_improvement`,
+    // `assess_loudness_comfort`, `calculate_audibility_index`,
+    // `analyze_hearing_aid_distortion`, `assess_fine_structure_preservation`,
+    // `estimate_ci_spectral_resolution`, `calculate_dynamic_range_usage`,
+    // `model_channel_interactions`) live in the sibling `hearing_aid_ci`
+    // module (see its module doc comment) to keep this file under the
+    // workspace's 2000-line policy limit.
 }
 
 impl GammatoneFilterbank {

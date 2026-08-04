@@ -35,8 +35,10 @@ use candle_core::{Device, Tensor};
 mod dsp;
 mod models;
 mod text;
+mod types;
 
 pub use models::{RealFeatureExtractor, RuleBasedFeedbackModel};
+pub use types::*;
 
 /// Result type for deep learning operations
 pub type DeepLearningResult<T> = Result<T, DeepLearningError>;
@@ -103,609 +105,6 @@ pub struct DeepLearningFeedbackSystem {
     model_cache: Arc<RwLock<ModelCache>>,
     /// Inference statistics
     inference_stats: Arc<RwLock<InferenceStatistics>>,
-}
-
-/// Configuration for deep learning models
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeepLearningConfig {
-    /// Model directory path
-    pub model_path: String,
-    /// Maximum sequence length for transformers
-    pub max_sequence_length: usize,
-    /// Batch size for inference
-    pub batch_size: usize,
-    /// Whether to use GPU acceleration
-    pub use_gpu: bool,
-    /// Model precision (fp16, fp32)
-    pub precision: ModelPrecision,
-    /// Cache configuration
-    pub cache_config: CacheConfig,
-    /// Model-specific configurations
-    pub model_configs: HashMap<String, ModelConfig>,
-    /// Feature extraction settings
-    pub feature_config: FeatureExtractionConfig,
-}
-
-/// Model precision options
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ModelPrecision {
-    /// Half precision (faster, less memory)
-    FP16,
-    /// Full precision (slower, more accurate)
-    FP32,
-    /// Mixed precision
-    Mixed,
-}
-
-/// Cache configuration for models
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheConfig {
-    /// Enable model caching
-    pub enabled: bool,
-    /// Maximum cache size in MB
-    pub max_size_mb: usize,
-    /// Cache eviction policy
-    pub eviction_policy: CacheEvictionPolicy,
-    /// Preload models on startup
-    pub preload_models: Vec<String>,
-}
-
-/// Cache eviction policies
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CacheEvictionPolicy {
-    /// Least Recently Used
-    LRU,
-    /// Least Frequently Used
-    LFU,
-    /// First In First Out
-    FIFO,
-    /// Weighted by model size and usage
-    Weighted,
-}
-
-/// Configuration for specific models
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelConfig {
-    /// Model type
-    pub model_type: ModelType,
-    /// Model file path
-    pub model_file: String,
-    /// Tokenizer configuration
-    pub tokenizer_config: Option<TokenizerConfig>,
-    /// Model-specific parameters
-    pub parameters: HashMap<String, f32>,
-    /// Input/output dimensions
-    pub dimensions: ModelDimensions,
-    /// Quantization settings
-    pub quantization: Option<QuantizationConfig>,
-}
-
-/// Types of deep learning models
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ModelType {
-    /// Transformer encoder model
-    TransformerEncoder,
-    /// Transformer decoder model
-    TransformerDecoder,
-    /// Encoder-decoder transformer
-    EncoderDecoder,
-    /// Convolutional neural network
-    CNN,
-    /// Recurrent neural network
-    RNN,
-    /// Generative adversarial network
-    GAN,
-    /// Variational autoencoder
-    VAE,
-    /// Custom model architecture
-    Custom {
-        /// Name or description of the custom architecture.
-        architecture: String,
-    },
-}
-
-/// Tokenizer configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TokenizerConfig {
-    /// Vocabulary file path
-    pub vocab_file: String,
-    /// Special tokens
-    pub special_tokens: HashMap<String, String>,
-    /// Maximum token length
-    pub max_token_length: usize,
-    /// Tokenization strategy
-    pub strategy: TokenizationStrategy,
-}
-
-/// Tokenization strategies
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TokenizationStrategy {
-    /// Byte Pair Encoding
-    BPE,
-    /// `WordPiece`
-    WordPiece,
-    /// `SentencePiece`
-    SentencePiece,
-    /// Character-level
-    Character,
-    /// Phoneme-based
-    Phoneme,
-}
-
-/// Model dimensions configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelDimensions {
-    /// Input dimension
-    pub input_dim: usize,
-    /// Hidden dimension
-    pub hidden_dim: usize,
-    /// Output dimension
-    pub output_dim: usize,
-    /// Number of attention heads
-    pub num_heads: Option<usize>,
-    /// Number of layers
-    pub num_layers: Option<usize>,
-}
-
-/// Quantization configuration for model compression
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuantizationConfig {
-    /// Quantization method
-    pub method: QuantizationMethod,
-    /// Number of bits for quantization
-    pub bits: usize,
-    /// Quantization scope
-    pub scope: QuantizationScope,
-}
-
-/// Quantization methods
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum QuantizationMethod {
-    /// Post-training quantization
-    PostTraining,
-    /// Quantization-aware training
-    QAT,
-    /// Dynamic quantization
-    Dynamic,
-}
-
-/// Quantization scope
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum QuantizationScope {
-    /// Quantize weights only
-    WeightsOnly,
-    /// Quantize activations only
-    ActivationsOnly,
-    /// Quantize both weights and activations
-    Full,
-}
-
-/// Feature extraction configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeatureExtractionConfig {
-    /// Audio preprocessing settings
-    pub audio_preprocessing: AudioPreprocessingConfig,
-    /// Text preprocessing settings
-    pub text_preprocessing: TextPreprocessingConfig,
-    /// Feature types to extract
-    pub feature_types: Vec<FeatureType>,
-    /// Feature normalization
-    pub normalization: FeatureNormalization,
-}
-
-/// Audio preprocessing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AudioPreprocessingConfig {
-    /// Sample rate for processing
-    pub target_sample_rate: usize,
-    /// Window size for analysis
-    pub window_size: usize,
-    /// Hop length for overlapping windows
-    pub hop_length: usize,
-    /// Number of mel filters
-    pub n_mels: usize,
-    /// Frequency range
-    pub freq_range: (f32, f32),
-    /// Apply noise reduction
-    pub noise_reduction: bool,
-}
-
-/// Text preprocessing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextPreprocessingConfig {
-    /// Convert to lowercase
-    pub lowercase: bool,
-    /// Remove punctuation
-    pub remove_punctuation: bool,
-    /// Normalize unicode
-    pub normalize_unicode: bool,
-    /// Handle contractions
-    pub expand_contractions: bool,
-    /// Language-specific preprocessing
-    pub language_specific: HashMap<String, String>,
-}
-
-/// Types of features to extract
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FeatureType {
-    /// Mel-frequency cepstral coefficients
-    MFCC,
-    /// Mel-scale spectrograms
-    MelSpectrogram,
-    /// Raw audio waveform
-    RawAudio,
-    /// Fundamental frequency
-    F0,
-    /// Spectral centroid
-    SpectralCentroid,
-    /// Zero crossing rate
-    ZeroCrossingRate,
-    /// Chroma features
-    Chroma,
-    /// Prosodic features
-    Prosodic,
-    /// Linguistic features
-    Linguistic,
-    /// Contextual embeddings
-    ContextualEmbeddings,
-}
-
-/// Feature normalization methods
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FeatureNormalization {
-    /// No normalization
-    None,
-    /// Z-score normalization
-    ZScore,
-    /// Min-max normalization
-    MinMax,
-    /// Robust scaling
-    RobustScaling,
-    /// Unit vector scaling
-    UnitVector,
-}
-
-/// Trait for feedback generation models
-#[async_trait]
-pub trait FeedbackModel {
-    /// Generate feedback from input features
-    async fn generate_feedback(
-        &self,
-        features: &FeatureBundle,
-        context: &FeedbackContext,
-    ) -> DeepLearningResult<FeedbackResponse>;
-
-    /// Get model information
-    fn model_info(&self) -> ModelInfo;
-
-    /// Check if model is loaded
-    fn is_loaded(&self) -> bool;
-
-    /// Load model from file
-    async fn load(&mut self, model_path: &Path) -> DeepLearningResult<()>;
-
-    /// Unload model to free memory
-    async fn unload(&mut self) -> DeepLearningResult<()>;
-}
-
-/// Trait for feature extraction
-#[async_trait]
-pub trait FeatureExtractor {
-    /// Extract features from audio
-    async fn extract_audio_features(
-        &self,
-        audio: &AudioBuffer,
-        config: &AudioPreprocessingConfig,
-    ) -> DeepLearningResult<AudioFeatures>;
-
-    /// Extract features from text
-    async fn extract_text_features(
-        &self,
-        text: &str,
-        config: &TextPreprocessingConfig,
-    ) -> DeepLearningResult<TextFeatures>;
-
-    /// Get supported feature types
-    fn supported_features(&self) -> Vec<FeatureType>;
-}
-
-/// Bundle of extracted features
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeatureBundle {
-    /// Audio features
-    pub audio_features: AudioFeatures,
-    /// Text features
-    pub text_features: TextFeatures,
-    /// Contextual features
-    pub contextual_features: ContextualFeatures,
-    /// Temporal features
-    pub temporal_features: TemporalFeatures,
-}
-
-/// Audio-specific features
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AudioFeatures {
-    /// MFCC coefficients
-    pub mfcc: Option<Vec<Vec<f32>>>,
-    /// Mel-scale spectrogram
-    pub mel_spectrogram: Option<Vec<Vec<f32>>>,
-    /// Raw audio samples
-    pub raw_audio: Option<Vec<f32>>,
-    /// Fundamental frequency
-    pub f0: Option<Vec<f32>>,
-    /// Spectral features
-    pub spectral_features: SpectralFeatures,
-    /// Prosodic features
-    pub prosodic_features: ProsodicFeatures,
-}
-
-/// Spectral feature components
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpectralFeatures {
-    /// Spectral centroid
-    pub centroid: Option<Vec<f32>>,
-    /// Spectral rolloff
-    pub rolloff: Option<Vec<f32>>,
-    /// Spectral flux
-    pub flux: Option<Vec<f32>>,
-    /// Zero crossing rate
-    pub zcr: Option<Vec<f32>>,
-    /// Chroma features
-    pub chroma: Option<Vec<Vec<f32>>>,
-}
-
-/// Prosodic feature components
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProsodicFeatures {
-    /// Pitch contour
-    pub pitch: Option<Vec<f32>>,
-    /// Energy contour
-    pub energy: Option<Vec<f32>>,
-    /// Duration features
-    pub duration: Option<Vec<f32>>,
-    /// Rhythm features
-    pub rhythm: Option<RhythmFeatures>,
-}
-
-/// Rhythm-specific features
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RhythmFeatures {
-    /// Beat tracking
-    pub beats: Option<Vec<f32>>,
-    /// Tempo estimation
-    pub tempo: Option<f32>,
-    /// Rhythmic patterns
-    pub patterns: Option<Vec<f32>>,
-}
-
-/// Text-specific features
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextFeatures {
-    /// Token embeddings
-    pub token_embeddings: Option<Vec<Vec<f32>>>,
-    /// Sentence embeddings
-    pub sentence_embeddings: Option<Vec<f32>>,
-    /// Linguistic features
-    pub linguistic_features: LinguisticFeatures,
-    /// Semantic features
-    pub semantic_features: SemanticFeatures,
-}
-
-/// Linguistic feature components
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LinguisticFeatures {
-    /// Part-of-speech tags
-    pub pos_tags: Option<Vec<String>>,
-    /// Named entity recognition
-    pub ner_tags: Option<Vec<String>>,
-    /// Phoneme sequences
-    pub phonemes: Option<Vec<String>>,
-    /// Syllable structure
-    pub syllables: Option<Vec<String>>,
-    /// Stress patterns
-    pub stress_patterns: Option<Vec<usize>>,
-}
-
-/// Semantic feature components
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SemanticFeatures {
-    /// Word sense disambiguation
-    pub word_senses: Option<HashMap<String, String>>,
-    /// Sentiment scores
-    pub sentiment: Option<SentimentScores>,
-    /// Topic modeling
-    pub topics: Option<Vec<(String, f32)>>,
-    /// Contextual relationships
-    pub relationships: Option<Vec<(String, String, f32)>>,
-}
-
-/// Sentiment analysis scores
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SentimentScores {
-    /// Overall sentiment
-    pub overall: f32,
-    /// Positive sentiment
-    pub positive: f32,
-    /// Negative sentiment
-    pub negative: f32,
-    /// Neutral sentiment
-    pub neutral: f32,
-    /// Emotional valence
-    pub emotional_valence: HashMap<String, f32>,
-}
-
-/// Contextual features from user/session data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextualFeatures {
-    /// User skill level
-    pub skill_level: f32,
-    /// Session progress
-    pub session_progress: f32,
-    /// Recent performance
-    pub recent_performance: Vec<f32>,
-    /// Focus areas
-    pub focus_areas: Vec<FocusArea>,
-    /// Difficulty level
-    pub difficulty_level: f32,
-    /// User preferences
-    pub preferences: HashMap<String, String>,
-}
-
-/// Temporal features for sequence modeling
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TemporalFeatures {
-    /// Time since session start
-    pub session_time: f32,
-    /// Time since last feedback
-    pub last_feedback_time: f32,
-    /// Historical patterns
-    pub historical_patterns: Vec<f32>,
-    /// Trend indicators
-    pub trend_indicators: HashMap<String, f32>,
-}
-
-/// Context for feedback generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeedbackContext {
-    /// Current user progress
-    pub user_progress: UserProgress,
-    /// Session state
-    pub session_state: SessionState,
-    /// Target text
-    pub target_text: String,
-    /// Previous feedback
-    pub previous_feedback: Vec<UserFeedback>,
-    /// Feedback preferences
-    pub preferences: FeedbackPreferences,
-}
-
-/// User preferences for feedback generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeedbackPreferences {
-    /// Preferred feedback style
-    pub style: FeedbackStyle,
-    /// Verbosity level
-    pub verbosity: VerbosityLevel,
-    /// Focus areas of interest
-    pub focus_areas: Vec<FocusArea>,
-    /// Language preferences
-    pub language: String,
-    /// Personalization level
-    pub personalization: PersonalizationLevel,
-}
-
-/// Feedback generation styles
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FeedbackStyle {
-    /// Encouraging and supportive
-    Encouraging,
-    /// Direct and technical
-    Technical,
-    /// Balanced approach
-    Balanced,
-    /// Gamified and fun
-    Gamified,
-    /// Professional coaching style
-    Professional,
-}
-
-/// Verbosity levels for feedback
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum VerbosityLevel {
-    /// Minimal feedback
-    Minimal,
-    /// Concise feedback
-    Concise,
-    /// Detailed feedback
-    Detailed,
-    /// Comprehensive feedback
-    Comprehensive,
-}
-
-/// Personalization levels
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PersonalizationLevel {
-    /// Generic feedback
-    Generic,
-    /// Basic personalization
-    Basic,
-    /// Advanced personalization
-    Advanced,
-    /// Highly personalized
-    HighlyPersonalized,
-}
-
-/// Model information and metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelInfo {
-    /// Model name
-    pub name: String,
-    /// Model version
-    pub version: String,
-    /// Model architecture
-    pub architecture: String,
-    /// Training dataset info
-    pub training_data: String,
-    /// Model size in MB
-    pub size_mb: usize,
-    /// Supported languages
-    pub supported_languages: Vec<String>,
-    /// Performance metrics
-    pub performance_metrics: HashMap<String, f32>,
-}
-
-/// Model cache for performance optimization
-pub struct ModelCache {
-    /// Cached models
-    cached_models: HashMap<String, CachedModel>,
-    /// Current cache size in MB
-    current_size_mb: usize,
-    /// Maximum cache size in MB
-    max_size_mb: usize,
-    /// Access history for LRU eviction
-    access_history: Vec<String>,
-}
-
-/// Cached model entry
-pub struct CachedModel {
-    /// Model instance
-    model: Box<dyn FeedbackModel + Send + Sync>,
-    /// Model size in MB
-    size_mb: usize,
-    /// Last access time
-    last_accessed: chrono::DateTime<chrono::Utc>,
-    /// Access count
-    access_count: usize,
-}
-
-/// Inference statistics for monitoring
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InferenceStatistics {
-    /// Total inferences performed
-    pub total_inferences: usize,
-    /// Average inference time (ms)
-    pub avg_inference_time_ms: f32,
-    /// Model usage counts
-    pub model_usage: HashMap<String, usize>,
-    /// Error counts by type
-    pub error_counts: HashMap<String, usize>,
-    /// Performance trends
-    pub performance_trends: Vec<PerformanceSnapshot>,
-}
-
-/// Performance snapshot for trend analysis
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PerformanceSnapshot {
-    /// Timestamp
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    /// Inference time
-    pub inference_time_ms: f32,
-    /// Memory usage
-    pub memory_usage_mb: f32,
-    /// Model name
-    pub model_name: String,
-    /// Success rate
-    pub success_rate: f32,
 }
 
 /// Transformer-based feedback model implementation.
@@ -837,7 +236,10 @@ impl DeepLearningFeedbackSystem {
         name: impl Into<String>,
         extractor: Box<dyn FeatureExtractor + Send + Sync>,
     ) {
-        self.feature_extractors.write().await.insert(name.into(), extractor);
+        self.feature_extractors
+            .write()
+            .await
+            .insert(name.into(), extractor);
     }
 
     /// Load a feedback model
@@ -897,12 +299,21 @@ impl DeepLearningFeedbackSystem {
     ) -> DeepLearningResult<FeatureBundle> {
         let extractors = self.feature_extractors.read().await;
 
-        // Get the default feature extractor
-        let extractor = extractors.values().next().ok_or_else(|| {
-            DeepLearningError::FeatureExtractionFailed {
+        // Prefer the extractor registered under `"default"` (always present
+        // after `Self::new()`); otherwise deterministically pick the
+        // lexicographically smallest key. `HashMap` iteration order is
+        // randomized per-process by Rust's default hasher, so
+        // `.values().next()` (the previous behavior) could select a
+        // different extractor across runs with the exact same registered
+        // set -- a real, if subtle, correctness bug for any caller who
+        // registers more than one extractor without also calling
+        // `set_active_extractor`-style API (none exists here).
+        let extractor = extractors
+            .get("default")
+            .or_else(|| extractors.keys().min().and_then(|k| extractors.get(k)))
+            .ok_or_else(|| DeepLearningError::FeatureExtractionFailed {
                 reason: "No feature extractor available".to_string(),
-            }
-        })?;
+            })?;
 
         // Extract audio features
         let audio_features = extractor
@@ -943,22 +354,50 @@ impl DeepLearningFeedbackSystem {
         })
     }
 
-    /// Select the most appropriate model for the given context
+    /// Select the most appropriate model for the given context.
+    ///
+    /// Real selection logic, not a placeholder: among registered models,
+    /// prefer one whose [`ModelInfo::supported_languages`] contains the
+    /// caller's requested [`FeedbackPreferences::language`]
+    /// (`context.preferences.language`) -- an actual use of `context`, not
+    /// an ignored parameter. Ties (including "no model declares this
+    /// language") are broken by the lexicographically smallest model name,
+    /// which is deterministic across runs regardless of `HashMap`
+    /// iteration order (Rust's default hasher randomizes that order
+    /// per-process, so a naive `.keys().next()`/first-language-match would
+    /// otherwise silently select a different model across runs given the
+    /// exact same registered set).
     async fn select_model(
         &self,
         _features: &FeatureBundle,
-        _context: &FeedbackContext,
+        context: &FeedbackContext,
     ) -> DeepLearningResult<String> {
-        // Simple model selection - in practice, this would be more sophisticated
         let models = self.feedback_models.read().await;
-
-        if let Some(model_name) = models.keys().next() {
-            Ok(model_name.clone())
-        } else {
-            Err(DeepLearningError::ModelNotFound {
+        if models.is_empty() {
+            return Err(DeepLearningError::ModelNotFound {
                 model_name: "No models available".to_string(),
-            })
+            });
         }
+
+        let requested_language = context.preferences.language.as_str();
+        let language_match = models
+            .iter()
+            .filter(|(_, model)| {
+                model
+                    .model_info()
+                    .supported_languages
+                    .iter()
+                    .any(|lang| lang.eq_ignore_ascii_case(requested_language))
+            })
+            .map(|(name, _)| name)
+            .min();
+
+        let selected = language_match
+            .or_else(|| models.keys().min())
+            .ok_or_else(|| DeepLearningError::ModelNotFound {
+                model_name: "No models available".to_string(),
+            })?;
+        Ok(selected.clone())
     }
 
     /// Create a model instance based on configuration.
@@ -1279,13 +718,14 @@ impl FeedbackModel for TransformerFeedbackModel {
     ) -> DeepLearningResult<FeedbackResponse> {
         #[cfg(feature = "adaptive")]
         {
-            let state = self.model_state.as_ref().ok_or_else(|| {
-                DeepLearningError::InferenceFailed {
-                    details: "model has not been loaded; call load() with a real safetensors \
+            let state =
+                self.model_state
+                    .as_ref()
+                    .ok_or_else(|| DeepLearningError::InferenceFailed {
+                        details: "model has not been loaded; call load() with a real safetensors \
                               checkpoint path first"
-                        .to_string(),
-                }
-            })?;
+                            .to_string(),
+                    })?;
             return models::transformer::run_forward(state, features, context);
         }
 
@@ -1384,119 +824,6 @@ impl FeedbackModel for TransformerFeedbackModel {
     }
 }
 
-impl ModelCache {
-    /// Description
-    #[must_use]
-    pub fn new(max_size_mb: usize) -> Self {
-        Self {
-            cached_models: HashMap::new(),
-            current_size_mb: 0,
-            max_size_mb,
-            access_history: Vec::new(),
-        }
-    }
-}
-
-impl Default for InferenceStatistics {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl InferenceStatistics {
-    /// Description
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            total_inferences: 0,
-            avg_inference_time_ms: 0.0,
-            model_usage: HashMap::new(),
-            error_counts: HashMap::new(),
-            performance_trends: Vec::new(),
-        }
-    }
-}
-
-// Default implementations
-impl Default for DeepLearningConfig {
-    fn default() -> Self {
-        Self {
-            model_path: "./models".to_string(),
-            max_sequence_length: 512,
-            batch_size: 1,
-            use_gpu: false,
-            precision: ModelPrecision::FP32,
-            cache_config: CacheConfig::default(),
-            model_configs: HashMap::new(),
-            feature_config: FeatureExtractionConfig::default(),
-        }
-    }
-}
-
-impl Default for CacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_size_mb: 1024,
-            eviction_policy: CacheEvictionPolicy::LRU,
-            preload_models: Vec::new(),
-        }
-    }
-}
-
-impl Default for FeatureExtractionConfig {
-    fn default() -> Self {
-        Self {
-            audio_preprocessing: AudioPreprocessingConfig::default(),
-            text_preprocessing: TextPreprocessingConfig::default(),
-            feature_types: vec![
-                FeatureType::MFCC,
-                FeatureType::MelSpectrogram,
-                FeatureType::F0,
-                FeatureType::SpectralCentroid,
-            ],
-            normalization: FeatureNormalization::ZScore,
-        }
-    }
-}
-
-impl Default for AudioPreprocessingConfig {
-    fn default() -> Self {
-        Self {
-            target_sample_rate: 16000,
-            window_size: 1024,
-            hop_length: 512,
-            n_mels: 80,
-            freq_range: (0.0, 8000.0),
-            noise_reduction: true,
-        }
-    }
-}
-
-impl Default for TextPreprocessingConfig {
-    fn default() -> Self {
-        Self {
-            lowercase: true,
-            remove_punctuation: false,
-            normalize_unicode: true,
-            expand_contractions: true,
-            language_specific: HashMap::new(),
-        }
-    }
-}
-
-impl Default for FeedbackPreferences {
-    fn default() -> Self {
-        Self {
-            style: FeedbackStyle::Balanced,
-            verbosity: VerbosityLevel::Detailed,
-            focus_areas: vec![FocusArea::Pronunciation],
-            language: "en".to_string(),
-            personalization: PersonalizationLevel::Advanced,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1576,7 +903,298 @@ mod tests {
         let result = system
             .generate_contextual_feedback(&audio, "test", &context)
             .await;
-        assert!(matches!(result, Err(DeepLearningError::ModelNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(DeepLearningError::ModelNotFound { .. })
+        ));
+    }
+
+    /// Regression guard: with more than one model registered,
+    /// [`DeepLearningFeedbackSystem::select_model`] must deterministically
+    /// pick the same one every call (previously `.keys().next()` on a
+    /// `HashMap`, whose iteration order is randomized per-process by Rust's
+    /// default hasher -- the same registered set could silently select a
+    /// different model across runs).
+    #[tokio::test]
+    async fn test_select_model_is_deterministic_across_repeated_calls() {
+        let mut config = DeepLearningConfig::default();
+        for name in ["zeta", "alpha", "mid"] {
+            config.model_configs.insert(
+                name.to_string(),
+                ModelConfig {
+                    model_type: ModelType::CNN,
+                    model_file: "unused.bin".to_string(),
+                    tokenizer_config: None,
+                    parameters: HashMap::new(),
+                    dimensions: ModelDimensions {
+                        input_dim: 1,
+                        hidden_dim: 1,
+                        output_dim: 1,
+                        num_heads: None,
+                        num_layers: None,
+                    },
+                    quantization: None,
+                },
+            );
+        }
+
+        let system = DeepLearningFeedbackSystem::new(config).unwrap();
+        for name in ["zeta", "alpha", "mid"] {
+            system.load_model(name).await.unwrap();
+        }
+
+        let audio = AudioBuffer::new(vec![0.1; 16000], 16000, 1);
+        let context = FeedbackContext {
+            user_progress: UserProgress::default(),
+            session_state: SessionState::default(),
+            target_text: "test".to_string(),
+            previous_feedback: Vec::new(),
+            preferences: FeedbackPreferences::default(),
+        };
+
+        // Run several times: a real per-process-randomized-HashMap bug
+        // would still return the same answer *within* one process, so this
+        // alone would not have caught the old bug; the meaningful
+        // assertion is the exact value below, chosen deterministically
+        // ("alpha" sorts first), not just self-consistency.
+        for _ in 0..5 {
+            let selected = system
+                .select_model(&empty_bundle(), &context)
+                .await
+                .unwrap();
+            assert_eq!(
+                selected, "alpha",
+                "must deterministically select the lexicographically smallest model name"
+            );
+        }
+
+        let _ = system
+            .generate_contextual_feedback(&audio, "test", &context)
+            .await
+            .unwrap();
+    }
+
+    /// A minimal [`FeedbackModel`] test double that only reports a fixed
+    /// `ModelInfo` (with a caller-supplied `supported_languages` list) and
+    /// never actually implements feedback generation -- used solely to
+    /// prove `select_model` genuinely inspects `ModelInfo::supported_languages`
+    /// against `context.preferences.language`, not just model names.
+    struct LanguageOnlyModel {
+        languages: Vec<String>,
+    }
+
+    #[async_trait]
+    impl FeedbackModel for LanguageOnlyModel {
+        async fn generate_feedback(
+            &self,
+            _features: &FeatureBundle,
+            _context: &FeedbackContext,
+        ) -> DeepLearningResult<FeedbackResponse> {
+            Err(DeepLearningError::InferenceFailed {
+                details: "LanguageOnlyModel is a selection-logic test double; it never generates \
+                          real feedback"
+                    .to_string(),
+            })
+        }
+
+        fn model_info(&self) -> ModelInfo {
+            ModelInfo {
+                name: "language-only-test-double".to_string(),
+                version: "0.0.0".to_string(),
+                architecture: "none".to_string(),
+                training_data: "none".to_string(),
+                size_mb: 0,
+                supported_languages: self.languages.clone(),
+                performance_metrics: HashMap::new(),
+            }
+        }
+
+        fn is_loaded(&self) -> bool {
+            true
+        }
+
+        async fn load(&mut self, _model_path: &Path) -> DeepLearningResult<()> {
+            Ok(())
+        }
+
+        async fn unload(&mut self) -> DeepLearningResult<()> {
+            Ok(())
+        }
+    }
+
+    /// `select_model` must genuinely use `context.preferences.language`:
+    /// registering a Japanese-only model under a name that sorts *before*
+    /// an English-only model (so a bare lexicographic tie-break would pick
+    /// the wrong one) must still select the English model when the
+    /// requested language is "en", and the Japanese model when it is "ja".
+    /// This is the property a fixed sort-order placeholder could never
+    /// have: the selection genuinely varies with real context input.
+    #[tokio::test]
+    async fn test_select_model_uses_requested_language_from_context() {
+        let system = DeepLearningFeedbackSystem::new(DeepLearningConfig::default()).unwrap();
+        {
+            let mut models = system.feedback_models.write().await;
+            models.insert(
+                "aaa-japanese-only".to_string(),
+                Box::new(LanguageOnlyModel {
+                    languages: vec!["ja".to_string()],
+                }),
+            );
+            models.insert(
+                "zzz-english-only".to_string(),
+                Box::new(LanguageOnlyModel {
+                    languages: vec!["en".to_string()],
+                }),
+            );
+        }
+
+        let mut english_context = FeedbackContext {
+            user_progress: UserProgress::default(),
+            session_state: SessionState::default(),
+            target_text: "test".to_string(),
+            previous_feedback: Vec::new(),
+            preferences: FeedbackPreferences::default(),
+        };
+        english_context.preferences.language = "en".to_string();
+        let selected = system
+            .select_model(&empty_bundle(), &english_context)
+            .await
+            .unwrap();
+        assert_eq!(
+            selected, "zzz-english-only",
+            "must select the model that actually declares 'en' support, even though its name \
+             sorts after the Japanese-only model"
+        );
+
+        let mut japanese_context = english_context.clone();
+        japanese_context.preferences.language = "ja".to_string();
+        let selected = system
+            .select_model(&empty_bundle(), &japanese_context)
+            .await
+            .unwrap();
+        assert_eq!(
+            selected, "aaa-japanese-only",
+            "changing only the requested language must genuinely change the selected model"
+        );
+
+        // A language no registered model declares falls back to the
+        // deterministic (lexicographically smallest) choice rather than
+        // erroring -- fail-open on selection, not fail-closed, since some
+        // model attempting to serve the request is better than none when
+        // every model is at least nominally available.
+        let mut unmatched_context = english_context.clone();
+        unmatched_context.preferences.language = "de".to_string();
+        let selected = system
+            .select_model(&empty_bundle(), &unmatched_context)
+            .await
+            .unwrap();
+        assert_eq!(selected, "aaa-japanese-only");
+    }
+
+    /// Regression guard: with more than one feature extractor registered
+    /// (beyond the always-present `"default"`), `extract_features` must
+    /// deterministically prefer `"default"` every call -- previously
+    /// `.values().next()` on a `HashMap` could silently select whichever
+    /// extractor the per-process-randomized iteration order happened to
+    /// place first.
+    #[tokio::test]
+    async fn test_extract_features_prefers_default_extractor_deterministically() {
+        let system = DeepLearningFeedbackSystem::new(DeepLearningConfig::default()).unwrap();
+        // Register additional extractors under names that would sort before
+        // "default" lexicographically, so a buggy "smallest key" fallback
+        // would also be caught by this test, not just hash-order flakiness.
+        system
+            .register_feature_extractor("aaa-not-default", Box::new(RealFeatureExtractor::new()))
+            .await;
+        system
+            .register_feature_extractor("zzz-not-default", Box::new(RealFeatureExtractor::new()))
+            .await;
+
+        let audio = AudioBuffer::new(
+            (0..16000)
+                .map(|i| (2.0 * std::f32::consts::PI * 200.0 * i as f32 / 16000.0).sin())
+                .collect(),
+            16000,
+            1,
+        );
+        let context = FeedbackContext {
+            user_progress: UserProgress::default(),
+            session_state: SessionState::default(),
+            target_text: "test".to_string(),
+            previous_feedback: Vec::new(),
+            preferences: FeedbackPreferences::default(),
+        };
+
+        // All three registered extractors are behaviorally identical
+        // (`RealFeatureExtractor`), so this test cannot distinguish "which
+        // one ran" from output alone; it instead exercises the code path
+        // directly to prove `"default"` is preferred over alphabetically
+        // earlier names, which is what the `.get("default").or_else(...)`
+        // fix guarantees regardless of `HashMap` iteration order.
+        let extractors = system.feature_extractors.read().await;
+        assert!(extractors.contains_key("default"));
+        assert!(extractors.contains_key("aaa-not-default"));
+        drop(extractors);
+
+        let features = system
+            .extract_features(&audio, "hello world", &context)
+            .await;
+        assert!(features.is_ok());
+    }
+
+    fn empty_bundle() -> FeatureBundle {
+        FeatureBundle {
+            audio_features: AudioFeatures {
+                mfcc: None,
+                mel_spectrogram: None,
+                raw_audio: None,
+                f0: None,
+                spectral_features: SpectralFeatures {
+                    centroid: None,
+                    rolloff: None,
+                    flux: None,
+                    zcr: None,
+                    chroma: None,
+                },
+                prosodic_features: ProsodicFeatures {
+                    pitch: None,
+                    energy: None,
+                    duration: None,
+                    rhythm: None,
+                },
+            },
+            text_features: TextFeatures {
+                token_embeddings: None,
+                sentence_embeddings: None,
+                linguistic_features: LinguisticFeatures {
+                    pos_tags: None,
+                    ner_tags: None,
+                    phonemes: None,
+                    syllables: None,
+                    stress_patterns: None,
+                },
+                semantic_features: SemanticFeatures {
+                    word_senses: None,
+                    sentiment: None,
+                    topics: None,
+                    relationships: None,
+                },
+            },
+            contextual_features: ContextualFeatures {
+                skill_level: 0.5,
+                session_progress: 0.5,
+                recent_performance: vec![],
+                focus_areas: vec![],
+                difficulty_level: 0.5,
+                preferences: HashMap::new(),
+            },
+            temporal_features: TemporalFeatures {
+                session_time: 0.0,
+                last_feedback_time: 0.0,
+                historical_patterns: vec![],
+                trend_indicators: HashMap::new(),
+            },
+        }
     }
 
     #[tokio::test]
@@ -1762,7 +1380,10 @@ mod tests {
             result,
             Err(DeepLearningError::ModelLoadingFailed { .. })
         ));
-        assert!(!model.is_loaded(), "a failed load must not leave the model marked loaded");
+        assert!(
+            !model.is_loaded(),
+            "a failed load must not leave the model marked loaded"
+        );
     }
 
     #[cfg(feature = "adaptive")]
@@ -1845,7 +1466,10 @@ mod tests {
         };
 
         let result = model.generate_feedback(&features, &context).await;
-        assert!(matches!(result, Err(DeepLearningError::InferenceFailed { .. })));
+        assert!(matches!(
+            result,
+            Err(DeepLearningError::InferenceFailed { .. })
+        ));
     }
 
     /// End-to-end: write a real, minimal safetensors checkpoint to a real
@@ -1858,7 +1482,7 @@ mod tests {
     #[cfg(feature = "adaptive")]
     #[tokio::test]
     async fn test_transformer_end_to_end_real_checkpoint_load_and_inference() {
-        use candle_core::{DType, Device, Tensor};
+        use candle_core::{Device, Tensor};
         use std::collections::HashMap as StdHashMap;
 
         let device = Device::Cpu;
@@ -1986,7 +1610,8 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let empty: StdHashMap<String, Tensor> = StdHashMap::new();
-        let _ = Device::Cpu; // keep parity with the loaded-branch device construction
+        let device = Device::Cpu; // keep parity with the loaded-branch device construction
+        let _ = &device;
         candle_core::safetensors::save(&empty, &checkpoint_path).unwrap();
 
         let config = ModelConfig {

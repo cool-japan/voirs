@@ -557,7 +557,7 @@ pub unsafe extern "C" fn voirs_synthesize_advanced(
 /// # Safety
 /// This function accepts raw pointers and function pointers.
 #[no_mangle]
-pub unsafe extern "C" fn voirs_synthesizeing_advanced(
+pub unsafe extern "C" fn voirs_synthesize_streaming_advanced(
     text: *const c_char,
     config: *const VoirsAdvancedSynthesisConfig,
     progress_callback: Option<VoirsSynthesisProgressCallback>,
@@ -851,7 +851,7 @@ fn emit_streaming_chunk(
 /// [`VoirsBufferedStreamingCallback`] for the lifetime contract of the audio
 /// buffer passed to `callback`.
 #[no_mangle]
-pub unsafe extern "C" fn voirs_synthesizeing(
+pub unsafe extern "C" fn voirs_synthesize_streaming(
     text: *const c_char,
     config: *const VoirsSynthesisConfig,
     callback: VoirsBufferedStreamingCallback,
@@ -936,7 +936,7 @@ pub unsafe extern "C" fn voirs_synthesizeing(
 /// [`VoirsBufferedStreamingCallback`] for the lifetime contract of the audio
 /// buffer passed to `chunk_callback`.
 #[no_mangle]
-pub unsafe extern "C" fn voirs_synthesizeing_realtime(
+pub unsafe extern "C" fn voirs_synthesize_streaming_realtime(
     text: *const c_char,
     config: *const VoirsSynthesisConfig,
     chunk_callback: VoirsBufferedStreamingCallback,
@@ -1612,7 +1612,7 @@ mod tests {
         let mut received_progress = 0.0f32;
 
         unsafe {
-            let error_code = voirs_synthesizeing_advanced(
+            let error_code = voirs_synthesize_streaming_advanced(
                 text.as_ptr(),
                 ptr::null(),
                 Some(test_progress_callback),
@@ -1760,7 +1760,7 @@ mod tests {
         let text = CString::new("This is a test of real-time streaming synthesis. It should be processed sentence by sentence for better streaming experience.").unwrap();
 
         unsafe {
-            let error_code = voirs_synthesizeing_realtime(
+            let error_code = voirs_synthesize_streaming_realtime(
                 text.as_ptr(),
                 ptr::null(),
                 streaming_chunk_callback,
@@ -1837,7 +1837,7 @@ mod tests {
         let text = CString::new("Hello from the buffered streaming synthesis test").unwrap();
 
         unsafe {
-            let error_code = voirs_synthesizeing(
+            let error_code = voirs_synthesize_streaming(
                 text.as_ptr(),
                 ptr::null(),
                 chunk_cb,

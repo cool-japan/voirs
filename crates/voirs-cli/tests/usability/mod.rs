@@ -21,10 +21,8 @@ fn test_common_workflow_voice_listing() {
     let mut cmd = Command::cargo_bin("voirs").unwrap();
 
     // Common workflow: list available voices
-    cmd.arg("list-voices")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .success();
+    cmd.arg("list-voices").timeout(Duration::from_secs(30));
+    crate::common::run_or_skip_if_models_unavailable(&mut cmd);
 }
 
 #[test]
@@ -38,9 +36,10 @@ fn test_common_workflow_synthesis() {
     cmd.arg("synthesize")
         .arg("Hello, this is a test.")
         .arg(output_file.to_str().unwrap())
-        .timeout(Duration::from_secs(300))
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(300));
+    if crate::common::run_or_skip_if_models_unavailable(&mut cmd).is_none() {
+        return;
+    }
 
     // Verify output file was created
     assert!(output_file.exists());
@@ -140,10 +139,10 @@ fn test_voice_management_workflow() {
     let mut cmd = Command::cargo_bin("voirs").unwrap();
 
     // Step 1: List voices
-    cmd.arg("list-voices")
-        .timeout(Duration::from_secs(10))
-        .assert()
-        .success();
+    cmd.arg("list-voices").timeout(Duration::from_secs(10));
+    if crate::common::run_or_skip_if_models_unavailable(&mut cmd).is_none() {
+        return;
+    }
 
     // Step 2: Get voice info (using a common voice ID)
     let mut cmd = Command::cargo_bin("voirs").unwrap();
@@ -237,9 +236,13 @@ fn test_output_format_flexibility() {
         cmd.arg("synthesize")
             .arg("Test audio")
             .arg(output_file.to_str().unwrap())
-            .timeout(Duration::from_secs(600))
-            .assert()
-            .success();
+            .timeout(Duration::from_secs(600));
+        if crate::common::run_or_skip_if_models_unavailable(&mut cmd).is_none() {
+            // Synthesis models unavailable in this environment: further
+            // formats would fail identically, so stop iterating rather than
+            // repeating the same known-skip N more times.
+            return;
+        }
     }
 }
 

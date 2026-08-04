@@ -5,12 +5,13 @@
 use super::progress::{
     EpochMetrics, ResourceUsage, TrainingMetrics, TrainingProgress, TrainingStats,
 };
+use crate::error::{CliError, Result};
 use crate::GlobalOptions;
-use candle_core::{DType, Device, Tensor};
+use candle_core::backprop::GradStore;
+use candle_core::{DType, Device, Tensor, Var};
 use candle_nn::{optim::AdamW, Optimizer, VarBuilder, VarMap};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use voirs_sdk::Result;
 use voirs_vocoder::models::diffwave::diffusion::DiffWave;
 
 /// Configuration for vocoder training operations
@@ -78,6 +79,9 @@ pub async fn run_train_vocoder(args: VocoderTrainingArgs, global: &GlobalOptions
             "║ LR scheduler:  {:<40} ║",
             args.training_config.lr_scheduler
         );
+        if let Some(ref config_path) = args.config {
+            println!("║ Config file:   {:<40} ║", truncate_path(config_path, 40));
+        }
         if args.training_config.early_stopping {
             println!(
                 "║ Early stopping: {} (patience: {})                   ║",
@@ -102,7 +106,7 @@ pub async fn run_train_vocoder(args: VocoderTrainingArgs, global: &GlobalOptions
 
     // Validate input
     if !args.data.exists() {
-        return Err(voirs_sdk::VoirsError::config_error(format!(
+        return Err(CliError::config(format!(
             "Training data directory not found: {}\n\
              \n\
              The directory should contain:\n\
@@ -121,7 +125,7 @@ pub async fn run_train_vocoder(args: VocoderTrainingArgs, global: &GlobalOptions
     match args.model_type.as_str() {
         "diffwave" => train_diffwave(args, global).await,
         "hifigan" => train_hifigan(args, global).await,
-        _ => Err(voirs_sdk::VoirsError::config_error(format!(
+        _ => Err(CliError::config(format!(
             "Unsupported vocoder model type: '{}'\n\
              \n\
              Supported model types:\n\
@@ -205,7 +209,7 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
     std::fs::create_dir_all(&args.output)?;
 
     // Create model with VarMap for training
-    let varmap = VarMap::new();
+    let mut varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
     let model_config = DiffWaveConfig::default();
 
@@ -214,7 +218,7 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
     }
 
     let model = DiffWave::new(model_config, device.clone(), vb).map_err(|e| {
-        voirs_sdk::VoirsError::config_error(format!(
+        CliError::config(format!(
             "Failed to create DiffWave model: {}\n\
              \n\
              Possible causes:\n\
@@ -227,10 +231,22 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
         ))
     })?;
 
+    // Resume from checkpoint, if requested. Must happen after the model is
+    // constructed (so every parameter name is already registered in `varmap`)
+    // and before the optimizer is created.
+    let mut start_epoch = 0usize;
+    if let Some(ref resume_path) = args.resume {
+        start_epoch = resume_from_checkpoint(&mut varmap, resume_path, "DiffWave", global.quiet)?;
+    }
+
     // Create optimizer
     let params = varmap.all_vars();
+    // A second, independent snapshot of the same underlying parameter storage
+    // (Var is a cheap Arc-like handle), used for gradient-norm computation and
+    // clipping without fighting the optimizer for ownership of `params`.
+    let train_vars = params.clone();
     let mut optimizer = AdamW::new_lr(params, args.lr).map_err(|e| {
-        voirs_sdk::VoirsError::config_error(format!(
+        CliError::config(format!(
             "Failed to create AdamW optimizer: {}\n\
              \n\
              This may indicate:\n\
@@ -261,17 +277,22 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
     let start_time = Instant::now();
     let mut total_steps = 0;
     let mut best_val_loss = f64::MAX;
-    let mut current_lr = args.lr;
-    let mut patience_counter = 0;
+    // Epoch at which validation loss last improved. Early-stopping patience is
+    // measured as real epochs elapsed since this point (see below), matching
+    // `--patience`'s own "(epochs)" help text regardless of `--val-frequency`.
+    // Initialized to `start_epoch` so a `--resume`d run doesn't inherit an
+    // artificially stale improvement point from before the process restarted.
+    let mut last_improvement_epoch = start_epoch;
 
     // Tracks genuine training-step failures across the whole run (never reset
     // between epochs). Crossing the threshold aborts the run with a real error
     // instead of silently continuing on fabricated data.
     let mut error_count: usize = 0;
-    // Last real (non-fabricated) batch loss, used only to keep the live progress
-    // display continuous across a transient failure; never fed into any
-    // aggregate/reported statistic.
+    // Last real (non-fabricated) batch loss/gradient-norm, used only to keep the
+    // live progress display continuous across a transient failure; never fed
+    // into any aggregate/reported statistic.
     let mut last_known_batch_loss: Option<f64> = None;
+    let mut last_known_grad_norm: Option<f64> = None;
     // Real per-epoch statistics from the most recently completed epoch, used for
     // the final summary and checkpoint instead of hardcoded literals.
     let mut last_completed_epoch: Option<usize> = None;
@@ -282,7 +303,7 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
     let warmup_steps = args.training_config.warmup_steps;
 
     // Training loop
-    for epoch in 0..args.epochs {
+    for epoch in start_epoch..args.epochs {
         progress.start_epoch(epoch, batches_per_epoch);
 
         let epoch_start = Instant::now();
@@ -301,24 +322,23 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
 
             // Convert batch to tensors
             let (audio_tensors, mel_tensors) = convert_batch_to_tensors(&batch_data, args.use_gpu)
-                .map_err(|e| {
-                    voirs_sdk::VoirsError::config_error(format!("Tensor conversion failed: {}", e))
-                })?;
+                .map_err(|e| CliError::config(format!("Tensor conversion failed: {}", e)))?;
 
             // Real training step with DiffWave model
             if epoch == 0 && batch_idx == 0 && !global.quiet {
                 println!("   🔬 Attempting real DiffWave forward pass...");
             }
 
-            let batch_loss = match train_step_real(
+            let (batch_loss, grad_norm) = match train_step_real(
                 &model,
                 &mut optimizer,
+                &train_vars,
                 &audio_tensors,
                 &mel_tensors,
                 &device,
                 args.training_config.grad_clip,
             ) {
-                Ok(loss) => {
+                Ok((loss, norm)) => {
                     // Log first batch to confirm real training is working
                     if epoch == 0 && batch_idx == 0 && !global.quiet {
                         println!("   ✅ Real forward pass SUCCESS! Loss: {:.6}", loss);
@@ -326,7 +346,8 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
                     epoch_loss += loss;
                     successful_batches += 1;
                     last_known_batch_loss = Some(loss);
-                    loss
+                    last_known_grad_norm = Some(norm);
+                    (loss, norm)
                 }
                 Err(e) => {
                     error_count += 1;
@@ -338,33 +359,39 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
                             e
                         );
                     }
-                    if error_count > batches_per_epoch / 2 {
-                        return Err(voirs_sdk::VoirsError::config_error(format!(
+                    if should_abort_on_errors(error_count, batches_per_epoch) {
+                        return Err(CliError::config(format!(
                             "Too many DiffWave training-step failures ({error_count} failed \
                              out of {} batches attempted), aborting instead of fabricating \
                              training progress. Last error: {e}",
                             total_steps + 1
                         )));
                     }
-                    // Do not fabricate a loss value: reuse the last real
-                    // measurement for the live display only, or NaN if no batch
-                    // has ever succeeded yet. Never added to epoch_loss.
-                    last_known_batch_loss.unwrap_or(f64::NAN)
+                    // Do not fabricate a loss/grad-norm value: reuse the last
+                    // real measurement for the live display only, or NaN if no
+                    // batch has ever succeeded yet. Never added to epoch_loss.
+                    (
+                        last_known_batch_loss.unwrap_or(f64::NAN),
+                        last_known_grad_norm.unwrap_or(f64::NAN),
+                    )
                 }
             };
             total_steps += 1;
 
-            // Apply warmup to learning rate (overrides scheduler during warmup phase)
+            // Apply warmup to learning rate (overrides scheduler during warmup
+            // phase) and push it into the real optimizer -- not just the
+            // display -- via candle-nn's `Optimizer::set_learning_rate`.
             if warmup_steps > 0 && total_steps <= warmup_steps {
                 // Linear warmup: gradually increase from 0 to target lr
-                current_lr = args.lr * (total_steps as f64 / warmup_steps as f64);
+                let warmup_lr = args.lr * (total_steps as f64 / warmup_steps as f64);
+                optimizer.set_learning_rate(warmup_lr);
 
-                // Update optimizer learning rate during warmup
-                // Note: This is a simplified approach. In production, you'd update the optimizer's lr directly
                 if total_steps % 100 == 0 && !global.quiet {
                     println!(
                         "   🔥 Warmup: step {}/{}, lr: {:.6}",
-                        total_steps, warmup_steps, current_lr
+                        total_steps,
+                        warmup_steps,
+                        optimizer.learning_rate()
                     );
                 }
             }
@@ -380,8 +407,10 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
             if batch_idx % 10 == 0 {
                 let metrics = TrainingMetrics {
                     loss: batch_loss,
-                    learning_rate: current_lr,
-                    grad_norm: Some(0.5),
+                    // Read back from the optimizer itself so the displayed
+                    // value can never drift from the rate actually applied.
+                    learning_rate: optimizer.learning_rate(),
+                    grad_norm: Some(grad_norm),
                 };
                 progress.update_metrics(&metrics);
 
@@ -423,13 +452,16 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
             last_val_loss = val_loss;
         }
 
-        // Update best validation loss and check early stopping
+        // Update best validation loss and check early stopping. Patience is
+        // counted in real epochs elapsed since the last improvement (not in
+        // validation *events*), so it matches the flag's documented
+        // "(epochs)" semantics regardless of --val-frequency.
         if let Some(vl) = val_loss {
             let improved = vl < (best_val_loss - args.training_config.min_delta);
 
             if improved {
                 best_val_loss = vl;
-                patience_counter = 0;
+                last_improvement_epoch = epoch;
 
                 // Save best checkpoint
                 if !global.quiet {
@@ -446,12 +478,12 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
                 )
                 .await?;
             } else if args.training_config.early_stopping {
-                patience_counter += 1;
-                if patience_counter >= args.training_config.patience {
+                let epochs_without_improvement = epoch.saturating_sub(last_improvement_epoch);
+                if epochs_without_improvement >= args.training_config.patience {
                     if !global.quiet {
                         println!(
                             "\n⚠️  Early stopping triggered after {} epochs without improvement",
-                            patience_counter
+                            epochs_without_improvement
                         );
                     }
                     break;
@@ -468,19 +500,22 @@ async fn train_diffwave(args: VocoderTrainingArgs, global: &GlobalOptions) -> Re
 
         progress.finish_epoch(&epoch_metrics);
 
-        // Apply learning rate scheduler (only after warmup is complete)
+        // Apply learning rate scheduler (only after warmup is complete) and
+        // push it into the real optimizer, not just the display.
         if args.training_config.lr_scheduler != "none" && total_steps > warmup_steps {
-            current_lr = apply_lr_scheduler(
+            let scheduled_lr = apply_lr_scheduler(
                 &args.training_config.lr_scheduler,
                 args.lr,
                 epoch,
                 args.training_config.lr_step_size,
                 args.training_config.lr_gamma,
                 args.epochs,
+                epoch.saturating_sub(last_improvement_epoch),
             );
+            optimizer.set_learning_rate(scheduled_lr);
 
             if !global.quiet && epoch % 10 == 0 {
-                println!("   📊 Learning rate: {:.6}", current_lr);
+                println!("   📊 Learning rate: {:.6}", optimizer.learning_rate());
             }
         } else if total_steps <= warmup_steps && !global.quiet && epoch % 10 == 0 {
             println!(
@@ -639,7 +674,7 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
     std::fs::create_dir_all(&args.output)?;
 
     // Create model with VarMap for training (using V2 variant for balance of speed/quality)
-    let varmap = VarMap::new();
+    let mut varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
     let model_config = HiFiGanVariant::V2.default_config();
 
@@ -647,15 +682,25 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
         println!("🔨 Creating HiFi-GAN V2 generator...");
     }
 
-    let model = HiFiGanGenerator::new(model_config.clone(), vb).map_err(|e| {
-        voirs_sdk::VoirsError::config_error(format!("Failed to create model: {}", e))
-    })?;
+    let model = HiFiGanGenerator::new(model_config.clone(), vb)
+        .map_err(|e| CliError::config(format!("Failed to create model: {}", e)))?;
+
+    // Resume from checkpoint, if requested. Must happen after the model is
+    // constructed (so every parameter name is already registered in `varmap`)
+    // and before the optimizer is created.
+    let mut start_epoch = 0usize;
+    if let Some(ref resume_path) = args.resume {
+        start_epoch = resume_from_checkpoint(&mut varmap, resume_path, "HiFiGan", global.quiet)?;
+    }
 
     // Create optimizer
     let params = varmap.all_vars();
-    let mut optimizer = AdamW::new_lr(params, args.lr).map_err(|e| {
-        voirs_sdk::VoirsError::config_error(format!("Failed to create optimizer: {}", e))
-    })?;
+    // A second, independent snapshot of the same underlying parameter storage
+    // (Var is a cheap Arc-like handle), used for gradient-norm computation and
+    // clipping without fighting the optimizer for ownership of `params`.
+    let train_vars = params.clone();
+    let mut optimizer = AdamW::new_lr(params, args.lr)
+        .map_err(|e| CliError::config(format!("Failed to create optimizer: {}", e)))?;
 
     // Calculate batches per epoch
     let batches_per_epoch = data_loader.len().div_ceil(args.batch_size);
@@ -681,17 +726,22 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
     let start_time = Instant::now();
     let mut total_steps = 0;
     let mut best_val_loss = f64::MAX;
-    let mut current_lr = args.lr;
-    let mut patience_counter = 0;
+    // Epoch at which validation loss last improved. Early-stopping patience is
+    // measured as real epochs elapsed since this point (see below), matching
+    // `--patience`'s own "(epochs)" help text regardless of `--val-frequency`.
+    // Initialized to `start_epoch` so a `--resume`d run doesn't inherit an
+    // artificially stale improvement point from before the process restarted.
+    let mut last_improvement_epoch = start_epoch;
 
     // Tracks genuine training-step failures across the whole run (never reset
     // between epochs). Crossing the threshold aborts the run with a real error
     // instead of silently continuing on fabricated data.
     let mut error_count: usize = 0;
-    // Last real (non-fabricated) batch loss, used only to keep the live progress
-    // display continuous across a transient failure; never fed into any
-    // aggregate/reported statistic.
+    // Last real (non-fabricated) batch loss/gradient-norm, used only to keep the
+    // live progress display continuous across a transient failure; never fed
+    // into any aggregate/reported statistic.
     let mut last_known_batch_loss: Option<f64> = None;
+    let mut last_known_grad_norm: Option<f64> = None;
     // Real per-epoch statistics from the most recently completed epoch, used for
     // the final summary and checkpoint instead of hardcoded literals.
     let mut last_completed_epoch: Option<usize> = None;
@@ -702,7 +752,7 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
     let warmup_steps = args.training_config.warmup_steps;
 
     // Training loop
-    for epoch in 0..args.epochs {
+    for epoch in start_epoch..args.epochs {
         progress.start_epoch(epoch, batches_per_epoch);
 
         let epoch_start = Instant::now();
@@ -721,23 +771,25 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
 
             // Convert batch to tensors
             let (audio_tensors, mel_tensors) = convert_batch_to_tensors(&batch_data, args.use_gpu)
-                .map_err(|e| {
-                    voirs_sdk::VoirsError::config_error(format!("Tensor conversion failed: {}", e))
-                })?;
+                .map_err(|e| CliError::config(format!("Tensor conversion failed: {}", e)))?;
 
-            // Training step: Generator reconstruction loss
-            let batch_loss = match train_hifigan_step(
+            // Training step: Generator reconstruction loss, with the same real
+            // gradient-clipping mechanism used for DiffWave (see
+            // `backward_step_with_grad_norm`).
+            let (batch_loss, grad_norm) = match train_hifigan_step(
                 &model,
                 &mut optimizer,
+                &train_vars,
                 &audio_tensors,
                 &mel_tensors,
                 args.training_config.grad_clip,
             ) {
-                Ok(loss) => {
+                Ok((loss, norm)) => {
                     epoch_loss += loss;
                     successful_batches += 1;
                     last_known_batch_loss = Some(loss);
-                    loss
+                    last_known_grad_norm = Some(norm);
+                    (loss, norm)
                 }
                 Err(e) => {
                     error_count += 1;
@@ -749,30 +801,37 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
                             e
                         );
                     }
-                    if error_count > batches_per_epoch / 2 {
-                        return Err(voirs_sdk::VoirsError::config_error(format!(
+                    if should_abort_on_errors(error_count, batches_per_epoch) {
+                        return Err(CliError::config(format!(
                             "Too many HiFi-GAN training-step failures ({error_count} failed \
                              out of {} batches attempted), aborting instead of fabricating \
                              training progress. Last error: {e}",
                             total_steps + 1
                         )));
                     }
-                    // Do not fabricate a loss value: reuse the last real
-                    // measurement for the live display only, or NaN if no batch
-                    // has ever succeeded yet. Never added to epoch_loss.
-                    last_known_batch_loss.unwrap_or(f64::NAN)
+                    // Do not fabricate a loss/grad-norm value: reuse the last
+                    // real measurement for the live display only, or NaN if no
+                    // batch has ever succeeded yet. Never added to epoch_loss.
+                    (
+                        last_known_batch_loss.unwrap_or(f64::NAN),
+                        last_known_grad_norm.unwrap_or(f64::NAN),
+                    )
                 }
             };
 
             total_steps += 1;
 
-            // Apply warmup to learning rate
+            // Apply warmup to learning rate and push it into the real
+            // optimizer, not just the display.
             if warmup_steps > 0 && total_steps <= warmup_steps {
-                current_lr = args.lr * (total_steps as f64 / warmup_steps as f64);
+                let warmup_lr = args.lr * (total_steps as f64 / warmup_steps as f64);
+                optimizer.set_learning_rate(warmup_lr);
                 if total_steps % 100 == 0 && !global.quiet {
                     println!(
                         "   🔥 Warmup: step {}/{}, lr: {:.6}",
-                        total_steps, warmup_steps, current_lr
+                        total_steps,
+                        warmup_steps,
+                        optimizer.learning_rate()
                     );
                 }
             }
@@ -788,8 +847,10 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
             if batch_idx % 10 == 0 {
                 let metrics = TrainingMetrics {
                     loss: batch_loss,
-                    learning_rate: current_lr,
-                    grad_norm: Some(0.6), // Placeholder
+                    // Read back from the optimizer itself so the displayed
+                    // value can never drift from the rate actually applied.
+                    learning_rate: optimizer.learning_rate(),
+                    grad_norm: Some(grad_norm),
                 };
                 progress.update_metrics(&metrics);
 
@@ -830,13 +891,16 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
             last_val_loss = val_loss;
         }
 
-        // Update best validation loss and check early stopping
+        // Update best validation loss and check early stopping. Patience is
+        // counted in real epochs elapsed since the last improvement (not in
+        // validation *events*), so it matches the flag's documented
+        // "(epochs)" semantics regardless of --val-frequency.
         if let Some(vl) = val_loss {
             let improved = vl < (best_val_loss - args.training_config.min_delta);
 
             if improved {
                 best_val_loss = vl;
-                patience_counter = 0;
+                last_improvement_epoch = epoch;
 
                 if !global.quiet {
                     println!("\n💾 New best model saved (val_loss: {:.4})", vl);
@@ -852,12 +916,12 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
                 )
                 .await?;
             } else if args.training_config.early_stopping {
-                patience_counter += 1;
-                if patience_counter >= args.training_config.patience {
+                let epochs_without_improvement = epoch.saturating_sub(last_improvement_epoch);
+                if epochs_without_improvement >= args.training_config.patience {
                     if !global.quiet {
                         println!(
                             "\n⚠️  Early stopping triggered after {} epochs without improvement",
-                            patience_counter
+                            epochs_without_improvement
                         );
                     }
                     break;
@@ -874,19 +938,22 @@ async fn train_hifigan(args: VocoderTrainingArgs, global: &GlobalOptions) -> Res
 
         progress.finish_epoch(&epoch_metrics);
 
-        // Apply learning rate scheduler (only after warmup)
+        // Apply learning rate scheduler (only after warmup) and push it into
+        // the real optimizer, not just the display.
         if args.training_config.lr_scheduler != "none" && total_steps > warmup_steps {
-            current_lr = apply_lr_scheduler(
+            let scheduled_lr = apply_lr_scheduler(
                 &args.training_config.lr_scheduler,
                 args.lr,
                 epoch,
                 args.training_config.lr_step_size,
                 args.training_config.lr_gamma,
                 args.epochs,
+                epoch.saturating_sub(last_improvement_epoch),
             );
+            optimizer.set_learning_rate(scheduled_lr);
 
             if !global.quiet && epoch % 10 == 0 {
-                println!("   📊 Learning rate: {:.6}", current_lr);
+                println!("   📊 Learning rate: {:.6}", optimizer.learning_rate());
             }
         }
 
@@ -1031,14 +1098,16 @@ fn convert_batch_to_tensors(
     Ok((audio_tensor, mel_tensor))
 }
 
-/// HiFi-GAN training step (generator-only with reconstruction loss)
+/// HiFi-GAN training step (generator-only with reconstruction loss). Returns
+/// `(loss, real gradient global L2 norm)`.
 fn train_hifigan_step(
     model: &voirs_vocoder::models::hifigan::generator::HiFiGanGenerator,
     optimizer: &mut AdamW,
+    vars: &[Var],
     audio: &Tensor,
     mel: &Tensor,
     grad_clip: f64,
-) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+) -> std::result::Result<(f64, f64), Box<dyn std::error::Error>> {
     // Forward pass: generate audio from mel spectrogram
     let generated_audio = model.forward(mel)?;
 
@@ -1062,26 +1131,24 @@ fn train_hifigan_step(
 
     let loss_value = total_loss.to_vec0::<f32>()? as f64;
 
-    // Backward pass with optional gradient clipping
-    if grad_clip > 0.0 {
-        // Note: Simplified approach - full clipping would require gradient norm computation
-        optimizer.backward_step(&total_loss)?;
-    } else {
-        optimizer.backward_step(&total_loss)?;
-    }
+    // Backward pass, real global-norm gradient clipping (the same mechanism
+    // used for DiffWave below), then the optimizer step.
+    let grad_norm = backward_step_with_grad_norm(optimizer, vars, &total_loss, grad_clip)?;
 
-    Ok(loss_value)
+    Ok((loss_value, grad_norm))
 }
 
-/// Real training step with DiffWave model
+/// Real training step with DiffWave model. Returns `(loss, real gradient
+/// global L2 norm)`.
 fn train_step_real(
     model: &DiffWave,
     optimizer: &mut AdamW,
+    vars: &[Var],
     audio: &Tensor,
     mel: &Tensor,
     device: &Device,
     grad_clip: f64,
-) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+) -> std::result::Result<(f64, f64), Box<dyn std::error::Error>> {
     let batch_size = audio.dims()[0];
 
     // Generate random timesteps for diffusion (0 to 999)
@@ -1097,33 +1164,81 @@ fn train_step_real(
     let loss_tensor = diff.sqr()?.mean_all()?;
     let loss_value = loss_tensor.to_vec0::<f32>()? as f64;
 
-    // Backward pass and optimizer step with gradient clipping
-    // Implementation: Use loss scaling to approximate gradient clipping
-    // While Candle's backward_step is atomic, we can scale the loss before
-    // backpropagation to achieve a similar effect to gradient clipping
-    if grad_clip > 0.0 {
-        // Estimate gradient scale: typical gradient norms are proportional to loss magnitude
-        // Scale the loss to keep effective gradients within reasonable bounds
-        let loss_scale = if loss_value > grad_clip {
-            grad_clip / loss_value
-        } else {
-            1.0
-        };
+    // Backward pass, real global-norm gradient clipping, then the optimizer
+    // step. See `backward_step_with_grad_norm` for the shared mechanism.
+    let grad_norm = backward_step_with_grad_norm(optimizer, vars, &loss_tensor, grad_clip)?;
 
-        if loss_scale < 1.0 {
-            // Apply loss scaling for large losses (approximates gradient clipping)
-            let scaled_loss = (loss_tensor * loss_scale)?;
-            optimizer.backward_step(&scaled_loss)?;
-        } else {
-            // Normal backpropagation for reasonable losses
-            optimizer.backward_step(&loss_tensor)?;
+    Ok((loss_value, grad_norm))
+}
+
+/// Run a real backward pass for `loss`, compute the real global L2 norm of the
+/// resulting gradients across `vars`, optionally rescale them so the norm
+/// does not exceed `grad_clip` (disabled when `grad_clip <= 0.0`), then apply
+/// the optimizer step. Returns the real, pre-clipping gradient norm -- the
+/// value worth displaying, since it reflects what the model actually produced
+/// before any clamping.
+///
+/// This is the single mechanism shared by both DiffWave's and HiFi-GAN's
+/// training steps, replacing an earlier loss-scaling approximation that only
+/// applied to DiffWave and was a complete no-op for HiFi-GAN. Standard
+/// global-norm clipping (the same algorithm as
+/// `torch.nn.utils.clip_grad_norm_`) is more correct than loss scaling and
+/// applies identically to both models.
+fn backward_step_with_grad_norm(
+    optimizer: &mut AdamW,
+    vars: &[Var],
+    loss: &Tensor,
+    grad_clip: f64,
+) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let mut grads = loss.backward()?;
+    let grad_norm = clip_gradients(&mut grads, vars, grad_clip)?;
+    optimizer.step(&grads)?;
+    Ok(grad_norm)
+}
+
+/// Compute the real global L2 norm of the gradients in `grads` for `vars`
+/// (accumulated on-device, with a single host sync at the end rather than one
+/// per parameter tensor), and -- when `grad_clip > 0.0` and the norm exceeds
+/// it -- rescale every gradient in place so the resulting norm equals
+/// `grad_clip`. Always returns the norm as measured *before* any rescaling.
+fn clip_gradients(
+    grads: &mut GradStore,
+    vars: &[Var],
+    grad_clip: f64,
+) -> std::result::Result<f64, Box<dyn std::error::Error>> {
+    let mut sum_sq: Option<Tensor> = None;
+    for var in vars {
+        if !var.dtype().is_float() {
+            continue;
         }
-    } else {
-        // No gradient clipping requested
-        optimizer.backward_step(&loss_tensor)?;
+        if let Some(g) = grads.get(var.as_tensor()) {
+            let sq = g.sqr()?.sum_all()?;
+            sum_sq = Some(match sum_sq {
+                Some(acc) => (acc + sq)?,
+                None => sq,
+            });
+        }
     }
 
-    Ok(loss_value)
+    let grad_norm = match sum_sq {
+        Some(acc) => (acc.to_vec0::<f32>()? as f64).sqrt(),
+        None => 0.0,
+    };
+
+    if grad_clip > 0.0 && grad_norm > grad_clip {
+        let scale = grad_clip / (grad_norm + 1e-6);
+        for var in vars {
+            if !var.dtype().is_float() {
+                continue;
+            }
+            if let Some(g) = grads.get(var.as_tensor()) {
+                let scaled = (g * scale)?;
+                grads.insert(var.as_tensor(), scaled);
+            }
+        }
+    }
+
+    Ok(grad_norm)
 }
 
 /// Save checkpoint to file
@@ -1176,16 +1291,9 @@ async fn save_checkpoint(
             // Convert tensor to Vec<f32>
             let data: Vec<f32> = tensor
                 .flatten_all()
-                .map_err(|e| {
-                    voirs_sdk::VoirsError::config_error(format!("Failed to flatten tensor: {}", e))
-                })?
+                .map_err(|e| CliError::config(format!("Failed to flatten tensor: {}", e)))?
                 .to_vec1()
-                .map_err(|e| {
-                    voirs_sdk::VoirsError::config_error(format!(
-                        "Failed to convert tensor to vec: {}",
-                        e
-                    ))
-                })?;
+                .map_err(|e| CliError::config(format!("Failed to convert tensor to vec: {}", e)))?;
 
             tensors.push((name.clone(), (data, shape)));
         }
@@ -1429,7 +1537,109 @@ fn truncate_path(path: &Path, max_len: usize) -> String {
     }
 }
 
-/// Apply learning rate scheduler
+/// Whether accumulated training-step failures are severe enough to abort the run
+/// rather than continue. Mirrors the acoustic-training abort threshold (more than
+/// half of a single epoch's batches worth of failures): past that point the run
+/// can no longer be trusted, so it fails with a real error instead of silently
+/// substituting fabricated loss values forever.
+fn should_abort_on_errors(error_count: usize, batches_per_epoch: usize) -> bool {
+    error_count > batches_per_epoch / 2
+}
+
+/// Resume training from a checkpoint written by `save_checkpoint`.
+///
+/// Must be called after the model has been constructed (so every parameter
+/// name is already registered in `varmap`) and before the optimizer is
+/// created. Loads real weights via `VarMap::load`; fails closed with a typed
+/// error if the checkpoint file is missing, or if its tensor names/shapes
+/// don't match this model (a partial or mismatched load is never accepted as
+/// success -- `VarMap::load` itself errors out in that case).
+///
+/// `save_checkpoint` never persisted optimizer state (AdamW's per-parameter
+/// moment buffers), only weights, so that state always restarts fresh. The
+/// epoch counter is best-effort recovered from the checkpoint's `<name>.json`
+/// sidecar (written alongside every checkpoint); if that sidecar is missing
+/// or unparseable, the epoch counter honestly restarts at 0 too, and this is
+/// logged rather than silently assumed.
+///
+/// Returns the epoch to resume training from.
+fn resume_from_checkpoint(
+    varmap: &mut VarMap,
+    resume_path: &Path,
+    model_name: &str,
+    quiet: bool,
+) -> Result<usize> {
+    if !resume_path.exists() {
+        return Err(CliError::config(format!(
+            "Resume checkpoint not found: {}\n\n\
+             Expected a .safetensors checkpoint file written by a previous \
+             `voirs train vocoder --model-type {}` run.",
+            resume_path.display(),
+            model_name.to_lowercase()
+        )));
+    }
+
+    varmap.load(resume_path).map_err(|e| {
+        CliError::config(format!(
+            "Failed to load resume checkpoint {}: {}\n\n\
+             The checkpoint is missing, corrupted, or its tensor names/shapes do \
+             not match a {model_name} model. Refusing to silently start training \
+             from scratch.",
+            resume_path.display(),
+            e
+        ))
+    })?;
+
+    let start_epoch = match resume_epoch_from_sidecar(resume_path) {
+        Some(saved_epoch) => {
+            // `saved_epoch` (0-indexed) is the last epoch the checkpoint
+            // completed; resume with the next one.
+            let next_epoch = saved_epoch + 1;
+            if !quiet {
+                println!(
+                    "   ✓ Restored model weights from {}; resuming at epoch {} \
+                     (optimizer state -- AdamW moment buffers -- is not persisted \
+                     by this checkpoint format, so it restarts fresh)\n",
+                    resume_path.display(),
+                    // 1-indexed for display, matching the rest of the UI
+                    // (e.g. progress.start_epoch's "Epoch {epoch+1}/{total}").
+                    next_epoch + 1
+                );
+            }
+            next_epoch
+        }
+        None => {
+            if !quiet {
+                println!(
+                    "   ✓ Restored model weights from {} (no epoch metadata sidecar \
+                     found alongside it; epoch counter restarts at 0, optimizer \
+                     state restarts fresh)\n",
+                    resume_path.display()
+                );
+            }
+            0
+        }
+    };
+
+    Ok(start_epoch)
+}
+
+/// Best-effort recovery of the epoch number a checkpoint was saved at, from
+/// the `<name>.json` sidecar file `save_checkpoint` writes alongside every
+/// `.safetensors` checkpoint. Returns `None` (never a fabricated number) when
+/// the sidecar is missing or its `epoch` field can't be parsed.
+fn resume_epoch_from_sidecar(checkpoint_path: &Path) -> Option<usize> {
+    let json_path = checkpoint_path.with_extension("json");
+    let content = std::fs::read_to_string(json_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    value.get("epoch")?.as_u64().map(|e| e as usize)
+}
+
+/// Apply learning rate scheduler.
+///
+/// `epochs_since_improvement` is only used by the `"plateau"` variant (real
+/// epochs elapsed since validation loss last improved, as tracked by the
+/// caller's early-stopping bookkeeping); every other scheduler ignores it.
 fn apply_lr_scheduler(
     scheduler_type: &str,
     initial_lr: f64,
@@ -1437,6 +1647,7 @@ fn apply_lr_scheduler(
     step_size: usize,
     gamma: f64,
     total_epochs: usize,
+    epochs_since_improvement: usize,
 ) -> f64 {
     match scheduler_type {
         "step" => {
@@ -1468,42 +1679,22 @@ fn apply_lr_scheduler(
             }
         }
         "plateau" => {
-            // Placeholder: Would need validation loss history
-            // For now, act like "none"
-            initial_lr
+            // ReduceLROnPlateau-style: decay by `gamma` for every full
+            // `step_size` epochs validation loss has gone without improving.
+            // Purely a function of stagnation duration (not absolute epoch),
+            // so it stays flat at `initial_lr` immediately after any
+            // improvement and only starts decaying once a full window has
+            // passed without one.
+            if step_size == 0 || epochs_since_improvement == 0 {
+                initial_lr
+            } else {
+                let decay_steps = (epochs_since_improvement / step_size) as f64;
+                initial_lr * gamma.powf(decay_steps)
+            }
         }
         _ => initial_lr,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_truncate_path() {
-        let path = PathBuf::from("/very/long/path/to/some/directory/file.txt");
-        let truncated = truncate_path(&path, 20);
-        assert!(truncated.len() <= 20);
-        assert!(truncated.starts_with("..."));
-    }
-
-    #[test]
-    fn test_lr_schedulers() {
-        // Test step scheduler
-        let lr_step = apply_lr_scheduler("step", 0.001, 100, 100, 0.1, 1000);
-        assert!((lr_step - 0.0001).abs() < 1e-6); // Should be 0.001 * 0.1^1
-
-        // Test exponential scheduler
-        let lr_exp = apply_lr_scheduler("exponential", 0.001, 10, 100, 0.95, 1000);
-        assert!((lr_exp - (0.001 * 0.95_f64.powf(10.0))).abs() < 1e-9);
-
-        // Test cosine scheduler
-        let lr_cos = apply_lr_scheduler("cosine", 0.001, 500, 100, 0.1, 1000);
-        assert!(lr_cos > 0.0 && lr_cos <= 0.001);
-
-        // Test onecycle scheduler
-        let lr_one = apply_lr_scheduler("onecycle", 0.001, 250, 100, 0.1, 1000);
-        assert!(lr_one > 0.001); // Should be in increasing phase
-    }
-}
+mod tests;

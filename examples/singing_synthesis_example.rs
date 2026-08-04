@@ -2,9 +2,9 @@
 //!
 //! This example demonstrates the singing synthesis capabilities of VoiRS SDK.
 
+use voirs_singing::types::Articulation;
 use voirs_singing::{
-    Expression, MusicalNote, NoteEvent, SingingConfig, SingingConfigBuilder, SynthesisEngine,
-    VoiceType,
+    Expression, MusicalNote, NoteEvent, SingingConfigBuilder, SynthesisEngine, VoiceType,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         timing_offset: 0.0,
         breath_before: 0.0,
         legato: false,
+        articulation: Articulation::Normal,
     };
 
     // Create a musical note with proper API
@@ -40,8 +41,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         musical_note.event.note, musical_note.event.frequency
     );
 
-    // Create synthesis engine
-    let synthesis_engine = SynthesisEngine::new(singing_config);
+    // Create synthesis engine (construction is the point of this demo; a full
+    // synthesis run requires a musical score and is shown in other examples)
+    let _synthesis_engine = SynthesisEngine::new(singing_config);
 
     println!("✅ Created synthesis engine");
 
@@ -56,7 +58,9 @@ fn demonstrate_voice_characteristics() {
     println!("\n🎤 Voice Type Demonstrations:");
 
     for voice_type in [VoiceType::Soprano, VoiceType::Tenor, VoiceType::Bass] {
-        let config = SingingConfigBuilder::new().enabled(true).build();
+        // Each voice type gets its own enabled singing configuration; this demo
+        // only shows that construction succeeds, so the built config is unused.
+        let _config = SingingConfigBuilder::new().enabled(true).build();
 
         println!("  {:?} voice configuration created", voice_type);
     }

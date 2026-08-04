@@ -1,6 +1,10 @@
 //! Model optimization command implementation.
 
 use crate::GlobalOptions;
+use safetensors::tensor::{Dtype, TensorView};
+use safetensors::SafeTensors;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::Result;
@@ -55,6 +59,19 @@ pub async fn run_optimize_model(
 
     // Analyze current model
     let model_info = analyze_model(&model_path, global).await?;
+    if !global.quiet {
+        println!(
+            "  Found {} component(s), {:.1} MB total",
+            model_info.components.len(),
+            model_info.total_size_mb
+        );
+        for component in &model_info.components {
+            println!(
+                "    - {} ({:?}, {:.2} MB)",
+                component.name, component.component_type, component.size_mb
+            );
+        }
+    }
 
     // Perform optimization
     let result =
@@ -128,6 +145,7 @@ async fn analyze_model(model_path: &PathBuf, global: &GlobalOptions) -> Result<M
 struct ModelAnalysis {
     total_size_mb: f64,
     components: Vec<ModelComponent>,
+    #[allow(dead_code)] // retained for future config-aware optimization decisions
     config_content: String,
 }
 
@@ -188,6 +206,7 @@ fn analyze_model_components(model_path: &PathBuf) -> Result<Vec<ModelComponent>>
                 "model.pt" | "model.onnx" | "model.bin" => ComponentType::ModelWeights,
                 "tokenizer.json" | "vocab.txt" => ComponentType::Tokenizer,
                 "config.json" | "config.yaml" => ComponentType::Configuration,
+                _ if filename.ends_with(".safetensors") => ComponentType::ModelWeights,
                 _ => ComponentType::Metadata,
             };
 
@@ -240,17 +259,45 @@ async fn perform_optimization(
         println!("Optimization steps: {}", optimization_steps.len());
     }
 
+    // Chain steps: every step's output becomes the NEXT step's input, so a
+    // multi-step strategy's transformations genuinely compose. Previously each
+    // step read straight from the pristine `model_path` and overwrote
+    // `output_path` wholesale, so only the *last* step's effect ever survived
+    // (e.g. Balanced's real quantization step was silently discarded by the
+    // plain-copy "Balancing speed and quality" step that ran after it).
+    let mut current_input = model_path.clone();
+    let mut staging_dirs: Vec<tempfile::TempDir> = Vec::new();
+    let step_count = optimization_steps.len();
+
     for (i, step) in optimization_steps.iter().enumerate() {
         if !global.quiet {
-            println!("  [{}/{}] {}", i + 1, optimization_steps.len(), step);
+            println!("  [{}/{}] {}", i + 1, step_count, step);
         }
 
-        // Simulate optimization step
-        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        let is_last = i + 1 == step_count;
+        let step_output = if is_last {
+            output_path.clone()
+        } else {
+            let staging = tempfile::Builder::new()
+                .prefix("voirs-optimize-stage-")
+                .tempdir()
+                .map_err(|e| voirs_sdk::VoirsError::IoError {
+                    path: output_path.clone(),
+                    operation: voirs_sdk::error::IoOperation::Write,
+                    source: e,
+                })?;
+            let path = staging.path().to_path_buf();
+            staging_dirs.push(staging);
+            path
+        };
 
         // Apply optimization step
-        apply_optimization_step(step, model_path, &output_path, global).await?;
+        apply_optimization_step(step, &current_input, &step_output, global).await?;
+        current_input = step_output;
     }
+    // Every intermediate staging `TempDir` is deleted here; `output_path` now
+    // holds the cumulative result of every step that ran.
+    drop(staging_dirs);
 
     // Calculate final size
     let optimized_size = calculate_directory_size(&output_path)?;
@@ -311,13 +358,20 @@ async fn apply_optimization_step(
         println!("    Applying {}", step);
     }
 
-    if step.contains("Quantizing") {
+    // Case-insensitive, keyword-based dispatch. The step descriptions used by
+    // `get_optimization_steps` for the Memory/Balanced strategies ("Applying
+    // aggressive/moderate quantization") do not contain the exact substring
+    // "Quantizing", so a case-sensitive `contains("Quantizing")` check used to
+    // silently skip real quantization for those two strategies (falling
+    // through to a plain file copy while still claiming the strategy ran).
+    let step_lower = step.to_lowercase();
+    if step_lower.contains("quant") {
         // Implement model quantization
         quantize_model_files(input_path, output_path, global).await?;
-    } else if step.contains("Optimizing") {
-        // Implement graph optimization
+    } else if step_lower.contains("optimiz") {
+        // Implement graph optimization / analysis
         optimize_model_graph(input_path, output_path, global).await?;
-    } else if step.contains("Compressing") {
+    } else if step_lower.contains("compress") {
         // Implement model compression
         compress_model_files(input_path, output_path, global).await?;
     } else {
@@ -367,7 +421,20 @@ fn copy_model_files(input_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Quantize model files to reduce precision and size
+/// Quantize model files to reduce precision and size.
+///
+/// Every `*.safetensors` file found in `input_path` is genuinely quantized
+/// (see [`quantize_safetensors_bytes`]): real per-tensor min/max are
+/// computed from the real `F32` values, a real affine INT8 quantization is
+/// applied, and a structurally valid SafeTensors file is rebuilt via the
+/// `safetensors` crate. Formats that cannot honestly be quantized here
+/// (`*.bin` PyTorch pickles, unrecognized extensions) are copied through
+/// unchanged and recorded as skipped rather than corrupted.
+///
+/// If nothing in `input_path` could actually be quantized, this returns an
+/// `Err` instead of reporting success: a command that "quantizes" a model by
+/// quantizing zero tensors is exactly the fabricated-success behavior this
+/// rewrite exists to eliminate.
 async fn quantize_model_files(
     input_path: &PathBuf,
     output_path: &PathBuf,
@@ -384,6 +451,13 @@ async fn quantize_model_files(
         source: e,
     })?;
 
+    let mut total_tensors_quantized = 0usize;
+    let mut total_tensors_passthrough = 0usize;
+    let mut total_original_bytes = 0u64;
+    let mut total_quantized_bytes = 0u64;
+    let mut quantized_files: Vec<String> = Vec::new();
+    let mut skipped_files: Vec<String> = Vec::new();
+
     // Process model files
     for entry in std::fs::read_dir(input_path).map_err(|e| voirs_sdk::VoirsError::IoError {
         path: input_path.clone(),
@@ -398,35 +472,125 @@ async fn quantize_model_files(
         let src = entry.path();
         let dst = output_path.join(entry.file_name());
 
-        if src.is_file() {
-            let file_name = src
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
+        if !src.is_file() {
+            continue;
+        }
 
-            // Apply quantization based on file type
-            if file_name.ends_with(".safetensors") || file_name.ends_with(".bin") {
-                quantize_tensor_file(&src, &dst, global).await?;
-            } else if file_name.ends_with(".onnx") {
-                quantize_onnx_model(&src, &dst, global).await?;
-            } else {
-                // Copy non-model files as-is
-                std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
+        let file_name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        if file_name.ends_with(".safetensors") {
+            let original_data =
+                std::fs::read(&src).map_err(|e| voirs_sdk::VoirsError::IoError {
                     path: src.clone(),
                     operation: voirs_sdk::error::IoOperation::Read,
                     source: e,
                 })?;
+
+            match quantize_safetensors_bytes(&original_data)? {
+                Some((quantized_data, report)) => {
+                    total_original_bytes += original_data.len() as u64;
+                    total_quantized_bytes += quantized_data.len() as u64;
+                    total_tensors_quantized += report.quantized_tensor_count;
+                    total_tensors_passthrough += report.passthrough_tensor_count;
+
+                    std::fs::write(&dst, &quantized_data).map_err(|e| {
+                        voirs_sdk::VoirsError::IoError {
+                            path: dst.clone(),
+                            operation: voirs_sdk::error::IoOperation::Write,
+                            source: e,
+                        }
+                    })?;
+
+                    if !global.quiet {
+                        let ratio = original_data.len() as f64 / quantized_data.len().max(1) as f64;
+                        println!(
+                            "        Quantized {} ({} tensor(s), {} passthrough, {:.1}x compression)",
+                            file_name, report.quantized_tensor_count, report.passthrough_tensor_count, ratio
+                        );
+                    }
+                    quantized_files.push(file_name);
+                }
+                None => {
+                    // Not real SafeTensors data (e.g. a prior optimization step
+                    // already transformed this file under the same name). Pass
+                    // it through unchanged rather than aborting the whole run.
+                    std::fs::write(&dst, &original_data).map_err(|e| {
+                        voirs_sdk::VoirsError::IoError {
+                            path: dst.clone(),
+                            operation: voirs_sdk::error::IoOperation::Write,
+                            source: e,
+                        }
+                    })?;
+                    skipped_files.push(format!("{file_name} (not a valid SafeTensors buffer)"));
+                }
             }
+        } else if file_name.ends_with(".bin") {
+            // Real PyTorch pickle parsing (opcode stream + zip container) is
+            // not implemented in pure Rust here. Copy through unchanged
+            // instead of corrupting it, and be explicit that it was skipped.
+            std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: src.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
+            skipped_files.push(format!(
+                "{file_name} (PyTorch pickle quantization not implemented; convert to SafeTensors first)"
+            ));
+        } else if file_name.ends_with(".onnx") {
+            return Err(voirs_sdk::VoirsError::model_error(format!(
+                "Cannot quantize '{}': ONNX INT8 quantization is not implemented in voirs-cli \
+                 (it requires parsing and rewriting the ONNX protobuf graph, which is out of \
+                 scope here). Convert to SafeTensors first via `voirs convert-model --from onnx \
+                 <input.onnx> <output.safetensors>`, then re-run `voirs optimize-model` on the \
+                 resulting file, or use a dedicated tool such as onnxruntime.quantization.",
+                src.display()
+            )));
+        } else {
+            // Copy non-model files as-is
+            std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: src.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
         }
     }
 
-    // Create quantization metadata
+    if total_tensors_quantized == 0 {
+        return Err(voirs_sdk::VoirsError::model_error(format!(
+            "Quantization produced no result: no SafeTensors weight tensors could be quantized \
+             in '{}'.{}",
+            input_path.display(),
+            if skipped_files.is_empty() {
+                " No weight files (*.safetensors) were found.".to_string()
+            } else {
+                format!(" Skipped: {}", skipped_files.join("; "))
+            }
+        )));
+    }
+
+    let compression_ratio = if total_quantized_bytes > 0 {
+        total_original_bytes as f64 / total_quantized_bytes as f64
+    } else {
+        1.0
+    };
+
+    // Create quantization metadata from REAL, measured totals (no hardcoded
+    // compression ratio or fabricated per-tensor counts).
     let metadata = serde_json::json!({
         "quantization": {
-            "method": "int8",
-            "precision": "reduced",
-            "compression_ratio": 2.0,
-            "optimized_at": chrono::Utc::now().to_rfc3339()
+            "method": "int8_affine_per_tensor",
+            "quantized_tensor_count": total_tensors_quantized,
+            "passthrough_tensor_count": total_tensors_passthrough,
+            "quantized_files": quantized_files,
+            "skipped_files": skipped_files,
+            "original_size_bytes": total_original_bytes,
+            "quantized_size_bytes": total_quantized_bytes,
+            "compression_ratio": compression_ratio,
+            "quantized_at": chrono::Utc::now().to_rfc3339()
         }
     });
 
@@ -446,71 +610,296 @@ async fn quantize_model_files(
     })?;
 
     if !global.quiet {
-        println!("      ✓ Quantization completed");
+        println!(
+            "      ✓ Quantization completed: {} tensor(s) across {} file(s), {:.1}x compression",
+            total_tensors_quantized,
+            quantized_files.len(),
+            compression_ratio
+        );
     }
     Ok(())
 }
 
-/// Optimize model computational graph
+/// Real per-tensor affine INT8 quantization report for one SafeTensors file.
+struct SafeTensorsQuantReport {
+    quantized_tensor_count: usize,
+    passthrough_tensor_count: usize,
+}
+
+/// Real per-tensor affine quantization parameters, recorded so a quantized
+/// tensor can be dequantized: `x ≈ (q as f32) * scale + zero_point`.
+#[derive(serde::Serialize)]
+struct TensorQuantParams {
+    scale: f32,
+    zero_point: f32,
+    original_min: f32,
+    original_max: f32,
+}
+
+/// Attempt real per-tensor affine INT8 quantization of a SafeTensors byte
+/// buffer.
+///
+/// Every `F32` tensor is quantized to `U8` via the standard affine formula
+/// `q = round((x - min) / scale)` with `scale = (max - min) / 255`, using
+/// the tensor's REAL min/max (not a fabricated constant). Every other dtype
+/// (already-integer types, `F16`/`BF16`, `BOOL`, ...) is copied through
+/// byte-for-byte unchanged -- quantizing e.g. an integer token-id tensor
+/// would corrupt it rather than shrink it usefully. The result is rebuilt
+/// as a structurally valid SafeTensors file via the `safetensors` crate, so
+/// header offsets always match the real data section (unlike the previous
+/// implementation, which kept the *original* header while replacing the
+/// data underneath it with stride-sampled bytes, producing offsets that
+/// pointed past the end of the actual data).
+///
+/// Returns `Ok(None)` when `data` does not parse as SafeTensors at all --
+/// callers should treat that as "nothing to quantize here" and copy the
+/// bytes through, not as a hard failure (a prior optimization step may have
+/// already transformed this file into something else, e.g. gzip, under the
+/// same filename).
+fn quantize_safetensors_bytes(data: &[u8]) -> Result<Option<(Vec<u8>, SafeTensorsQuantReport)>> {
+    let parsed = match SafeTensors::deserialize(data) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+
+    let mut owned_tensors: Vec<(String, Dtype, Vec<usize>, Vec<u8>)> = Vec::new();
+    let mut quant_params: HashMap<String, TensorQuantParams> = HashMap::new();
+    let mut quantized_tensor_count = 0usize;
+    let mut passthrough_tensor_count = 0usize;
+
+    for (name, view) in parsed.tensors() {
+        if view.dtype() == Dtype::F32 {
+            let (quantized_bytes, params) = quantize_f32_bytes_affine(view.data())?;
+            quant_params.insert(name.clone(), params);
+            owned_tensors.push((name, Dtype::U8, view.shape().to_vec(), quantized_bytes));
+            quantized_tensor_count += 1;
+        } else {
+            owned_tensors.push((
+                name,
+                view.dtype(),
+                view.shape().to_vec(),
+                view.data().to_vec(),
+            ));
+            passthrough_tensor_count += 1;
+        }
+    }
+
+    let mut tensor_map: HashMap<String, TensorView<'_>> = HashMap::new();
+    for (name, dtype, shape, bytes) in &owned_tensors {
+        let view = TensorView::new(*dtype, shape.clone(), bytes).map_err(|e| {
+            voirs_sdk::VoirsError::model_error(format!(
+                "Failed to rebuild tensor '{name}' after quantization: {e}"
+            ))
+        })?;
+        tensor_map.insert(name.clone(), view);
+    }
+
+    let params_json = serde_json::to_string(&quant_params).map_err(|e| {
+        voirs_sdk::VoirsError::serialization(
+            "json",
+            format!("Failed to serialize quantization params: {e}"),
+        )
+    })?;
+
+    let mut file_metadata: HashMap<String, String> = HashMap::new();
+    file_metadata.insert(
+        "voirs_quantization_method".to_string(),
+        "int8_affine_per_tensor".to_string(),
+    );
+    file_metadata.insert(
+        "voirs_quantized_tensor_count".to_string(),
+        quantized_tensor_count.to_string(),
+    );
+    file_metadata.insert(
+        "voirs_passthrough_tensor_count".to_string(),
+        passthrough_tensor_count.to_string(),
+    );
+    file_metadata.insert("voirs_quantization_params".to_string(), params_json);
+
+    let out_bytes = safetensors::serialize(&tensor_map, Some(file_metadata)).map_err(|e| {
+        voirs_sdk::VoirsError::model_error(format!(
+            "Failed to serialize quantized SafeTensors file: {e}"
+        ))
+    })?;
+
+    Ok(Some((
+        out_bytes,
+        SafeTensorsQuantReport {
+            quantized_tensor_count,
+            passthrough_tensor_count,
+        },
+    )))
+}
+
+/// Affine (asymmetric) per-tensor INT8 quantization of a raw little-endian
+/// `F32` byte buffer (SafeTensors' documented byte order). Returns the
+/// quantized bytes (one `U8` per element, in `[0, 255]`) plus the
+/// `(scale, zero_point)` needed to dequantize: `x ≈ q * scale + zero_point`.
+fn quantize_f32_bytes_affine(data: &[u8]) -> Result<(Vec<u8>, TensorQuantParams)> {
+    if !data.len().is_multiple_of(4) {
+        return Err(voirs_sdk::VoirsError::model_error(
+            "F32 tensor byte length is not a multiple of 4 -- corrupt SafeTensors data",
+        ));
+    }
+
+    let values: Vec<f32> = data
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    let (min, max) = values
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+    // Empty tensor: fall back to a degenerate but well-defined range.
+    let (min, max) = if values.is_empty() {
+        (0.0, 0.0)
+    } else {
+        (min, max)
+    };
+
+    // Constant tensor (max == min): scale is irrelevant since every quantized
+    // value will be 0, which dequantizes back to exactly `min`.
+    let range = max - min;
+    let scale = if range > f32::EPSILON {
+        range / 255.0
+    } else {
+        1.0
+    };
+
+    let quantized: Vec<u8> = values
+        .iter()
+        .map(|&v| (((v - min) / scale).round().clamp(0.0, 255.0)) as u8)
+        .collect();
+
+    Ok((
+        quantized,
+        TensorQuantParams {
+            scale,
+            zero_point: min,
+            original_min: min,
+            original_max: max,
+        },
+    ))
+}
+
+/// Optimize model computational graph.
+///
+/// A raw `*.safetensors` weights file has no computation graph (unlike
+/// ONNX): it is a flat bag of named tensors, so there are no operators to
+/// fuse, no constants to fold, and no dead nodes to eliminate. The only
+/// genuinely measurable optimization opportunity for that format is exact
+/// tensor duplication (e.g. tied embedding / projection weights); this is
+/// detected and reported (never rewritten -- SafeTensors readers assume
+/// non-aliased offsets, so the file is always copied through byte-for-byte
+/// unchanged). `*.onnx` files, which DO have a real graph, are refused with
+/// a clear error rather than corrupted, since real ONNX graph optimization
+/// (protobuf parsing + rewriting) is not implemented here.
 async fn optimize_model_graph(
-    input_path: &PathBuf,
-    output_path: &PathBuf,
+    input_path: &Path,
+    output_path: &Path,
     global: &GlobalOptions,
 ) -> Result<()> {
     if !global.quiet {
-        println!("      Optimizing computational graph...");
+        println!("      Analyzing computational structure...");
     }
 
     // Create output directory
     std::fs::create_dir_all(output_path).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: output_path.clone(),
+        path: output_path.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Write,
         source: e,
     })?;
 
-    // Copy and optimize model files
+    let mut safetensors_reports: Vec<(String, DuplicateTensorReport)> = Vec::new();
+    let mut skipped_files: Vec<String> = Vec::new();
+
+    // Copy and analyze model files
     for entry in std::fs::read_dir(input_path).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: input_path.clone(),
+        path: input_path.to_path_buf(),
         operation: voirs_sdk::error::IoOperation::Read,
         source: e,
     })? {
         let entry = entry.map_err(|e| voirs_sdk::VoirsError::IoError {
-            path: input_path.clone(),
+            path: input_path.to_path_buf(),
             operation: voirs_sdk::error::IoOperation::Read,
             source: e,
         })?;
         let src = entry.path();
         let dst = output_path.join(entry.file_name());
 
-        if src.is_file() {
-            let file_name = src
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
+        if !src.is_file() {
+            continue;
+        }
 
-            if file_name == "config.json" {
-                optimize_model_config(&src, &dst)?;
-            } else if file_name.ends_with(".onnx") {
-                optimize_onnx_graph(&src, &dst, global).await?;
-            } else {
-                // Copy other files
-                std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
-                    path: src.clone(),
-                    operation: voirs_sdk::error::IoOperation::Read,
-                    source: e,
-                })?;
+        let file_name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        if file_name == "config.json" {
+            annotate_model_config(&src, &dst)?;
+        } else if file_name.ends_with(".onnx") {
+            return Err(voirs_sdk::VoirsError::model_error(format!(
+                "Cannot optimize '{}': ONNX graph optimization (operator fusion / constant \
+                 folding / dead-code elimination) is not implemented in voirs-cli -- this \
+                 requires a full ONNX protobuf graph rewriter. Use tract's own optimizer or \
+                 onnxruntime's graph optimization instead.",
+                src.display()
+            )));
+        } else if file_name.ends_with(".safetensors") {
+            let data = std::fs::read(&src).map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: src.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
+
+            match analyze_safetensors_duplicates(&data) {
+                Some(report) => {
+                    if !global.quiet && !report.duplicate_groups.is_empty() {
+                        println!(
+                            "        {}: {} duplicate tensor group(s), {} bytes redundant",
+                            file_name,
+                            report.duplicate_groups.len(),
+                            report.duplicate_bytes
+                        );
+                    }
+                    safetensors_reports.push((file_name, report));
+                }
+                None => {
+                    // Not real SafeTensors data (e.g. an earlier step in this
+                    // same run already replaced it, such as gzip compression
+                    // running before graph analysis). Being unable to analyze
+                    // a buffer is not a failed transformation -- copy it
+                    // through and say so, rather than aborting the run.
+                    skipped_files.push(format!(
+                        "{file_name} (not a valid SafeTensors buffer -- likely already \
+                         transformed by an earlier optimization step)"
+                    ));
+                }
             }
+
+            // Always a byte-identical passthrough: this step only reports on
+            // duplication, it never rewrites tensor data or offsets.
+            std::fs::write(&dst, &data).map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: dst.clone(),
+                operation: voirs_sdk::error::IoOperation::Write,
+                source: e,
+            })?;
+        } else {
+            // Copy other files
+            std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: src.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
         }
     }
 
-    // Create optimization metadata
-    let metadata = serde_json::json!({
-        "graph_optimization": {
-            "techniques": ["operator_fusion", "constant_folding", "dead_code_elimination"],
-            "performance_gain": "15-25%",
-            "optimized_at": chrono::Utc::now().to_rfc3339()
-        }
-    });
+    // Create optimization metadata from REAL, measured findings.
+    let metadata = build_graph_analysis_metadata(&safetensors_reports, &skipped_files);
 
     let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
         voirs_sdk::VoirsError::serialization(
@@ -528,9 +917,103 @@ async fn optimize_model_graph(
     })?;
 
     if !global.quiet {
-        println!("      ✓ Graph optimization completed");
+        println!("      ✓ Graph analysis completed");
     }
     Ok(())
+}
+
+/// Report of exact-duplicate tensors found in one SafeTensors file: tensors
+/// whose dtype, shape AND raw bytes are all identical.
+struct DuplicateTensorReport {
+    tensor_count: usize,
+    duplicate_groups: Vec<Vec<String>>,
+    duplicate_bytes: u64,
+}
+
+/// Detect exact-duplicate tensors in a SafeTensors byte buffer.
+///
+/// Groups tensors by `(dtype, shape, SHA-256 of the raw bytes)`, then -- as
+/// a defense-in-depth check against the astronomically unlikely case of a
+/// hash collision -- re-verifies real byte equality within any group with
+/// more than one member before reporting it as a duplicate. Returns `None`
+/// when `data` does not parse as SafeTensors.
+fn analyze_safetensors_duplicates(data: &[u8]) -> Option<DuplicateTensorReport> {
+    let parsed = SafeTensors::deserialize(data).ok()?;
+
+    // `Dtype` does not derive `Hash`, but it does derive `Ord`, so a
+    // `BTreeMap` groups tensors by content signature without needing to
+    // clone every tensor's bytes into the map key (only a 32-byte digest is
+    // stored).
+    let mut by_signature: BTreeMap<(Dtype, Vec<usize>, Vec<u8>), Vec<String>> = BTreeMap::new();
+    for (name, view) in parsed.tensors() {
+        let digest = Sha256::digest(view.data()).to_vec();
+        by_signature
+            .entry((view.dtype(), view.shape().to_vec(), digest))
+            .or_default()
+            .push(name);
+    }
+
+    let mut duplicate_groups: Vec<Vec<String>> = Vec::new();
+    let mut duplicate_bytes = 0u64;
+
+    for mut names in by_signature.into_values() {
+        if names.len() < 2 {
+            continue;
+        }
+        names.sort();
+
+        let Ok(first_view) = parsed.tensor(&names[0]) else {
+            continue;
+        };
+        let first_bytes = first_view.data();
+        let all_identical = names[1..].iter().all(|n| {
+            parsed
+                .tensor(n)
+                .map(|v| v.data() == first_bytes)
+                .unwrap_or(false)
+        });
+
+        if all_identical {
+            duplicate_bytes += first_bytes.len() as u64 * (names.len() as u64 - 1);
+            duplicate_groups.push(names);
+        }
+    }
+    duplicate_groups.sort();
+
+    Some(DuplicateTensorReport {
+        tensor_count: parsed.len(),
+        duplicate_groups,
+        duplicate_bytes,
+    })
+}
+
+/// Build honest graph-analysis metadata from real per-file duplicate reports.
+fn build_graph_analysis_metadata(
+    reports: &[(String, DuplicateTensorReport)],
+    skipped_files: &[String],
+) -> serde_json::Value {
+    let total_duplicate_groups: usize = reports.iter().map(|(_, r)| r.duplicate_groups.len()).sum();
+    let total_duplicate_bytes: u64 = reports.iter().map(|(_, r)| r.duplicate_bytes).sum();
+
+    serde_json::json!({
+        "graph_analysis": {
+            "note": "SafeTensors weight files have no computation graph to fuse or fold \
+                      (that only applies to formats like ONNX); the only optimization \
+                      opportunity that can honestly be measured here is exact tensor \
+                      duplication. This step is analysis-only -- files are copied through \
+                      byte-for-byte unchanged.",
+            "files_analyzed": reports.iter().map(|(name, r)| serde_json::json!({
+                "file": name,
+                "tensor_count": r.tensor_count,
+                "duplicate_groups": r.duplicate_groups,
+                "duplicate_bytes": r.duplicate_bytes,
+            })).collect::<Vec<_>>(),
+            "files_skipped": skipped_files,
+            "total_duplicate_groups": total_duplicate_groups,
+            "total_duplicate_bytes": total_duplicate_bytes,
+            "analyzed_at": chrono::Utc::now().to_rfc3339()
+        }
+    })
 }
 
 /// Compress model files to reduce size
@@ -565,46 +1048,54 @@ async fn compress_model_files(
             source: e,
         })?;
         let src = entry.path();
-        let dst = output_path.join(entry.file_name());
 
-        if src.is_file() {
-            let original_size = src
-                .metadata()
-                .map_err(|e| voirs_sdk::VoirsError::IoError {
-                    path: src.clone(),
-                    operation: voirs_sdk::error::IoOperation::Read,
-                    source: e,
-                })?
-                .len();
-            total_original_size += original_size;
-
-            let file_name = src
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
-
-            if file_name.ends_with(".safetensors") || file_name.ends_with(".bin") {
-                // Compress large model files
-                compress_model_file(&src, &dst)?;
-            } else {
-                // Copy smaller files without compression
-                std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
-                    path: src.clone(),
-                    operation: voirs_sdk::error::IoOperation::Read,
-                    source: e,
-                })?;
-            }
-
-            let compressed_size = dst
-                .metadata()
-                .map_err(|e| voirs_sdk::VoirsError::IoError {
-                    path: dst.clone(),
-                    operation: voirs_sdk::error::IoOperation::Read,
-                    source: e,
-                })?
-                .len();
-            total_compressed_size += compressed_size;
+        if !src.is_file() {
+            continue;
         }
+
+        let original_size = src
+            .metadata()
+            .map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: src.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?
+            .len();
+        total_original_size += original_size;
+
+        let file_name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        let compressed_size = if file_name.ends_with(".safetensors") || file_name.ends_with(".bin")
+        {
+            // Gzip output is no longer a valid SafeTensors/PyTorch file, so it
+            // must NOT keep the original extension: a later optimization step
+            // (or a human, or a model loader) reading a file named
+            // "model.safetensors" must never receive gzip bytes under that
+            // name and try to load it as a real model.
+            let gz_dst = output_path.join(format!("{file_name}.gz"));
+            compress_model_file(&src, &gz_dst)?;
+            gz_dst
+                .metadata()
+                .map_err(|e| voirs_sdk::VoirsError::IoError {
+                    path: gz_dst.clone(),
+                    operation: voirs_sdk::error::IoOperation::Read,
+                    source: e,
+                })?
+                .len()
+        } else {
+            // Copy smaller files without compression
+            let dst = output_path.join(entry.file_name());
+            std::fs::copy(&src, &dst).map_err(|e| voirs_sdk::VoirsError::IoError {
+                path: src.clone(),
+                operation: voirs_sdk::error::IoOperation::Read,
+                source: e,
+            })?;
+            original_size
+        };
+        total_compressed_size += compressed_size;
     }
 
     // Calculate compression ratio
@@ -650,24 +1141,44 @@ async fn compress_model_files(
     Ok(())
 }
 
-/// Optimize configuration
-fn optimize_configuration(input_path: &Path, output_path: &Path) -> Result<()> {
-    let config_src = input_path.join("config.json");
-    let config_dst = output_path.join("config.json");
+/// Annotate `config.json` with the real fact that voirs-cli's optimize
+/// pipeline analyzed this model. Unlike the previous implementation, this
+/// never claims specific ML transformations happened (`enable_fusion`,
+/// `memory_optimization`, ...) -- a flat weights directory has no graph for
+/// those to apply to, so asserting them would be exactly the kind of
+/// fabricated capability flag this rewrite exists to remove.
+fn annotate_model_config(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    let config_content =
+        std::fs::read_to_string(src).map_err(|e| voirs_sdk::VoirsError::IoError {
+            path: src.to_path_buf(),
+            operation: voirs_sdk::error::IoOperation::Read,
+            source: e,
+        })?;
 
-    if config_src.exists() {
-        let mut config_content = std::fs::read_to_string(&config_src)?;
-        config_content = config_content.replace("\"optimized\": false", "\"optimized\": true");
-        std::fs::write(&config_dst, config_content)?;
+    let mut config: serde_json::Value = serde_json::from_str(&config_content)
+        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Invalid JSON config: {}", e)))?;
+
+    if let Some(obj) = config.as_object_mut() {
+        obj.insert(
+            "voirs_optimize_analyzed".to_string(),
+            serde_json::Value::Bool(true),
+        );
+        obj.insert(
+            "voirs_optimize_analyzed_at".to_string(),
+            serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+        );
     }
 
-    Ok(())
-}
+    let annotated_content = serde_json::to_string_pretty(&config).map_err(|e| {
+        voirs_sdk::VoirsError::config_error(format!("Failed to serialize config: {}", e))
+    })?;
 
-/// Compress model artifacts
-fn compress_model_artifacts(input_path: &Path, output_path: &Path) -> Result<()> {
-    // Create a marker file to indicate compression
-    std::fs::write(output_path.join("compressed.marker"), "optimized")?;
+    std::fs::write(dst, annotated_content).map_err(|e| voirs_sdk::VoirsError::IoError {
+        path: dst.to_path_buf(),
+        operation: voirs_sdk::error::IoOperation::Write,
+        source: e,
+    })?;
+
     Ok(())
 }
 
@@ -707,687 +1218,16 @@ fn display_optimization_results(
     println!("Original size: {:.1} MB", result.original_size_mb);
     println!("Optimized size: {:.1} MB", result.optimized_size_mb);
     println!("Compression ratio: {:.2}x", result.compression_ratio);
-    println!("Speed improvement: {:.1}x", result.speed_improvement);
-    println!("Quality impact: {:.1}", result.quality_impact);
+    println!(
+        "Estimated speed improvement: {:.1}x (strategy-based estimate, not a measured \
+         benchmark -- run `voirs benchmark-models` before/after for real timing)",
+        result.speed_improvement
+    );
+    println!(
+        "Estimated quality impact: {:.1} (strategy-based estimate)",
+        result.quality_impact
+    );
     println!("Output path: {}", result.output_path.display());
-}
-
-/// Quantize tensor file with realistic quantization simulation
-async fn quantize_tensor_file(
-    src: &std::path::Path,
-    dst: &std::path::Path,
-    global: &GlobalOptions,
-) -> Result<()> {
-    let original_data = std::fs::read(src).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: src.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Read,
-        source: e,
-    })?;
-
-    // Check file extension to determine format
-    let file_ext = src
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    let quantized_data = match file_ext.as_str() {
-        "safetensors" => quantize_safetensors_format(&original_data)?,
-        "bin" => quantize_pytorch_bin_format(&original_data)?,
-        "onnx" => quantize_onnx_format(&original_data)?,
-        _ => {
-            // For unknown formats, apply generic quantization
-            quantize_generic_format(&original_data)?
-        }
-    };
-
-    // Write quantized data
-    std::fs::write(dst, &quantized_data).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: dst.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    // Create quantization metadata
-    let metadata = create_quantization_metadata(&original_data, &quantized_data, &file_ext);
-    let metadata_path = dst.with_extension(format!("{}.quant_meta", file_ext));
-
-    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
-        voirs_sdk::VoirsError::serialization(
-            "json",
-            format!("Failed to serialize quantization file metadata: {}", e),
-        )
-    })?;
-
-    std::fs::write(&metadata_path, json_content).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: metadata_path,
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    if !global.quiet {
-        let compression_ratio = original_data.len() as f64 / quantized_data.len() as f64;
-        let filename = src
-            .file_name()
-            .ok_or_else(|| {
-                voirs_sdk::VoirsError::model_error(format!(
-                    "Invalid source file path: {}",
-                    src.display()
-                ))
-            })?
-            .to_string_lossy();
-        println!(
-            "        Quantized tensor file: {} ({:.1}x compression)",
-            filename, compression_ratio
-        );
-    }
-    Ok(())
-}
-
-/// Quantize safetensors format
-fn quantize_safetensors_format(data: &[u8]) -> Result<Vec<u8>> {
-    // Simulate safetensors quantization
-    // Real implementation would parse the safetensors header and tensor data
-    if data.len() < 8 {
-        return Ok(data.to_vec());
-    }
-
-    // Read header size (first 8 bytes in safetensors format)
-    let header_bytes: [u8; 8] = data[0..8]
-        .try_into()
-        .map_err(|_| voirs_sdk::VoirsError::model_error("Invalid safetensors header format"))?;
-    let header_size = u64::from_le_bytes(header_bytes) as usize;
-
-    if header_size + 8 > data.len() {
-        return Ok(data.to_vec());
-    }
-
-    // Keep header intact, quantize tensor data
-    let mut quantized = Vec::new();
-    quantized.extend_from_slice(&data[0..header_size + 8]);
-
-    // Simulate quantization of tensor data (FP32 -> INT8)
-    let tensor_data = &data[header_size + 8..];
-    let quantized_tensors = apply_int8_quantization(tensor_data);
-    quantized.extend_from_slice(&quantized_tensors);
-
-    Ok(quantized)
-}
-
-/// Quantize PyTorch bin format
-fn quantize_pytorch_bin_format(data: &[u8]) -> Result<Vec<u8>> {
-    // Simulate PyTorch pickle format quantization
-    // Real implementation would deserialize pickle, quantize tensors, re-serialize
-    let quantized_data = apply_int8_quantization(data);
-    Ok(quantized_data)
-}
-
-/// Quantize ONNX format
-fn quantize_onnx_format(data: &[u8]) -> Result<Vec<u8>> {
-    // Simulate ONNX protobuf quantization
-    // Real implementation would parse protobuf, quantize weight initializers
-    let quantized_data = apply_int8_quantization(data);
-    Ok(quantized_data)
-}
-
-/// Apply generic quantization
-fn quantize_generic_format(data: &[u8]) -> Result<Vec<u8>> {
-    // Generic quantization for unknown formats
-    let quantized_data = apply_int8_quantization(data);
-    Ok(quantized_data)
-}
-
-/// Apply INT8 quantization simulation
-fn apply_int8_quantization(data: &[u8]) -> Vec<u8> {
-    // Simulate FP32 to INT8 quantization
-    // Real implementation would:
-    // 1. Parse FP32 values from binary data
-    // 2. Calculate min/max for calibration
-    // 3. Apply quantization formula: q = round((x - min) / scale)
-    // 4. Pack INT8 values back to binary
-
-    // For simulation, reduce data size by ~75% (FP32 -> INT8)
-    let target_size = (data.len() as f64 * 0.25) as usize;
-    let mut quantized = Vec::with_capacity(target_size);
-
-    // Sample every 4th byte to simulate FP32 -> INT8 conversion
-    for i in (0..data.len()).step_by(4) {
-        if quantized.len() < target_size {
-            quantized.push(data[i]);
-        } else {
-            break;
-        }
-    }
-
-    // Pad to target size if needed
-    while quantized.len() < target_size {
-        quantized.push(0);
-    }
-
-    quantized
-}
-
-/// Create quantization metadata
-fn create_quantization_metadata(
-    original: &[u8],
-    quantized: &[u8],
-    format: &str,
-) -> serde_json::Value {
-    let compression_ratio = original.len() as f64 / quantized.len() as f64;
-
-    serde_json::json!({
-        "quantization": {
-            "format": format,
-            "method": "INT8",
-            "original_size_bytes": original.len(),
-            "quantized_size_bytes": quantized.len(),
-            "compression_ratio": compression_ratio,
-            "size_reduction_percent": (1.0 - (quantized.len() as f64 / original.len() as f64)) * 100.0,
-            "quality_preservation": estimate_quality_preservation(format),
-            "quantized_at": chrono::Utc::now().to_rfc3339(),
-            "calibration_method": "min_max",
-            "tensor_types": ["weights", "biases"],
-            "performance_gain": estimate_performance_gain(compression_ratio)
-        }
-    })
-}
-
-/// Estimate quality preservation based on format
-fn estimate_quality_preservation(format: &str) -> f64 {
-    match format {
-        "safetensors" => 0.95, // Good preservation with structured format
-        "bin" => 0.90,         // Good preservation for PyTorch
-        "onnx" => 0.92,        // Good preservation for ONNX
-        _ => 0.85,             // Conservative estimate for unknown formats
-    }
-}
-
-/// Estimate performance gain from compression ratio
-fn estimate_performance_gain(compression_ratio: f64) -> f64 {
-    // Performance gain is typically less than compression ratio due to overhead
-    compression_ratio * 0.8
-}
-
-/// Quantize ONNX model with enhanced simulation
-async fn quantize_onnx_model(
-    src: &std::path::Path,
-    dst: &std::path::Path,
-    global: &GlobalOptions,
-) -> Result<()> {
-    let original_data = std::fs::read(src).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: src.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Read,
-        source: e,
-    })?;
-
-    // Simulate ONNX quantization
-    let quantized_data = simulate_onnx_quantization(&original_data)?;
-
-    std::fs::write(dst, &quantized_data).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: dst.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    // Create ONNX quantization metadata
-    let metadata = create_onnx_quantization_metadata(&original_data, &quantized_data);
-    let metadata_path = dst.with_extension("onnx.quant_meta");
-
-    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
-        voirs_sdk::VoirsError::serialization(
-            "json",
-            format!("Failed to serialize ONNX quantization metadata: {}", e),
-        )
-    })?;
-
-    std::fs::write(&metadata_path, json_content).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: metadata_path,
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    if !global.quiet {
-        let compression_ratio = original_data.len() as f64 / quantized_data.len() as f64;
-        let filename = src
-            .file_name()
-            .ok_or_else(|| {
-                voirs_sdk::VoirsError::model_error(format!(
-                    "Invalid source file path: {}",
-                    src.display()
-                ))
-            })?
-            .to_string_lossy();
-        println!(
-            "        Quantized ONNX model: {} ({:.1}x compression)",
-            filename, compression_ratio
-        );
-    }
-    Ok(())
-}
-
-/// Simulate ONNX quantization
-fn simulate_onnx_quantization(data: &[u8]) -> Result<Vec<u8>> {
-    // Simulate ONNX protobuf quantization
-    // Real implementation would:
-    // 1. Parse the protobuf to extract the model graph
-    // 2. Identify weight initializers and quantize them
-    // 3. Update the graph with quantization nodes
-    // 4. Re-serialize the protobuf
-
-    if data.len() < 16 {
-        return Ok(data.to_vec());
-    }
-
-    // Check for ONNX magic bytes (optional, for simulation)
-    let is_onnx = data.len() > 8 && &data[0..8] == b"\x08\x07\x12\x04\x08\x07\x12\x04";
-
-    if is_onnx {
-        // Apply ONNX-specific quantization
-        let quantized = apply_onnx_specific_quantization(data);
-        Ok(quantized)
-    } else {
-        // Apply generic quantization
-        let quantized = apply_int8_quantization(data);
-        Ok(quantized)
-    }
-}
-
-/// Apply ONNX-specific quantization
-fn apply_onnx_specific_quantization(data: &[u8]) -> Vec<u8> {
-    // Simulate ONNX-specific quantization that preserves graph structure
-    // while reducing weight precision
-
-    // ONNX models typically have better compression ratios than generic formats
-    let target_size = (data.len() as f64 * 0.3) as usize; // 70% size reduction
-    let mut quantized = Vec::with_capacity(target_size);
-
-    // Keep some header information intact (first 256 bytes)
-    let header_size = std::cmp::min(256, data.len());
-    quantized.extend_from_slice(&data[0..header_size]);
-
-    // Quantize the rest of the data
-    let remaining_data = &data[header_size..];
-    let remaining_target = target_size.saturating_sub(header_size);
-
-    // Sample data to simulate quantization
-    let step = if remaining_data.len() > remaining_target && remaining_target > 0 {
-        remaining_data.len() / remaining_target
-    } else {
-        1
-    };
-
-    for i in (0..remaining_data.len()).step_by(step) {
-        if quantized.len() < target_size {
-            quantized.push(remaining_data[i]);
-        } else {
-            break;
-        }
-    }
-
-    // Pad to target size if needed
-    while quantized.len() < target_size {
-        quantized.push(0);
-    }
-
-    quantized
-}
-
-/// Create ONNX quantization metadata
-fn create_onnx_quantization_metadata(original: &[u8], quantized: &[u8]) -> serde_json::Value {
-    let compression_ratio = original.len() as f64 / quantized.len() as f64;
-
-    serde_json::json!({
-        "onnx_quantization": {
-            "format": "ONNX",
-            "quantization_method": "dynamic_int8",
-            "original_size_bytes": original.len(),
-            "quantized_size_bytes": quantized.len(),
-            "compression_ratio": compression_ratio,
-            "size_reduction_percent": (1.0 - (quantized.len() as f64 / original.len() as f64)) * 100.0,
-            "quality_preservation": 0.92,
-            "quantized_at": chrono::Utc::now().to_rfc3339(),
-            "optimization_techniques": [
-                "dynamic_quantization",
-                "weight_quantization",
-                "graph_optimization",
-                "constant_folding"
-            ],
-            "performance_improvement": {
-                "inference_speed": compression_ratio * 0.85,
-                "memory_usage": compression_ratio,
-                "model_size": compression_ratio
-            },
-            "supported_ops": [
-                "Conv", "MatMul", "Gemm", "Add", "Mul", "Relu"
-            ],
-            "calibration_dataset": "representative_samples",
-            "quantization_ranges": {
-                "weights": "[-128, 127]",
-                "activations": "dynamic"
-            }
-        }
-    })
-}
-
-/// Optimize model configuration
-fn optimize_model_config(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
-    let config_content =
-        std::fs::read_to_string(src).map_err(|e| voirs_sdk::VoirsError::IoError {
-            path: src.to_path_buf(),
-            operation: voirs_sdk::error::IoOperation::Read,
-            source: e,
-        })?;
-
-    // Parse and optimize configuration
-    let mut config: serde_json::Value = serde_json::from_str(&config_content)
-        .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Invalid JSON config: {}", e)))?;
-
-    // Apply optimizations to config
-    if let Some(obj) = config.as_object_mut() {
-        obj.insert("optimized".to_string(), serde_json::Value::Bool(true));
-        obj.insert(
-            "optimization_level".to_string(),
-            serde_json::Value::String("high".to_string()),
-        );
-
-        // Enable performance optimizations
-        if let Some(perf) = obj.get_mut("performance") {
-            if let Some(perf_obj) = perf.as_object_mut() {
-                perf_obj.insert("enable_fusion".to_string(), serde_json::Value::Bool(true));
-                perf_obj.insert(
-                    "memory_optimization".to_string(),
-                    serde_json::Value::Bool(true),
-                );
-            }
-        } else {
-            obj.insert(
-                "performance".to_string(),
-                serde_json::json!({
-                    "enable_fusion": true,
-                    "memory_optimization": true,
-                    "parallel_execution": true
-                }),
-            );
-        }
-    }
-
-    let optimized_content = serde_json::to_string_pretty(&config).map_err(|e| {
-        voirs_sdk::VoirsError::config_error(format!("Failed to serialize config: {}", e))
-    })?;
-
-    std::fs::write(dst, optimized_content).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: dst.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    Ok(())
-}
-
-/// Optimize ONNX graph with enhanced simulation
-async fn optimize_onnx_graph(
-    src: &std::path::Path,
-    dst: &std::path::Path,
-    global: &GlobalOptions,
-) -> Result<()> {
-    let original_data = std::fs::read(src).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: src.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Read,
-        source: e,
-    })?;
-
-    // Simulate ONNX graph optimization
-    let optimized_data = simulate_onnx_graph_optimization(&original_data)?;
-
-    std::fs::write(dst, &optimized_data).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: dst.to_path_buf(),
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    // Create graph optimization metadata
-    let metadata = create_graph_optimization_metadata(&original_data, &optimized_data);
-    let metadata_path = dst.with_extension("onnx.graph_opt_meta");
-
-    let json_content = serde_json::to_string_pretty(&metadata).map_err(|e| {
-        voirs_sdk::VoirsError::serialization(
-            "json",
-            format!("Failed to serialize graph optimization metadata: {}", e),
-        )
-    })?;
-
-    std::fs::write(&metadata_path, json_content).map_err(|e| voirs_sdk::VoirsError::IoError {
-        path: metadata_path,
-        operation: voirs_sdk::error::IoOperation::Write,
-        source: e,
-    })?;
-
-    if !global.quiet {
-        let size_reduction =
-            (original_data.len() as f64 - optimized_data.len() as f64) / original_data.len() as f64;
-        let filename = src
-            .file_name()
-            .ok_or_else(|| {
-                voirs_sdk::VoirsError::model_error(format!(
-                    "Invalid source file path: {}",
-                    src.display()
-                ))
-            })?
-            .to_string_lossy();
-        println!(
-            "        Optimized ONNX graph: {} ({:.1}% size reduction)",
-            filename,
-            size_reduction * 100.0
-        );
-    }
-    Ok(())
-}
-
-/// Simulate ONNX graph optimization
-fn simulate_onnx_graph_optimization(data: &[u8]) -> Result<Vec<u8>> {
-    // Simulate ONNX graph optimization techniques
-    // Real implementation would:
-    // 1. Parse the ONNX protobuf to extract the model graph
-    // 2. Apply operator fusion (Conv + BatchNorm + Relu -> FusedConv)
-    // 3. Perform constant folding
-    // 4. Remove dead code and unused nodes
-    // 5. Optimize memory layout
-    // 6. Re-serialize the optimized graph
-
-    if data.len() < 32 {
-        return Ok(data.to_vec());
-    }
-
-    // Apply multiple optimization passes
-    let mut optimized = data.to_vec();
-
-    // Pass 1: Operator fusion simulation
-    optimized = apply_operator_fusion(&optimized);
-
-    // Pass 2: Constant folding simulation
-    optimized = apply_constant_folding(&optimized);
-
-    // Pass 3: Dead code elimination simulation
-    optimized = apply_dead_code_elimination(&optimized);
-
-    // Pass 4: Memory layout optimization
-    optimized = apply_memory_layout_optimization(&optimized);
-
-    Ok(optimized)
-}
-
-/// Apply operator fusion optimization
-fn apply_operator_fusion(data: &[u8]) -> Vec<u8> {
-    // Simulate operator fusion which typically reduces model size by 5-10%
-    let target_size = (data.len() as f64 * 0.95) as usize;
-    let mut fused = Vec::with_capacity(target_size);
-
-    // Keep important header information
-    let header_size = std::cmp::min(512, data.len());
-    fused.extend_from_slice(&data[0..header_size]);
-
-    // Simulate fusion by sampling data more aggressively
-    let remaining_data = &data[header_size..];
-    let remaining_target = target_size.saturating_sub(header_size);
-
-    if remaining_data.len() > remaining_target && remaining_target > 0 {
-        let step = remaining_data.len() / remaining_target;
-        for i in (0..remaining_data.len()).step_by(step) {
-            if fused.len() < target_size {
-                fused.push(remaining_data[i]);
-            } else {
-                break;
-            }
-        }
-    } else {
-        fused.extend_from_slice(remaining_data);
-    }
-
-    // Pad to target size if needed
-    while fused.len() < target_size {
-        fused.push(0);
-    }
-
-    fused
-}
-
-/// Apply constant folding optimization
-fn apply_constant_folding(data: &[u8]) -> Vec<u8> {
-    // Simulate constant folding which reduces model size by 3-7%
-    let target_size = (data.len() as f64 * 0.97) as usize;
-    let mut folded = Vec::with_capacity(target_size);
-
-    // Sample data to simulate constant folding
-    let step = if data.len() > target_size && target_size > 0 {
-        data.len() / target_size
-    } else {
-        1
-    };
-
-    for i in (0..data.len()).step_by(step) {
-        if folded.len() < target_size {
-            folded.push(data[i]);
-        } else {
-            break;
-        }
-    }
-
-    // Pad to target size if needed
-    while folded.len() < target_size {
-        folded.push(0);
-    }
-
-    folded
-}
-
-/// Apply dead code elimination
-fn apply_dead_code_elimination(data: &[u8]) -> Vec<u8> {
-    // Simulate dead code elimination which reduces model size by 2-5%
-    let target_size = (data.len() as f64 * 0.98) as usize;
-    let mut eliminated = Vec::with_capacity(target_size);
-
-    // Sample data to simulate dead code elimination
-    let step = if data.len() > target_size && target_size > 0 {
-        data.len() / target_size
-    } else {
-        1
-    };
-
-    for i in (0..data.len()).step_by(step) {
-        if eliminated.len() < target_size {
-            eliminated.push(data[i]);
-        } else {
-            break;
-        }
-    }
-
-    // Pad to target size if needed
-    while eliminated.len() < target_size {
-        eliminated.push(0);
-    }
-
-    eliminated
-}
-
-/// Apply memory layout optimization
-fn apply_memory_layout_optimization(data: &[u8]) -> Vec<u8> {
-    // Simulate memory layout optimization which may slightly reduce size
-    let target_size = (data.len() as f64 * 0.99) as usize;
-    let mut optimized = Vec::with_capacity(target_size);
-
-    // Sample data to simulate memory layout optimization
-    let step = if data.len() > target_size && target_size > 0 {
-        data.len() / target_size
-    } else {
-        1
-    };
-
-    for i in (0..data.len()).step_by(step) {
-        if optimized.len() < target_size {
-            optimized.push(data[i]);
-        } else {
-            break;
-        }
-    }
-
-    // Pad to target size if needed
-    while optimized.len() < target_size {
-        optimized.push(0);
-    }
-
-    optimized
-}
-
-/// Create graph optimization metadata
-fn create_graph_optimization_metadata(original: &[u8], optimized: &[u8]) -> serde_json::Value {
-    let size_reduction = (original.len() as f64 - optimized.len() as f64) / original.len() as f64;
-
-    serde_json::json!({
-        "graph_optimization": {
-            "format": "ONNX",
-            "original_size_bytes": original.len(),
-            "optimized_size_bytes": optimized.len(),
-            "size_reduction_percent": size_reduction * 100.0,
-            "optimized_at": chrono::Utc::now().to_rfc3339(),
-            "optimization_passes": [
-                {
-                    "name": "operator_fusion",
-                    "description": "Fused consecutive operators for better performance",
-                    "size_reduction_percent": 5.0,
-                    "performance_gain": 1.15
-                },
-                {
-                    "name": "constant_folding",
-                    "description": "Pre-computed constant expressions",
-                    "size_reduction_percent": 3.0,
-                    "performance_gain": 1.08
-                },
-                {
-                    "name": "dead_code_elimination",
-                    "description": "Removed unused nodes and edges",
-                    "size_reduction_percent": 2.0,
-                    "performance_gain": 1.05
-                },
-                {
-                    "name": "memory_layout_optimization",
-                    "description": "Optimized memory access patterns",
-                    "size_reduction_percent": 1.0,
-                    "performance_gain": 1.03
-                }
-            ],
-            "performance_improvement": {
-                "inference_speed": 1.25,
-                "memory_usage": 1.0 / (1.0 - size_reduction),
-                "cpu_utilization": 0.85
-            },
-            "optimization_statistics": {
-                "nodes_removed": ((original.len() - optimized.len()) / 100) as u32,
-                "edges_removed": ((original.len() - optimized.len()) / 200) as u32,
-                "operators_fused": ((original.len() - optimized.len()) / 150) as u32,
-                "constants_folded": ((original.len() - optimized.len()) / 80) as u32
-            }
-        }
-    })
 }
 
 /// Compress model file using gzip
@@ -1447,19 +1287,54 @@ fn compress_model_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap as StdHashMap;
 
-    #[test]
-    fn test_determine_optimization_strategy() {
-        let config = AppConfig::default();
-        let global = GlobalOptions {
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "voirs_optimize_test_{}_{}_{}",
+            label,
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        std::fs::create_dir_all(&dir).expect("failed to create unique temp dir");
+        dir
+    }
+
+    fn default_global() -> GlobalOptions {
+        GlobalOptions {
             config: None,
             verbose: 0,
-            quiet: false,
+            quiet: true,
             format: None,
             voice: None,
             gpu: false,
             threads: None,
-        };
+        }
+    }
+
+    /// Build a tiny but real SafeTensors buffer with one F32 tensor and one
+    /// I64 tensor (so passthrough behavior can be verified too).
+    fn build_test_safetensors(f32_values: &[f32]) -> Vec<u8> {
+        let f32_bytes: Vec<u8> = f32_values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let f32_view = TensorView::new(Dtype::F32, vec![f32_values.len()], &f32_bytes)
+            .expect("valid F32 tensor view");
+
+        let int_values: [i64; 2] = [7, 9];
+        let int_bytes: Vec<u8> = int_values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let int_view = TensorView::new(Dtype::I64, vec![int_values.len()], &int_bytes)
+            .expect("valid I64 view");
+
+        let mut tensors: StdHashMap<String, TensorView<'_>> = StdHashMap::new();
+        tensors.insert("weight".to_string(), f32_view);
+        tensors.insert("token_ids".to_string(), int_view);
+
+        safetensors::serialize(&tensors, None).expect("serialize test safetensors")
+    }
+
+    #[test]
+    fn test_determine_optimization_strategy() {
+        let config = AppConfig::default();
+        let global = default_global();
 
         // Test default balanced strategy
         let strategy = determine_optimization_strategy(None, &config, &global)
@@ -1500,5 +1375,334 @@ mod tests {
     fn test_calculate_speed_improvement() {
         let improvement = calculate_speed_improvement(&OptimizationStrategy::Speed);
         assert!(improvement > 1.0);
+    }
+
+    #[test]
+    fn test_quantize_f32_bytes_affine_roundtrip() {
+        let values = [0.0f32, -1.5, 3.25, 100.0, -100.0];
+        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+
+        let (quantized, params) =
+            quantize_f32_bytes_affine(&bytes).expect("quantization should succeed");
+
+        assert_eq!(quantized.len(), values.len());
+        // Real per-tensor min/max, not a fabricated constant.
+        assert!((params.original_min - (-100.0)).abs() < 1e-6);
+        assert!((params.original_max - 100.0).abs() < 1e-6);
+
+        // Dequantize and check every real value round-trips within one
+        // quantization step (the theoretical maximum error for 8-bit affine
+        // quantization of this range).
+        let max_error = params.scale;
+        for (i, &original) in values.iter().enumerate() {
+            let dequantized = quantized[i] as f32 * params.scale + params.zero_point;
+            assert!(
+                (dequantized - original).abs() <= max_error + 1e-4,
+                "value {i}: original={original}, dequantized={dequantized}, max_error={max_error}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_quantize_f32_bytes_affine_constant_tensor() {
+        // Degenerate case: every value identical -- must not divide by zero
+        // and must reconstruct the exact constant.
+        let values = [5.0f32; 8];
+        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let (quantized, params) = quantize_f32_bytes_affine(&bytes).expect("must not fail");
+        for &q in &quantized {
+            let dequantized = q as f32 * params.scale + params.zero_point;
+            assert!((dequantized - 5.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_quantize_safetensors_bytes_is_valid_and_shrinks() {
+        // Large enough that the real 4x data reduction (F32 -> U8) clearly
+        // dominates the SafeTensors header + quantization-metadata overhead
+        // added per file (for a handful of elements, that fixed overhead can
+        // exceed the raw data savings, which would make a "must shrink"
+        // assertion flaky rather than meaningful).
+        let values: Vec<f32> = (0..300).map(|i| i as f32 * 0.5 - 10.0).collect();
+        let original = build_test_safetensors(&values);
+
+        let (quantized, report) = quantize_safetensors_bytes(&original)
+            .expect("must not error")
+            .expect("real safetensors input must be recognized");
+
+        assert_eq!(report.quantized_tensor_count, 1); // the F32 tensor
+        assert_eq!(report.passthrough_tensor_count, 1); // the I64 tensor
+
+        // Output must be structurally valid SafeTensors.
+        let reparsed =
+            SafeTensors::deserialize(&quantized).expect("output must be valid SafeTensors");
+        let weight = reparsed.tensor("weight").expect("weight tensor present");
+        assert_eq!(weight.dtype(), Dtype::U8);
+        assert_eq!(weight.shape(), &[values.len()]);
+
+        let token_ids = reparsed.tensor("token_ids").expect("token_ids present");
+        assert_eq!(token_ids.dtype(), Dtype::I64); // passthrough: untouched
+
+        // The whole file must genuinely shrink (F32 -> U8 is a real 4x
+        // reduction on the quantized tensor).
+        assert!(quantized.len() < original.len());
+    }
+
+    #[test]
+    fn test_quantize_safetensors_bytes_rejects_garbage() {
+        let garbage = b"this is definitely not a safetensors file".to_vec();
+        let result = quantize_safetensors_bytes(&garbage).expect("must not error");
+        assert!(
+            result.is_none(),
+            "garbage input must be reported as unparseable, not corrupted"
+        );
+    }
+
+    #[test]
+    fn test_analyze_safetensors_duplicates_detects_real_duplicates() {
+        let shared_bytes: Vec<u8> = [1.0f32, 2.0, 3.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let unique_bytes: Vec<u8> = [9.0f32, 9.0, 9.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+
+        let view_a = TensorView::new(Dtype::F32, vec![3], &shared_bytes).unwrap();
+        let view_b = TensorView::new(Dtype::F32, vec![3], &shared_bytes).unwrap();
+        let view_c = TensorView::new(Dtype::F32, vec![3], &unique_bytes).unwrap();
+
+        let mut tensors: StdHashMap<String, TensorView<'_>> = StdHashMap::new();
+        tensors.insert("layer_a.weight".to_string(), view_a);
+        tensors.insert("layer_b.weight".to_string(), view_b);
+        tensors.insert("layer_c.weight".to_string(), view_c);
+
+        let data = safetensors::serialize(&tensors, None).unwrap();
+        let report = analyze_safetensors_duplicates(&data).expect("real safetensors input");
+
+        assert_eq!(report.tensor_count, 3);
+        assert_eq!(report.duplicate_groups.len(), 1);
+        assert_eq!(report.duplicate_groups[0].len(), 2);
+        assert!(report.duplicate_groups[0].contains(&"layer_a.weight".to_string()));
+        assert!(report.duplicate_groups[0].contains(&"layer_b.weight".to_string()));
+        assert!(!report
+            .duplicate_groups
+            .iter()
+            .any(|g| g.contains(&"layer_c.weight".to_string())));
+        assert_eq!(report.duplicate_bytes, shared_bytes.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn test_quantize_model_files_end_to_end_real_shrink() {
+        let global = default_global();
+        let input_dir = unique_temp_dir("quantize_input");
+        let output_dir = unique_temp_dir("quantize_output");
+
+        let data = build_test_safetensors(&(0..256).map(|i| i as f32).collect::<Vec<_>>());
+        std::fs::write(input_dir.join("model.safetensors"), &data).unwrap();
+
+        quantize_model_files(&input_dir, &output_dir, &global)
+            .await
+            .expect("quantization of a real safetensors file must succeed");
+
+        let output_file = std::fs::read(output_dir.join("model.safetensors")).unwrap();
+        assert!(
+            output_file.len() < data.len(),
+            "output must genuinely shrink"
+        );
+        SafeTensors::deserialize(&output_file).expect("output must be structurally valid");
+
+        let info_path = output_dir.join("quantization_info.json");
+        assert!(info_path.exists());
+        let info: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(info_path).unwrap()).unwrap();
+        let quantized_count = info["quantization"]["quantized_tensor_count"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(quantized_count, 1);
+        // Compression ratio must be computed from the real byte totals, not
+        // a hardcoded constant -- for a mostly-F32 tensor it must exceed 1x.
+        assert!(info["quantization"]["compression_ratio"].as_f64().unwrap() > 1.0);
+
+        std::fs::remove_dir_all(&input_dir).ok();
+        std::fs::remove_dir_all(&output_dir).ok();
+    }
+
+    /// Regression test: a directory that contains only an unquantizable
+    /// format (`.bin`) must not be reported as a successful quantization.
+    #[tokio::test]
+    async fn test_quantize_model_files_fails_closed_when_nothing_quantized() {
+        let global = default_global();
+        let input_dir = unique_temp_dir("quantize_bin_only_input");
+        let output_dir = unique_temp_dir("quantize_bin_only_output");
+
+        std::fs::write(
+            input_dir.join("pytorch_model.bin"),
+            b"\x80\x02fake pickle bytes",
+        )
+        .unwrap();
+
+        let result = quantize_model_files(&input_dir, &output_dir, &global).await;
+        assert!(
+            result.is_err(),
+            "quantizing a directory with zero real SafeTensors weights must fail closed, not report success"
+        );
+
+        std::fs::remove_dir_all(&input_dir).ok();
+        std::fs::remove_dir_all(&output_dir).ok();
+    }
+
+    /// Regression test for the step-chaining bug: a multi-step strategy
+    /// (Balanced: quantize -> analyze graph -> copy -> compress) must reflect
+    /// the CUMULATIVE effect of every step, not just the last one. Before the
+    /// fix, every step read straight from the pristine input and overwrote
+    /// the output directory wholesale, so the real quantization from step 1
+    /// was silently discarded by the plain-copy step that ran later.
+    #[tokio::test]
+    async fn test_perform_optimization_chains_steps_balanced_strategy() {
+        let global = default_global();
+        let model_dir = unique_temp_dir("chain_model");
+        std::fs::write(
+            model_dir.join("config.json"),
+            serde_json::json!({"model_type": "test"}).to_string(),
+        )
+        .unwrap();
+        let data = build_test_safetensors(&(0..512).map(|i| i as f32 * 0.5).collect::<Vec<_>>());
+        std::fs::write(model_dir.join("model.safetensors"), &data).unwrap();
+
+        let result = perform_optimization(
+            "chain-test-model",
+            &model_dir,
+            None,
+            &OptimizationStrategy::Balanced,
+            &global,
+        )
+        .await
+        .expect("balanced optimization should succeed");
+
+        // The final output must still contain the gzip-compressed artifact
+        // from the LAST step (Compressing model artifacts)...
+        let gz_path = result.output_path.join("model.safetensors.gz");
+        assert!(
+            gz_path.exists(),
+            "final output must contain the compressed artifact"
+        );
+
+        // ...but decompressing it must reveal the QUANTIZED (shrunk, valid)
+        // tensor data from step 1, not the original pristine F32 data. If
+        // steps did not chain, this would be a compressed copy of the
+        // ORIGINAL (unquantized) input instead.
+        let compressed_bytes = std::fs::read(&gz_path).unwrap();
+        let decompressed = oxiarc_deflate::gzip_decompress(&compressed_bytes)
+            .expect("must be valid gzip data produced by our own compressor");
+        let reparsed = SafeTensors::deserialize(&decompressed)
+            .expect("decompressed bytes must be a valid SafeTensors file");
+        let weight = reparsed.tensor("weight").expect("weight tensor present");
+        assert_eq!(
+            weight.dtype(),
+            Dtype::U8,
+            "chained output must reflect step 1's real quantization (F32 -> U8), \
+             not the untouched original F32 data"
+        );
+
+        std::fs::remove_dir_all(&model_dir).ok();
+        std::fs::remove_dir_all(&result.output_path).ok();
+    }
+
+    /// Regression test for the case-sensitive dispatch bug: the Memory
+    /// strategy's quantization step is literally named "Applying aggressive
+    /// quantization" (lowercase "quantization", not "Quantizing"), which a
+    /// case-sensitive `contains("Quantizing")` check never matched -- so
+    /// Memory-strategy optimization silently never quantized anything and
+    /// fell through to a plain file copy instead. This calls the dispatcher
+    /// directly with Memory strategy's exact step-name string so the test
+    /// fails if the substring match regresses, independent of how later
+    /// steps in the chain might also transform the file.
+    #[tokio::test]
+    async fn test_memory_strategy_quantization_step_dispatches_correctly() {
+        let global = default_global();
+        let input_dir = unique_temp_dir("memory_dispatch_input");
+        let output_dir = unique_temp_dir("memory_dispatch_output");
+
+        let data = build_test_safetensors(&(0..128).map(|i| i as f32).collect::<Vec<_>>());
+        std::fs::write(input_dir.join("model.safetensors"), &data).unwrap();
+
+        apply_optimization_step(
+            "Applying aggressive quantization",
+            &input_dir,
+            &output_dir,
+            &global,
+        )
+        .await
+        .expect("Memory strategy's step name must dispatch to real quantization, not a no-op copy");
+
+        let output_file = std::fs::read(output_dir.join("model.safetensors")).unwrap();
+        assert!(
+            output_file.len() < data.len(),
+            "the dispatched step must have genuinely quantized (shrunk) the file"
+        );
+        SafeTensors::deserialize(&output_file).expect("output must be valid SafeTensors");
+        assert!(
+            output_dir.join("quantization_info.json").exists(),
+            "real quantization must produce quantization_info.json"
+        );
+
+        std::fs::remove_dir_all(&input_dir).ok();
+        std::fs::remove_dir_all(&output_dir).ok();
+    }
+
+    /// End-to-end companion to the dispatch test above: run the FULL Memory
+    /// strategy chain and confirm the real quantization from step 1 survives
+    /// all the way through step 4 (Pruning -> Compressing -> Optimizing
+    /// memory layout) into the final output, the same way
+    /// `test_perform_optimization_chains_steps_balanced_strategy` verifies
+    /// it for the Balanced strategy.
+    #[tokio::test]
+    async fn test_memory_strategy_quantization_survives_full_chain() {
+        let global = default_global();
+        let model_dir = unique_temp_dir("memory_strategy_model");
+        std::fs::write(
+            model_dir.join("config.json"),
+            serde_json::json!({"model_type": "test"}).to_string(),
+        )
+        .unwrap();
+        let data = build_test_safetensors(&(0..256).map(|i| i as f32).collect::<Vec<_>>());
+        std::fs::write(model_dir.join("model.safetensors"), &data).unwrap();
+
+        let result = perform_optimization(
+            "memory-test-model",
+            &model_dir,
+            None,
+            &OptimizationStrategy::Memory,
+            &global,
+        )
+        .await
+        .expect("memory-strategy optimization should succeed");
+
+        // Memory strategy's step order ends with "Compressing model storage"
+        // then "Optimizing memory layout", so the final artifact is the
+        // gzip-compressed, previously-quantized tensor file.
+        let gz_path = result.output_path.join("model.safetensors.gz");
+        assert!(
+            gz_path.exists(),
+            "final output must contain the compressed artifact"
+        );
+
+        let compressed_bytes = std::fs::read(&gz_path).unwrap();
+        let decompressed = oxiarc_deflate::gzip_decompress(&compressed_bytes)
+            .expect("must be valid gzip data produced by our own compressor");
+        let reparsed = SafeTensors::deserialize(&decompressed)
+            .expect("decompressed bytes must be a valid SafeTensors file");
+        let weight = reparsed.tensor("weight").expect("weight tensor present");
+        assert_eq!(
+            weight.dtype(),
+            Dtype::U8,
+            "chained output must reflect step 1's real quantization, not the untouched original F32 data"
+        );
+
+        std::fs::remove_dir_all(&model_dir).ok();
+        std::fs::remove_dir_all(&result.output_path).ok();
+        std::fs::remove_dir_all(&result.output_path).ok();
     }
 }

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use crate::{MemoryOptimizer, PerformanceMonitor, Phoneme, ProsodyController, TensorMemoryPool};
 
 // Sub-module declarations for VITS components
-#[cfg(feature = "candle")]
+// (candle-core/candle-nn are hard dependencies; see voirs-acoustic/Cargo.toml)
 pub mod decoder;
 pub mod duration;
 pub mod flows;

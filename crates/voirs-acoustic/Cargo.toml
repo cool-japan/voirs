@@ -19,9 +19,15 @@ crate-type = ["lib"]
 
 [dependencies]
 # ML/Tensor libraries
-candle-core = { workspace = true, optional = true }
-candle-nn = { workspace = true, optional = true }
-candle-transformers = { workspace = true, optional = true }
+# candle-core/candle-nn/candle-transformers are hard (non-optional) dependencies: core
+# modules (e.g. vits/loader.rs, vits/duration.rs, vits/posterior.rs, parallel_attention.rs)
+# reference candle_core/candle_nn types unconditionally with no feature gate, so the crate
+# has never actually been able to compile without them. Making that explicit here (instead
+# of advertising a "candle" feature that silently can't be disabled) is the honest fix; see
+# the (now-empty) `candle` feature below for backward compatibility.
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
 oxionnx = { workspace = true, optional = true }
 safetensors.workspace = true
 reqwest.workspace = true
@@ -147,10 +153,15 @@ required-features = ["candle"]
 
 [features]
 default = ["candle"]
-candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
+# candle-core/candle-nn/candle-transformers are now hard dependencies (see above), so this
+# feature is intentionally empty. It is kept only for backward compatibility with existing
+# `--features candle` / `required-features = ["candle"]` usages (in this crate's own
+# [[example]] entries and in downstream Cargo.toml files) so they keep resolving without
+# error; enabling or disabling it no longer changes what compiles.
+candle = []
 onnx = ["dep:oxionnx"]
 gpu = ["metal", "oxionnx?/gpu"]  # On macOS, use Metal; on Linux/Windows would use cuda
-cuda = ["candle-core?/cuda", "oxionnx?/gpu"]
+cuda = ["candle-core/cuda", "oxionnx?/gpu"]
 metal = ["dep:metal-rs"]  # Only available on macOS
 coreml = []  # oxionnx does not have a separate coreml feature; GPU via oxionnx/gpu
 

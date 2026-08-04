@@ -48,11 +48,13 @@ pub static DESTROYED_PIPELINES: Lazy<Mutex<HashSet<u32>>> =
 ///   `voirs_get_pipeline_count()` (it is a real, trackable handle),
 /// - can be checked with `voirs_is_pipeline_benchmark_placeholder()`,
 /// - CANNOT perform real synthesis or voice operations: any call to
-///   `voirs_synthesize`/`voirs_synthesize_async`/`voirs_synthesize_parallel`/
-///   `voirs_set_voice`/`voirs_get_voice` with a placeholder handle fails with
+///   `voirs_synthesize_async`/`voirs_synthesize_parallel`/`voirs_set_voice`/
+///   `voirs_get_voice` with a placeholder handle fails with
 ///   `VOIRS_ERROR_INVALID_PARAMETER`, and `voirs_get_last_error()` reports
 ///   that the handle is a benchmark placeholder rather than a generic
-///   "invalid pipeline ID".
+///   "invalid pipeline ID". The self-contained entry points
+///   (`voirs_synthesize_advanced`, `voirs_synthesize_streaming*`) take no
+///   pipeline handle at all and are unaffected by this restriction.
 ///
 /// This is intended for this crate's own benchmark suite; most callers
 /// should never set `VOIRS_BENCHMARK_MODE`.
@@ -61,13 +63,18 @@ pub extern "C" fn voirs_create_pipeline() -> c_uint {
     // Install the pure-Rust rustls CryptoProvider before any TLS handshake
     // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
     voirs_acoustic::hub::ensure_crypto_provider();
-    match create_pipeline_impl() {
-        Ok(id) => id,
-        Err(code) => {
-            set_last_error(format!("Failed to create pipeline: {code:?}"));
-            0
-        }
-    }
+    // `create_pipeline_impl` may already call `set_last_error` with a
+    // specific diagnostic (the underlying `voirs_sdk` build error) before
+    // returning `Err`; `run_with_fallback_error` only installs the generic
+    // fallback below if that didn't happen, so the specific message is never
+    // clobbered -- and, unlike an unconditional pre-clear, never mistakes a
+    // stale message from a wholly unrelated earlier call for "already
+    // handled" either (see its doc comment for both failure modes this
+    // avoids).
+    crate::run_with_fallback_error(create_pipeline_impl, |code| {
+        format!("Failed to create pipeline: {code:?}")
+    })
+    .unwrap_or_default()
 }
 
 /// Create a new VoiRS pipeline instance with configuration
@@ -82,13 +89,15 @@ pub extern "C" fn voirs_create_pipeline_with_config(config_json: *const c_char) 
     // Install the pure-Rust rustls CryptoProvider before any TLS handshake
     // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
     voirs_acoustic::hub::ensure_crypto_provider();
-    match create_pipeline_with_config_impl(config_json) {
-        Ok(id) => id,
-        Err(code) => {
-            set_last_error(format!("Failed to create pipeline with config: {code:?}"));
-            0
-        }
-    }
+    // See voirs_create_pipeline's identical use of run_with_fallback_error --
+    // create_pipeline_with_config_impl may already have set a more specific
+    // message (e.g. invalid UTF-8 in `config_json`, or the underlying
+    // `voirs_sdk` build error).
+    crate::run_with_fallback_error(
+        || create_pipeline_with_config_impl(config_json),
+        |code| format!("Failed to create pipeline with config: {code:?}"),
+    )
+    .unwrap_or_default()
 }
 
 /// Destroy a VoiRS pipeline instance
@@ -99,14 +108,20 @@ pub extern "C" fn voirs_create_pipeline_with_config(config_json: *const c_char) 
 /// Returns 0 on success, or error code on failure.
 #[no_mangle]
 pub extern "C" fn voirs_destroy_pipeline(pipeline_id: c_uint) -> c_int {
-    match destroy_pipeline_impl(pipeline_id) {
+    // destroy_pipeline_impl never calls set_last_error itself on any Err
+    // path (there's nothing pipeline-specific to add beyond the ID already
+    // in this message), so run_with_fallback_error's fallback always wins
+    // here -- but using it (rather than an unconditional set_last_error)
+    // still matters: it guarantees THIS call's own diagnostic replaces
+    // whatever was pending before (including a stale message from an
+    // unrelated earlier call) on failure, while never touching a
+    // still-pending message on success.
+    match crate::run_with_fallback_error(
+        || destroy_pipeline_impl(pipeline_id),
+        |code| format!("Failed to destroy pipeline {pipeline_id}: {code:?}"),
+    ) {
         Ok(()) => 0,
-        Err(code) => {
-            set_last_error(format!(
-                "Failed to destroy pipeline {pipeline_id}: {code:?}"
-            ));
-            code as c_int
-        }
+        Err(code) => code as c_int,
     }
 }
 
@@ -394,6 +409,27 @@ fn destroy_pipeline_impl(pipeline_id: c_uint) -> Result<(), VoirsErrorCode> {
 mod tests {
     use super::*;
 
+    /// Named marker, visible in `cargo nextest list`/test-run output,
+    /// documenting a real coverage gap rather than leaving it silently
+    /// implicit in a doc comment nobody greps for: with `ffi-test-mocks`
+    /// active (e.g. `--all-features`, which enables every Cargo feature this
+    /// crate defines, `ffi-test-mocks` included), `voirs-ffi/tests/
+    /// pipeline_real_path.rs`'s real-`PIPELINE_MANAGER` integration tests are
+    /// entirely absent from the build (that file is `#![cfg(not(feature =
+    /// "ffi-test-mocks"))]`) -- so a green `cargo nextest run -p voirs-ffi
+    /// --all-features` does NOT, by itself, prove the real (non-mock)
+    /// `voirs_create_pipeline`/`voirs_set_voice`/`voirs_synthesize_async`
+    /// production paths work. Only a run WITHOUT `ffi-test-mocks` (the
+    /// default -- plain `cargo nextest run -p voirs-ffi`) exercises them.
+    /// This test only documents that fact; it makes no assertion of its own.
+    #[test]
+    fn test_real_path_suite_is_compiled_out_under_ffi_test_mocks() {
+        // Intentionally empty: this test's existence and name are the
+        // signal. See the doc comment above and
+        // `voirs-ffi/tests/pipeline_real_path.rs`'s module doc comment for
+        // the full explanation.
+    }
+
     #[test]
     fn test_pipeline_creation_and_destruction() {
         // Test basic pipeline creation
@@ -498,5 +534,142 @@ mod tests {
         // code path in the `tests/` integration suite -- this crate's own
         // `#[cfg(test)]` mock pipeline manager never creates placeholders, so
         // it cannot be exercised from a unit test in this module.
+    }
+}
+
+// Deterministic, feature-independent regression tests: unlike the module
+// above, these do NOT depend on `ffi-test-mocks` (they run under plain
+// `cargo test`/`cargo nextest run -p voirs-ffi` in *either* configuration)
+// and do NOT touch the network or `PIPELINE_MANAGER` -- `config_json`
+// validation happens before the mock/real split in
+// `create_pipeline_with_config_impl`.
+#[cfg(test)]
+mod error_message_tests {
+    use super::*;
+
+    /// Regression test for the "outer wrapper clobbers a more specific inner
+    /// error" bug: `voirs_create_pipeline_with_config`'s outer wrapper used to
+    /// unconditionally overwrite whatever `create_pipeline_with_config_impl`
+    /// had already set via `set_last_error` (e.g. "Invalid UTF-8 in config: <details>")
+    /// with a generic `"Failed to create pipeline with config: InvalidParameter"`,
+    /// silently discarding the actually-useful diagnostic. This is
+    /// deterministic and needs no network/model access: invalid UTF-8 in
+    /// `config_json` is rejected before any pipeline/runtime work starts.
+    #[test]
+    fn test_invalid_config_utf8_error_is_not_clobbered_by_generic_fallback() {
+        crate::voirs_clear_error();
+
+        // A null-terminated byte string that is NOT valid UTF-8 (0xFF is
+        // never a valid UTF-8 lead or continuation byte).
+        let invalid_utf8 = std::ffi::CString::new(vec![0xFFu8, 0xFEu8]).expect("no interior NUL");
+        let pipeline_id = voirs_create_pipeline_with_config(invalid_utf8.as_ptr());
+        assert_eq!(
+            pipeline_id, 0,
+            "invalid UTF-8 config must fail pipeline creation"
+        );
+
+        assert_ne!(crate::voirs_has_error(), 0);
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+
+        assert!(
+            message.contains("Invalid UTF-8"),
+            "the specific inner diagnostic must survive to the caller, got: {message}"
+        );
+        assert!(
+            !message.contains("Failed to create pipeline with config: InvalidParameter"),
+            "the specific message must not be clobbered by the generic \
+             VoirsErrorCode-only fallback: {message}"
+        );
+    }
+
+    /// Same regression, for the null-`config_json` path -- this one has no
+    /// specific inner message to preserve (there's nothing UTF-8-related to
+    /// report), so the generic fallback SHOULD be the message seen; this is
+    /// the complementary case proving `set_fallback_error` still sets a
+    /// message when none is already pending, rather than leaving callers
+    /// with no diagnostic at all.
+    #[test]
+    fn test_null_config_still_reports_generic_fallback_message() {
+        crate::voirs_clear_error();
+
+        let pipeline_id = voirs_create_pipeline_with_config(std::ptr::null());
+        assert_eq!(pipeline_id, 0);
+        assert_ne!(crate::voirs_has_error(), 0);
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert!(
+            !message.is_empty(),
+            "a null config must still report SOME diagnostic message"
+        );
+    }
+
+    /// Regression test for a stale-error-leak bug distinct from (but
+    /// discovered alongside) the clobbering bug above: `set_fallback_error`
+    /// decides whether to install its generic message purely by checking "is
+    /// ANY error currently pending" -- so a message-less `Err` path (e.g.
+    /// `create_pipeline_with_config_impl`'s null-`config_json` check, or
+    /// `destroy_pipeline_impl`'s `pipeline_id == 0` / real-path "not found"
+    /// checks, none of which call `set_last_error` themselves) could
+    /// previously be masked by a stale message left over from a completely
+    /// unrelated EARLIER call on the same thread, making
+    /// `voirs_get_last_error()` report old, irrelevant text instead of (or
+    /// alongside) this call's actual, current failure. Fixed by
+    /// `run_with_fallback_error` (see its doc comment in `lib.rs`), which
+    /// compares the message immediately before/after the `*_impl()` runs
+    /// rather than checking "is any error pending" -- so it always installs
+    /// a fresh, accurate diagnostic for THIS call's failure, replacing any
+    /// stale leftover, without needing to unconditionally clear state up
+    /// front (which would also incorrectly wipe a still-relevant pending
+    /// message on an unrelated call that goes on to *succeed*). Deterministic
+    /// and feature-independent: both checked paths happen before any
+    /// `ffi-test-mocks`/production split.
+    #[test]
+    fn test_create_and_destroy_do_not_leak_stale_error_from_earlier_call() {
+        let stale = "stale message from a totally unrelated earlier call";
+
+        crate::voirs_clear_error();
+        crate::set_last_error(stale.to_string());
+        let pipeline_id = voirs_create_pipeline_with_config(std::ptr::null());
+        assert_eq!(pipeline_id, 0);
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert!(
+            !message.contains(stale),
+            "voirs_create_pipeline_with_config must not leak a stale error \
+             from an unrelated earlier call: {message}"
+        );
+
+        crate::voirs_clear_error();
+        crate::set_last_error(stale.to_string());
+        let result = voirs_destroy_pipeline(0); // pipeline_id 0 is always invalid
+        assert_ne!(result, 0);
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert!(
+            !message.contains(stale),
+            "voirs_destroy_pipeline must not leak a stale error from an \
+             unrelated earlier call: {message}"
+        );
     }
 }

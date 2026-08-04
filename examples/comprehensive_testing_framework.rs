@@ -9,11 +9,9 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,7 +38,7 @@ pub enum Platform {
     MacOS,
     Windows,
     WebAssembly,
-    iOS,
+    Ios,
     Android,
 }
 
@@ -103,7 +101,7 @@ pub struct TestSuiteResult {
     pub output: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct PerformanceMetrics {
     pub cpu_usage: SystemMetrics,
     pub memory_usage: SystemMetrics,
@@ -328,11 +326,11 @@ impl TestFramework {
                 let mut ignored = 0;
 
                 for (i, part) in parts.iter().enumerate() {
-                    if part == "passed;" && i > 0 {
+                    if *part == "passed;" && i > 0 {
                         passed = parts[i - 1].parse().unwrap_or(0);
-                    } else if part == "failed;" && i > 0 {
+                    } else if *part == "failed;" && i > 0 {
                         failed = parts[i - 1].parse().unwrap_or(0);
-                    } else if (part == "ignored;" || part == "ignored") && i > 0 {
+                    } else if (*part == "ignored;" || *part == "ignored") && i > 0 {
                         ignored = parts[i - 1].parse().unwrap_or(0);
                     }
                 }
@@ -347,7 +345,7 @@ impl TestFramework {
 
     async fn check_performance_regression(
         &self,
-        suite: &TestSuite,
+        _suite: &TestSuite,
         output: &str,
     ) -> Option<PerformanceRegression> {
         // Simple performance regression detection
@@ -367,7 +365,7 @@ impl TestFramework {
 
     fn update_performance_metrics(
         &self,
-        metrics: &mut PerformanceMetrics,
+        _metrics: &mut PerformanceMetrics,
         suite_result: &TestSuiteResult,
     ) {
         // Extract performance metrics from test output
@@ -426,7 +424,7 @@ impl TestFramework {
 
     fn print_console_report(&self, report: &TestReport) {
         println!("\n📊 VoiRS Test Framework Report");
-        println!("=".repeat(50));
+        println!("{}", "=".repeat(50));
         println!("🆔 Run ID: {}", report.run_id);
         println!(
             "⏰ Timestamp: {}",
@@ -597,7 +595,7 @@ impl TestFramework {
         )
     }
 
-    async fn send_slack_notification(&self, webhook: &str, report: &TestReport) -> Result<()> {
+    async fn send_slack_notification(&self, _webhook: &str, report: &TestReport) -> Result<()> {
         let status_emoji = if report.summary.failed == 0 {
             "✅"
         } else {
@@ -612,7 +610,7 @@ impl TestFramework {
             report.total_duration
         );
 
-        let payload = serde_json::json!({
+        let _payload = serde_json::json!({
             "text": message
         });
 
@@ -635,6 +633,9 @@ impl TestFramework {
 }
 
 #[derive(Debug)]
+// `duration` is logged at the point it's measured (see `run_specific_tests`);
+// it isn't currently re-aggregated by the caller beyond that.
+#[allow(dead_code)]
 struct TestResult {
     tests_run: usize,
     passed: usize,
@@ -642,17 +643,6 @@ struct TestResult {
     ignored: usize,
     output: String,
     duration: Duration,
-}
-
-impl Default for PerformanceMetrics {
-    fn default() -> Self {
-        Self {
-            cpu_usage: SystemMetrics::default(),
-            memory_usage: SystemMetrics::default(),
-            latency_ms: SystemMetrics::default(),
-            throughput: SystemMetrics::default(),
-        }
-    }
 }
 
 impl Default for SystemMetrics {

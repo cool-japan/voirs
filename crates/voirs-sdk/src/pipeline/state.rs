@@ -1,7 +1,7 @@
 //! Pipeline state management and synchronization.
 
 use crate::{config::PipelineConfig, error::Result, types::VoiceConfig, VoirsError};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -490,6 +490,11 @@ impl PipelineStateManager {
     }
 
     /// Check if CUDA is available
+    ///
+    /// The underlying `nvidia-smi` probe is executed at most once per
+    /// process (cached in a [`OnceLock`]) and under a hard timeout, so this
+    /// can never hang the caller even if the subprocess itself does - see
+    /// [`crate::process_probe::run_with_timeout`].
     fn is_cuda_available(&self) -> bool {
         // Skip expensive system calls in test mode
         if self.test_mode {
@@ -497,14 +502,16 @@ impl PipelineStateManager {
             return false;
         }
 
-        // Check for CUDA by looking for nvidia-ml-py or nvidia-smi
-        std::process::Command::new("nvidia-smi")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        static CUDA_AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *CUDA_AVAILABLE.get_or_init(probe_cuda_available)
     }
 
     /// Check if Metal is available (macOS)
+    ///
+    /// Cached and timeout-guarded for the same reason as
+    /// [`Self::is_cuda_available`]: the `system_profiler` probe it used to
+    /// run unguarded is known to occasionally take a very long time (or hang)
+    /// on macOS.
     fn is_metal_available(&self) -> bool {
         // Skip expensive system calls in test mode
         if self.test_mode {
@@ -512,25 +519,14 @@ impl PipelineStateManager {
             return false;
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            // Metal is available on macOS with Apple Silicon or discrete GPUs
-            std::process::Command::new("system_profiler")
-                .args(["SPDisplaysDataType", "-detailLevel", "mini"])
-                .output()
-                .map(|output| {
-                    output.status.success()
-                        && String::from_utf8_lossy(&output.stdout).contains("Metal")
-                })
-                .unwrap_or(false)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            false
-        }
+        static METAL_AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *METAL_AVAILABLE.get_or_init(probe_metal_available)
     }
 
     /// Check if OpenCL is available
+    ///
+    /// Cached and timeout-guarded for the same reason as
+    /// [`Self::is_cuda_available`].
     fn is_opencl_available(&self) -> bool {
         // Skip expensive system calls in test mode
         if self.test_mode {
@@ -538,30 +534,94 @@ impl PipelineStateManager {
             return false;
         }
 
-        // Check for OpenCL by looking for clinfo or similar
-        std::process::Command::new("clinfo")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or_else(|_| {
-                // Fallback: check for OpenCL library existence
-                #[cfg(target_os = "linux")]
-                {
-                    std::path::Path::new("/usr/lib/x86_64-linux-gnu/libOpenCL.so.1").exists()
-                        || std::path::Path::new("/usr/lib/libOpenCL.so.1").exists()
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    std::path::Path::new("/System/Library/Frameworks/OpenCL.framework").exists()
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    std::path::Path::new("C:\\Windows\\System32\\OpenCL.dll").exists()
-                }
-                #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-                {
-                    false
-                }
-            })
+        static OPENCL_AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *OPENCL_AVAILABLE.get_or_init(probe_opencl_available)
+    }
+}
+
+/// Probe CUDA availability by running `nvidia-smi` under a hard timeout.
+/// Called at most once per process; the result is cached by the caller.
+fn probe_cuda_available() -> bool {
+    let mut command = std::process::Command::new("nvidia-smi");
+    match crate::process_probe::run_with_timeout(
+        &mut command,
+        crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+    ) {
+        Ok(Some(output)) => output.status.success(),
+        Ok(None) => {
+            warn!("nvidia-smi did not respond within the probe timeout; assuming CUDA unavailable");
+            false
+        }
+        Err(_) => false,
+    }
+}
+
+/// Probe Metal availability by running `system_profiler` under a hard
+/// timeout. Called at most once per process; the result is cached by the
+/// caller.
+fn probe_metal_available() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // Metal is available on macOS with Apple Silicon or discrete GPUs
+        let mut command = std::process::Command::new("system_profiler");
+        command.args(["SPDisplaysDataType", "-detailLevel", "mini"]);
+        match crate::process_probe::run_with_timeout(
+            &mut command,
+            crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+        ) {
+            Ok(Some(output)) => {
+                output.status.success() && String::from_utf8_lossy(&output.stdout).contains("Metal")
+            }
+            Ok(None) => {
+                warn!(
+                    "system_profiler did not respond within the probe timeout; \
+                     assuming Metal unavailable"
+                );
+                false
+            }
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// Probe OpenCL availability by running `clinfo` under a hard timeout, with a
+/// filesystem-based fallback if `clinfo` cannot be spawned at all. Called at
+/// most once per process; the result is cached by the caller.
+fn probe_opencl_available() -> bool {
+    let mut command = std::process::Command::new("clinfo");
+    match crate::process_probe::run_with_timeout(
+        &mut command,
+        crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+    ) {
+        Ok(Some(output)) => output.status.success(),
+        Ok(None) => {
+            warn!("clinfo did not respond within the probe timeout; assuming OpenCL unavailable");
+            false
+        }
+        Err(_) => {
+            // Fallback: check for OpenCL library existence
+            #[cfg(target_os = "linux")]
+            {
+                std::path::Path::new("/usr/lib/x86_64-linux-gnu/libOpenCL.so.1").exists()
+                    || std::path::Path::new("/usr/lib/libOpenCL.so.1").exists()
+            }
+            #[cfg(target_os = "macos")]
+            {
+                std::path::Path::new("/System/Library/Frameworks/OpenCL.framework").exists()
+            }
+            #[cfg(target_os = "windows")]
+            {
+                std::path::Path::new("C:\\Windows\\System32\\OpenCL.dll").exists()
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+            {
+                false
+            }
+        }
     }
 }
 
@@ -742,5 +802,46 @@ mod tests {
 
         assert_eq!(state_manager.get_state().await, PipelineState::Shutdown);
         assert!(state_manager.get_current_voice().await.is_none());
+    }
+
+    /// Regression test for a hang that used to be reachable through
+    /// `VoirsPipelineBuilder::build()` -> `update_config` ->
+    /// `validate_config_update` -> `is_device_available`: the device-probe
+    /// helpers shelled out to `nvidia-smi` / `system_profiler` / `clinfo`
+    /// with no timeout, so a slow or hung subprocess could block the calling
+    /// thread indefinitely.
+    ///
+    /// `PipelineStateManager` always runs with `test_mode = cfg!(test)`
+    /// inside `#[cfg(test)]`, which makes the public `is_*_available`
+    /// wrappers short-circuit before ever touching a subprocess. To actually
+    /// exercise the timeout-guarded probes, this test calls the private
+    /// `probe_*_available` free functions directly (bypassing the test-mode
+    /// gate) on background threads and requires each to report back within a
+    /// generous bound, proving the underlying `Command` calls can never hang
+    /// the caller even when the tool is missing, slow, or wedged.
+    #[test]
+    fn device_probe_functions_return_within_bounded_time() {
+        assert_probe_returns_within_bound("cuda", probe_cuda_available);
+        assert_probe_returns_within_bound("metal", probe_metal_available);
+        assert_probe_returns_within_bound("opencl", probe_opencl_available);
+    }
+
+    /// Run `probe` on a background thread and panic unless it reports back
+    /// within 10 seconds.
+    fn assert_probe_returns_within_bound(name: &str, probe: fn() -> bool) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Ignore send errors: if the receiver already timed out and was
+            // dropped, there is nothing left to report to.
+            let _ = tx.send(probe());
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(_available) => {}
+            Err(_) => panic!(
+                "{name} availability probe did not return within the 10s bound; \
+                 the subprocess timeout guard has regressed"
+            ),
+        }
     }
 }

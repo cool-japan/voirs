@@ -167,10 +167,16 @@ Text Input → G2P → Acoustic Model → Vocoder → Audio Output
 
 | Component | Description | Backends | Training |
 |-----------|-------------|----------|----------|
-| **G2P** | Grapheme-to-Phoneme conversion | Phonetisaurus, OpenJTalk, Neural | ✅ |
+| **G2P** | Grapheme-to-Phoneme conversion | Phonetisaurus, OpenJTalk, Neural | 🚧 |
 | **Acoustic** | Text → Mel spectrogram | VITS, FastSpeech2 | 🚧 |
 | **Vocoder** | Mel → Waveform | HiFi-GAN, DiffWave | ✅ DiffWave |
 | **Dataset** | Training data utilities | LJSpeech, JVS, Custom | ✅ |
+
+`voirs train acoustic` and `voirs train g2p` currently refuse to run (fail closed
+with a diagnostic) rather than produce an untrained model: their reference
+trainers never perform a backward pass / optimizer step, so no weights would
+actually change. Only `voirs train vocoder --model-type diffwave` (and the
+HiFi-GAN generator variant) perform real gradient-based training today.
 
 ## 📦 Crate Structure
 
@@ -233,8 +239,8 @@ cargo fmt --check
 # Train a model
 voirs train vocoder --data /path/to/dataset --output checkpoints/my-model --model-type diffwave
 
-# Monitor training
-tail -f checkpoints/my-model/training.log
+# Monitor training progress (checkpoint metadata written after each epoch)
+cat checkpoints/my-model/best_model.json | jq '{epoch, train_loss, val_loss}'
 ```
 
 ## 🎵 Supported Languages
@@ -298,9 +304,8 @@ Explore the `examples/` directory for comprehensive usage patterns:
   ```bash
   voirs train vocoder --data /path/to/LJSpeech-1.1 --output checkpoints/my-voice --model-type diffwave
   ```
-- **Monitor Training Progress** — Real-time training metrics and checkpoint analysis
+- **Monitor Training Progress** — Checkpoint metadata written after each epoch
   ```bash
-  tail -f checkpoints/my-voice/training.log
   cat checkpoints/my-voice/best_model.json | jq '{epoch, train_loss}'
   ```
 

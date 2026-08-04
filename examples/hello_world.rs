@@ -22,7 +22,7 @@
 //! # Install system dependencies
 //! xcode-select --install
 //! brew install cmake portaudio
-//! 
+//!
 //! # Grant audio permissions in System Preferences → Security & Privacy → Microphone
 //! # Add Terminal or your IDE to the allowed applications
 //! ```
@@ -32,7 +32,7 @@
 //! # Install required packages
 //! sudo apt-get update
 //! sudo apt-get install build-essential cmake libasound2-dev portaudio19-dev
-//! 
+//!
 //! # Add user to audio group (then log out and back in)
 //! sudo usermod -a -G audio $USER
 //! ```
@@ -42,7 +42,7 @@
 //! # Install Visual Studio Build Tools (required for compilation)
 //! # Download from: https://visualstudio.microsoft.com/downloads/
 //! # Include CMake component in installation
-//! 
+//!
 //! # Install Visual C++ Redistributable (latest version)
 //! # Download from Microsoft website
 //! ```
@@ -63,10 +63,10 @@
 //! ```bash
 //! # If CUDA errors on macOS/Linux without GPU:
 //! cargo run --example hello_world --workspace --exclude voirs-cli
-//! 
+//!
 //! # If audio device issues:
 //! cargo run --example hello_world --features="cpu-only"
-//! 
+//!
 //! # For memory-constrained systems:
 //! cargo run --example hello_world -j 1  # Use single thread
 //! ```
@@ -102,10 +102,7 @@
 //! | Memory constrained | 2.0-5.0s | Medium | 1GB |
 
 use anyhow::Result;
-use voirs::{
-    create_acoustic, create_g2p, create_vocoder, AcousticBackend, G2pBackend, VocoderBackend,
-    VoirsPipelineBuilder,
-};
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -129,24 +126,17 @@ async fn main() -> Result<()> {
     // - Vocoder: Converts mel-spectrograms to audio waveforms
     println!("🔧 Setting up TTS components...");
 
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
     println!("   ✅ G2P: Ready (converts text → phonemes)");
     println!("   ✅ Acoustic Model: Ready (phonemes → features)");
     println!("   ✅ Vocoder: Ready (features → audio)");
 
     // Step 2: Build the synthesis pipeline
-    // This connects all components together
+    // The unified VoirsPipelineBuilder wires the default G2P, acoustic model, and
+    // vocoder together automatically. Use `.with_g2p()` / `.with_acoustic_model()` /
+    // `.with_vocoder()` if you need to plug in custom implementations instead.
     println!("🏗️  Building synthesis pipeline...");
 
-    let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
-        .build()
-        .await?;
+    let pipeline = VoirsPipelineBuilder::new().build().await?;
 
     println!("   ✅ Pipeline ready for synthesis!");
 

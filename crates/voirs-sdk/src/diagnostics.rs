@@ -835,10 +835,14 @@ fn normalize_semver(version: &str) -> String {
 /// Run `rustc --version` and extract the version token (e.g. `"1.82.0"` from
 /// `"rustc 1.82.0 (f6e511eec 2024-10-15)"`).
 fn detect_rustc_version() -> std::result::Result<String, String> {
-    let output = std::process::Command::new("rustc")
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("failed to execute rustc: {e}"))?;
+    let mut command = std::process::Command::new("rustc");
+    command.arg("--version");
+    let output = crate::process_probe::run_with_timeout(
+        &mut command,
+        crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+    )
+    .map_err(|e| format!("failed to execute rustc: {e}"))?
+    .ok_or_else(|| "rustc --version did not respond within the probe timeout".to_string())?;
     if !output.status.success() {
         return Err("rustc --version exited with a non-zero status".to_string());
     }
@@ -875,10 +879,16 @@ fn query_total_memory_gb() -> std::result::Result<f64, String> {
 
     #[cfg(target_os = "macos")]
     {
-        let output = std::process::Command::new("sysctl")
-            .args(["-n", "hw.memsize"])
-            .output()
-            .map_err(|e| format!("failed to execute sysctl: {e}"))?;
+        let mut command = std::process::Command::new("sysctl");
+        command.args(["-n", "hw.memsize"]);
+        let output = crate::process_probe::run_with_timeout(
+            &mut command,
+            crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+        )
+        .map_err(|e| format!("failed to execute sysctl: {e}"))?
+        .ok_or_else(|| {
+            "sysctl -n hw.memsize did not respond within the probe timeout".to_string()
+        })?;
         if !output.status.success() {
             return Err("sysctl -n hw.memsize exited with a non-zero status".to_string());
         }

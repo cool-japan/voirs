@@ -50,14 +50,12 @@
 //! - Hardware utilization analysis
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info, warn};
-use voirs::*;
+use tracing::{debug, info};
+use voirs_sdk::prelude::*;
 
 /// Desktop-specific configuration optimized for native applications
 #[derive(Debug, Clone)]
@@ -121,23 +119,41 @@ impl Default for DesktopConfig {
         DesktopConfig {
             hardware_acceleration: true,
             worker_threads: num_cpus::get(),
-            audio_device: AudioDeviceConfig {
-                device_name: None, // Use system default
-                sample_rate: 44100,
-                buffer_size: 512,
-            },
-            file_management: FileManagementConfig {
-                output_directory: PathBuf::from("./voirs_output"),
-                auto_save: true,
-                preferred_format: AudioFormat::Wav,
-                cache_size_mb: 512,
-            },
-            system_integration: SystemIntegrationConfig {
-                notifications: true,
-                system_tray: false,    // Disabled by default
-                global_hotkeys: false, // Disabled by default
-                taskbar_progress: true,
-            },
+            audio_device: AudioDeviceConfig::default(),
+            file_management: FileManagementConfig::default(),
+            system_integration: SystemIntegrationConfig::default(),
+        }
+    }
+}
+
+impl Default for AudioDeviceConfig {
+    fn default() -> Self {
+        AudioDeviceConfig {
+            device_name: None, // Use system default
+            sample_rate: 44100,
+            buffer_size: 512,
+        }
+    }
+}
+
+impl Default for FileManagementConfig {
+    fn default() -> Self {
+        FileManagementConfig {
+            output_directory: PathBuf::from("./voirs_output"),
+            auto_save: true,
+            preferred_format: AudioFormat::Wav,
+            cache_size_mb: 512,
+        }
+    }
+}
+
+impl Default for SystemIntegrationConfig {
+    fn default() -> Self {
+        SystemIntegrationConfig {
+            notifications: true,
+            system_tray: false,    // Disabled by default
+            global_hotkeys: false, // Disabled by default
+            taskbar_progress: true,
         }
     }
 }
@@ -187,13 +203,13 @@ pub struct DesktopSynthesizer {
 }
 
 #[derive(Debug, Default)]
-struct DesktopStats {
-    total_syntheses: usize,
-    total_processing_time: Duration,
-    total_audio_duration: f64,
-    hardware_acceleration_uses: usize,
-    cache_hits: usize,
-    cache_misses: usize,
+pub struct DesktopStats {
+    pub total_syntheses: usize,
+    pub total_processing_time: Duration,
+    pub total_audio_duration: f64,
+    pub hardware_acceleration_uses: usize,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
 }
 
 impl DesktopSynthesizer {
@@ -211,16 +227,15 @@ impl DesktopSynthesizer {
                 .context("Failed to create desktop output directory")?;
         }
 
-        // Create high-performance desktop components
-        let g2p = Self::create_desktop_g2p(&config)?;
-        let acoustic = Self::create_desktop_acoustic(&config)?;
-        let vocoder = Self::create_desktop_vocoder(&config)?;
-
+        // Build the pipeline using the unified builder, driven by the desktop
+        // configuration's real hardware knobs (GPU acceleration, worker threads).
+        if config.hardware_acceleration {
+            info!("Requesting GPU acceleration for desktop synthesis");
+        }
         let pipeline = Arc::new(
             VoirsPipelineBuilder::new()
-                .with_g2p(g2p)
-                .with_acoustic_model(acoustic)
-                .with_vocoder(vocoder)
+                .with_gpu_acceleration(config.hardware_acceleration)
+                .with_threads(config.worker_threads)
                 .build()
                 .await
                 .context("Failed to build desktop synthesis pipeline")?,
@@ -237,6 +252,8 @@ impl DesktopSynthesizer {
             next_request_id: Arc::new(Mutex::new(1)),
         };
 
+        let worker_threads = config.worker_threads;
+
         // Start desktop worker threads
         Self::start_worker_threads(
             config,
@@ -246,32 +263,9 @@ impl DesktopSynthesizer {
         )
         .await;
 
-        info!(
-            "✅ Desktop synthesizer ready with {} worker threads",
-            config.worker_threads
-        );
+        info!("✅ Desktop synthesizer ready with {worker_threads} worker threads");
 
         Ok(desktop_synthesizer)
-    }
-
-    /// Create desktop-optimized G2P with performance settings
-    fn create_desktop_g2p(config: &DesktopConfig) -> Result<G2pComponent> {
-        info!("Creating desktop-optimized G2P component");
-        Ok(create_g2p(G2pBackend::RuleBased))
-    }
-
-    /// Create desktop-optimized acoustic model with hardware acceleration
-    fn create_desktop_acoustic(config: &DesktopConfig) -> Result<AcousticComponent> {
-        if config.hardware_acceleration {
-            info!("Creating hardware-accelerated acoustic model for desktop");
-        }
-        Ok(create_acoustic(AcousticBackend::Vits))
-    }
-
-    /// Create desktop-optimized vocoder
-    fn create_desktop_vocoder(config: &DesktopConfig) -> Result<VocoderComponent> {
-        info!("Creating desktop-optimized vocoder");
-        Ok(create_vocoder(VocoderBackend::HifiGan))
     }
 
     /// Start desktop worker threads for concurrent synthesis
@@ -307,7 +301,7 @@ impl DesktopSynthesizer {
                         let mut stats = stats.lock().unwrap_or_else(|e| e.into_inner());
                         stats.total_syntheses += 1;
                         stats.total_processing_time += synthesis_result.processing_time;
-                        stats.total_audio_duration += synthesis_result.audio.duration();
+                        stats.total_audio_duration += synthesis_result.audio.duration() as f64;
                         if synthesis_result.system_info.gpu_used {
                             stats.hardware_acceleration_uses += 1;
                         }
@@ -403,7 +397,10 @@ impl DesktopSynthesizer {
         priority: SynthesisPriority,
     ) -> Result<DesktopSynthesisResult> {
         let id = {
-            let mut next_id = self.next_request_id.lock().unwrap_or_else(|e| e.into_inner());
+            let mut next_id = self
+                .next_request_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let id = *next_id;
             *next_id += 1;
             id
@@ -428,16 +425,32 @@ impl DesktopSynthesizer {
             .context("Failed to receive desktop synthesis response")?
     }
 
-    /// Get system resource usage (simulated)
+    /// Get current global CPU usage percentage using real OS process/system
+    /// accounting via `sysinfo` (no simulated or random values).
     fn get_cpu_usage() -> f32 {
-        // In real implementation, would use system APIs
-        rand::random::<f32>() * 10.0 // 0-10% simulated
+        let mut system = sysinfo::System::new_all();
+        // A single sample is always 0%: sysinfo computes CPU usage as a delta
+        // between two refreshes, so we take one, wait the library's documented
+        // minimum interval, then take a second to get a real reading.
+        system.refresh_cpu_usage();
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        system.refresh_cpu_usage();
+        system.global_cpu_usage()
     }
 
-    /// Get memory usage (simulated)
+    /// Get current process memory usage in MB using real OS accounting via
+    /// `sysinfo` (no simulated or random values).
     fn get_memory_usage() -> f64 {
-        // In real implementation, would use system APIs
-        100.0 + rand::random::<f64>() * 50.0 // 100-150MB simulated
+        let pid = sysinfo::Pid::from_u32(std::process::id());
+        let mut system = sysinfo::System::new_with_specifics(
+            sysinfo::RefreshKind::nothing()
+                .with_processes(sysinfo::ProcessRefreshKind::nothing().with_memory()),
+        );
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        system
+            .process(pid)
+            .map(|process| process.memory() as f64 / (1024.0 * 1024.0))
+            .unwrap_or(0.0)
     }
 
     /// Send desktop notification (simulated)
@@ -447,6 +460,16 @@ impl DesktopSynthesizer {
         // - Windows: Windows.UI.Notifications
         // - macOS: NSUserNotification
         // - Linux: notify-send or D-Bus
+    }
+
+    /// Get the desktop configuration this synthesizer was built with
+    pub fn config(&self) -> &DesktopConfig {
+        &self.config
+    }
+
+    /// Get the underlying synthesis pipeline (e.g. for advanced/manual use)
+    pub fn pipeline(&self) -> &Arc<VoirsPipeline> {
+        &self.pipeline
     }
 
     /// Get desktop statistics
@@ -480,8 +503,12 @@ impl Clone for DesktopStats {
 pub mod gui_integration {
     /// egui immediate mode GUI integration
     pub mod egui_example {
-        use super::*;
+        use crate::DesktopSynthesizer;
 
+        // Illustrative only: shows the shape of app state an egui integration would
+        // hold. The `eframe::App` impl that would read these fields is commented out
+        // below since `egui`/`eframe` are not dependencies of this workspace.
+        #[allow(dead_code)]
         pub struct VoirsEguiApp {
             synthesizer: Option<DesktopSynthesizer>,
             input_text: String,
@@ -509,13 +536,25 @@ pub mod gui_integration {
     }
 
     /// Tauri web-based desktop integration
+    ///
+    /// Left as documentation rather than compiled code: wiring this up for real
+    /// requires the `tauri` crate (a full desktop app framework), which is not a
+    /// dependency of this workspace. Add it to your own Tauri application's
+    /// Cargo.toml and call into `voirs_sdk::VoirsPipeline` from the command body.
     pub mod tauri_example {
-        // Example Tauri commands for web-based desktop app
-        #[tauri::command]
-        async fn desktop_synthesize(text: String) -> Result<String, String> {
-            // Tauri command implementation
-            Ok(format!("Synthesized: {}", text))
-        }
+        // Example Tauri command for a web-based desktop app:
+        //
+        // #[tauri::command]
+        // async fn desktop_synthesize(text: String) -> Result<String, String> {
+        //     let pipeline = voirs_sdk::VoirsPipelineBuilder::new()
+        //         .build()
+        //         .await
+        //         .map_err(|e| e.to_string())?;
+        //     let audio = pipeline.synthesize(&text).await.map_err(|e| e.to_string())?;
+        //     let path = "desktop_synthesize_output.wav";
+        //     audio.save_wav(path).map_err(|e| e.to_string())?;
+        //     Ok(path.to_string())
+        // }
     }
 }
 
@@ -568,7 +607,7 @@ async fn main() -> Result<()> {
         println!("{}{}", "-".repeat(35), "-".repeat(config_name.len()));
 
         let desktop_start = Instant::now();
-        let synthesizer = DesktopSynthesizer::new(config.clone()).await?;
+        let synthesizer = Arc::new(DesktopSynthesizer::new(config.clone()).await?);
         let setup_time = desktop_start.elapsed();
 
         println!(
@@ -583,11 +622,16 @@ async fn main() -> Result<()> {
             "Hardware acceleration provides superior performance for demanding synthesis workloads.",
         ];
 
-        let mut desktop_tasks = Vec::new();
+        let mut desktop_tasks: Vec<
+            tokio::task::JoinHandle<Result<(usize, DesktopSynthesisResult, Duration)>>,
+        > = Vec::new();
 
-        // Submit all requests concurrently (demonstrates desktop multi-threading)
+        // Submit all requests concurrently: each one runs on its own spawned task
+        // against the shared (Arc-wrapped) synthesizer, so this really does
+        // exercise desktop multi-threading rather than just labeling a
+        // sequential loop as concurrent.
         for (i, text) in desktop_texts.iter().enumerate() {
-            let synthesizer_clone = &synthesizer; // In real code, would clone Arc
+            let synthesizer_clone = Arc::clone(&synthesizer);
             let text_clone = text.to_string();
             let priority = match i {
                 0 => SynthesisPriority::High,
@@ -601,10 +645,20 @@ async fn main() -> Result<()> {
                 priority
             );
 
-            // In real implementation, would handle this with proper async design
-            let synthesis_start = Instant::now();
-            let result = synthesizer.synthesize_async(text_clone, priority).await?;
-            let synthesis_time = synthesis_start.elapsed();
+            desktop_tasks.push(tokio::spawn(async move {
+                let synthesis_start = Instant::now();
+                let result = synthesizer_clone
+                    .synthesize_async(text_clone, priority)
+                    .await?;
+                let synthesis_time = synthesis_start.elapsed();
+                Ok((i, result, synthesis_time))
+            }));
+        }
+
+        // Wait for every concurrently-submitted request to complete and report results.
+        for task in desktop_tasks {
+            let (i, result, synthesis_time) =
+                task.await.context("Desktop synthesis task panicked")??;
 
             println!(
                 "   ✅ Desktop synthesis {} complete: {} ({:.2}s, RTF: {:.2}x)",

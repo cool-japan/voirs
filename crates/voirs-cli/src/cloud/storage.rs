@@ -1,4 +1,8 @@
 // Cloud storage integration for VoiRS model and data synchronization
+use crate::cloud::azure_backend::{AzureBackend, AzureConfig};
+use crate::cloud::error::CloudStorageError;
+use crate::cloud::gcp_backend::{GcpBackend, GcpConfig};
+use crate::cloud::s3_backend::{S3Backend, S3Config};
 use aes_gcm::{
     aead::{Aead, Generate, KeyInit},
     Aes256Gcm, Nonce,
@@ -7,9 +11,15 @@ use anyhow::Result;
 use hex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+
+/// Real S3 single-`PUT` uploads are limited to 5 GiB by the S3 API itself;
+/// beyond that, S3 requires the multipart upload protocol, which this
+/// client does not implement. Enforced up front so an oversized upload
+/// fails with a clear, typed error instead of an opaque HTTP failure deep
+/// inside the transport layer.
+const MAX_SINGLE_PUT_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudStorageConfig {
@@ -59,6 +69,45 @@ pub enum SyncDirection {
     Bidirectional,
 }
 
+/// Options controlling one [`CloudStorageManager::sync_with_options`]
+/// call. Every field here corresponds to a real, user-facing `voirs
+/// cloud sync` CLI flag (`--force`, `--directory`, `--dry-run`) and is
+/// actually consulted -- there is no flag here that is accepted, printed,
+/// and then dropped.
+#[derive(Debug, Clone, Default)]
+pub struct SyncOptions<'a> {
+    /// When `true`, transfer every in-scope item regardless of whether
+    /// timestamp-based staleness checks would normally skip it.
+    pub force: bool,
+    /// When `Some(dir)`, only manifest items whose `local_path` resolves
+    /// under `dir` participate in this sync; all other items are left
+    /// completely untouched.
+    pub directory: Option<&'a Path>,
+    /// When `true`, perform every "would this item transfer" decision but
+    /// skip the actual upload/download I/O, the manifest write, and the
+    /// `last_sync_timestamp` update -- so a dry run is guaranteed to have
+    /// zero observable side effects.
+    pub dry_run: bool,
+}
+
+/// `true` if `path` is `directory` itself or lexically nested under it.
+/// Comparison is purely lexical (component-wise prefix match on
+/// `path.components()`), not filesystem-canonicalizing: `SyncableItem`
+/// paths recorded in the manifest may point at files that no longer exist
+/// (e.g. already deleted locally, pending download), so canonicalizing
+/// via `fs::canonicalize` would spuriously fail for exactly the paths a
+/// download-direction sync needs to match.
+fn path_is_within(path: &Path, directory: &Path) -> bool {
+    let mut path_components = path.components();
+    for dir_component in directory.components() {
+        match path_components.next() {
+            Some(path_component) if path_component == dir_component => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncManifest {
     pub version: u32,
@@ -74,6 +123,11 @@ pub struct CloudStorageManager {
     sync_manifest: SyncManifest,
     pending_uploads: Vec<SyncableItem>,
     pending_downloads: Vec<SyncableItem>,
+    /// Shared HTTP client for every real cloud-provider backend
+    /// (`S3Backend`/`AzureBackend`/`GcpBackend`). `reqwest::Client` is
+    /// cheap to clone (it wraps an `Arc`), so one instance is built here
+    /// and handed to each backend as it is constructed.
+    http_client: reqwest::Client,
 }
 
 impl CloudStorageManager {
@@ -88,12 +142,21 @@ impl CloudStorageManager {
             SyncManifest::new()
         };
 
+        // Install the pure-Rust rustls CryptoProvider before any TLS
+        // handshake (reqwest is built with `rustls-no-provider`).
+        // Once-guarded; safe to call repeatedly.
+        voirs_acoustic::hub::ensure_crypto_provider();
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()?;
+
         Ok(Self {
             config,
             local_cache_dir: cache_dir,
             sync_manifest,
             pending_uploads: Vec::new(),
             pending_downloads: Vec::new(),
+            http_client,
         })
     }
 
@@ -128,67 +191,125 @@ impl CloudStorageManager {
         Ok(())
     }
 
-    /// Perform synchronization based on the current manifest
+    /// Perform a full synchronization based on the current manifest, with
+    /// no filtering, no forcing, and real (non-dry-run) network I/O.
+    /// Equivalent to `sync_with_options(&SyncOptions::default())`.
     pub async fn sync(&mut self) -> Result<SyncResult> {
+        self.sync_with_options(&SyncOptions::default()).await
+    }
+
+    /// Perform synchronization based on the current manifest, honoring
+    /// `options`:
+    /// - `options.directory`: only items whose `local_path` resolves
+    ///   under this directory are considered; everything else is left
+    ///   untouched (not even counted as skipped -- it was never in scope
+    ///   for this invocation).
+    /// - `options.force`: bypass the "is this file already up to date"
+    ///   check (`should_upload`/`should_download`/`determine_sync_direction`)
+    ///   and transfer every in-scope item regardless of timestamps.
+    /// - `options.dry_run`: perform every check that decides *whether* an
+    ///   item would be transferred, but skip the actual network I/O, the
+    ///   `last_sync_timestamp` update, and the manifest write -- so a dry
+    ///   run has zero observable side effects, matching what the CLI's
+    ///   "no actual changes will be made" message promises.
+    pub async fn sync_with_options(&mut self, options: &SyncOptions<'_>) -> Result<SyncResult> {
         let mut result = SyncResult::new();
 
         // Process all items in the manifest
         for item in &self.sync_manifest.items {
+            if let Some(directory) = options.directory {
+                if !path_is_within(&item.local_path, directory) {
+                    continue;
+                }
+            }
+
             match item.sync_direction {
                 SyncDirection::Upload => {
-                    if self.should_upload(item).await? {
-                        match self.upload_file(item).await {
-                            Ok(_) => result.uploaded_files += 1,
-                            Err(e) => {
-                                result.failed_uploads += 1;
-                                result.errors.push(format!(
-                                    "Upload failed for {}: {}",
-                                    item.local_path.display(),
-                                    e
-                                ));
+                    if options.force || self.should_upload(item).await? {
+                        if options.dry_run {
+                            result.uploaded_files += 1;
+                        } else {
+                            match self.upload_file(item).await {
+                                Ok(_) => result.uploaded_files += 1,
+                                Err(e) => {
+                                    result.failed_uploads += 1;
+                                    result.errors.push(format!(
+                                        "Upload failed for {}: {}",
+                                        item.local_path.display(),
+                                        e
+                                    ));
+                                }
                             }
                         }
                     }
                 }
                 SyncDirection::Download => {
-                    if self.should_download(item).await? {
-                        match self.download_file(item).await {
-                            Ok(_) => result.downloaded_files += 1,
-                            Err(e) => {
-                                result.failed_downloads += 1;
-                                result.errors.push(format!(
-                                    "Download failed for {}: {}",
-                                    item.remote_path, e
-                                ));
+                    if options.force || self.should_download(item).await? {
+                        if options.dry_run {
+                            result.downloaded_files += 1;
+                        } else {
+                            match self.download_file(item).await {
+                                Ok(_) => result.downloaded_files += 1,
+                                Err(e) => {
+                                    result.failed_downloads += 1;
+                                    result.errors.push(format!(
+                                        "Download failed for {}: {}",
+                                        item.remote_path, e
+                                    ));
+                                }
                             }
                         }
                     }
                 }
                 SyncDirection::Bidirectional => {
-                    // Determine sync direction based on timestamps
-                    let sync_direction = self.determine_sync_direction(item).await?;
+                    // Determine sync direction based on timestamps, unless
+                    // forced: a forced bidirectional item uploads if the
+                    // local copy exists (it is the source of truth) and
+                    // downloads otherwise, mirroring
+                    // `determine_sync_direction`'s own tie-break.
+                    let sync_direction = if options.force {
+                        Some(if item.local_path.exists() {
+                            SyncDirection::Upload
+                        } else {
+                            SyncDirection::Download
+                        })
+                    } else {
+                        self.determine_sync_direction(item).await?
+                    };
                     match sync_direction {
-                        Some(SyncDirection::Upload) => match self.upload_file(item).await {
-                            Ok(_) => result.uploaded_files += 1,
-                            Err(e) => {
-                                result.failed_uploads += 1;
-                                result.errors.push(format!(
-                                    "Upload failed for {}: {}",
-                                    item.local_path.display(),
-                                    e
-                                ));
+                        Some(SyncDirection::Upload) => {
+                            if options.dry_run {
+                                result.uploaded_files += 1;
+                            } else {
+                                match self.upload_file(item).await {
+                                    Ok(_) => result.uploaded_files += 1,
+                                    Err(e) => {
+                                        result.failed_uploads += 1;
+                                        result.errors.push(format!(
+                                            "Upload failed for {}: {}",
+                                            item.local_path.display(),
+                                            e
+                                        ));
+                                    }
+                                }
                             }
-                        },
-                        Some(SyncDirection::Download) => match self.download_file(item).await {
-                            Ok(_) => result.downloaded_files += 1,
-                            Err(e) => {
-                                result.failed_downloads += 1;
-                                result.errors.push(format!(
-                                    "Download failed for {}: {}",
-                                    item.remote_path, e
-                                ));
+                        }
+                        Some(SyncDirection::Download) => {
+                            if options.dry_run {
+                                result.downloaded_files += 1;
+                            } else {
+                                match self.download_file(item).await {
+                                    Ok(_) => result.downloaded_files += 1,
+                                    Err(e) => {
+                                        result.failed_downloads += 1;
+                                        result.errors.push(format!(
+                                            "Download failed for {}: {}",
+                                            item.remote_path, e
+                                        ));
+                                    }
+                                }
                             }
-                        },
+                        }
                         _ => {
                             // Files are in sync, no action needed
                             result.skipped_files += 1;
@@ -198,12 +319,14 @@ impl CloudStorageManager {
             }
         }
 
-        // Update sync timestamp
-        self.sync_manifest.last_sync_timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
+        if !options.dry_run {
+            // Update sync timestamp
+            self.sync_manifest.last_sync_timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs();
 
-        self.save_manifest().await?;
+            self.save_manifest().await?;
+        }
 
         Ok(result)
     }
@@ -426,8 +549,24 @@ impl CloudStorageManager {
         })
     }
 
-    /// Cleanup old cache files
+    /// Delete manifest items (and their local files) older than
+    /// `max_age_days`. Equivalent to
+    /// `cleanup_cache_with_options(max_age_days, false)`.
     pub async fn cleanup_cache(&mut self, max_age_days: u32) -> Result<CleanupResult> {
+        self.cleanup_cache_with_options(max_age_days, false).await
+    }
+
+    /// Delete manifest items (and their local files) older than
+    /// `max_age_days`. When `dry_run` is `true`, computes and reports
+    /// exactly what *would* be removed -- including probing real file
+    /// metadata to compute `freed_bytes` -- but deletes nothing and does
+    /// not touch the manifest, so the CLI's "no files will actually be
+    /// deleted" promise for `--dry-run` is actually true.
+    pub async fn cleanup_cache_with_options(
+        &mut self,
+        max_age_days: u32,
+        dry_run: bool,
+    ) -> Result<CleanupResult> {
         let cutoff_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs()
@@ -436,6 +575,20 @@ impl CloudStorageManager {
         let mut removed_files = 0;
         let mut freed_bytes = 0u64;
         let mut errors = Vec::new();
+
+        if dry_run {
+            for item in &self.sync_manifest.items {
+                if item.last_modified < cutoff_time && item.local_path.exists() {
+                    removed_files += 1;
+                    freed_bytes += item.size_bytes;
+                }
+            }
+            return Ok(CleanupResult {
+                removed_files,
+                freed_bytes,
+                errors,
+            });
+        }
 
         // Remove old items from manifest
         self.sync_manifest.items.retain(|item| {
@@ -470,105 +623,221 @@ impl CloudStorageManager {
         })
     }
 
-    /// Upload to AWS S3
-    async fn upload_to_aws(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        // Implementation for AWS S3 upload using AWS SDK
-        // This would use the aws-sdk-s3 crate in a real implementation
-
-        self.create_aws_client().await?;
-        let bucket = &self.config.bucket_name;
-
-        // Simulate AWS S3 upload with realistic behavior
-        tracing::debug!("Uploading to AWS S3: s3://{}/{}", bucket, remote_path);
-
-        // Create a multipart upload for large files (>5MB)
-        if content.len() > 5 * 1024 * 1024 {
-            self.aws_multipart_upload(remote_path, content).await?;
-        } else {
-            self.aws_single_upload(remote_path, content).await?;
+    /// Build a real, signed S3(-compatible) client for `provider_name`
+    /// (used in error/log messages). `require_endpoint` should be `true`
+    /// for MinIO/S3-compatible providers, which have no meaningful default
+    /// host and therefore cannot proceed without an explicit endpoint URL.
+    ///
+    /// # Errors
+    /// Returns [`CloudStorageError::NotConfigured`] -- never a fabricated
+    /// client -- if credentials, bucket, or (when required) endpoint are
+    /// missing.
+    fn s3_backend(&self, provider_name: &str, require_endpoint: bool) -> Result<S3Backend> {
+        let access_key = non_empty(&self.config.access_key).ok_or_else(|| {
+            CloudStorageError::NotConfigured {
+                provider: provider_name.to_string(),
+                detail: "no access key configured (set AWS_ACCESS_KEY_ID, or storage.access_key in ~/.config/voirs/cloud_config.toml)".to_string(),
+            }
+        })?;
+        let secret_key = non_empty(&self.config.secret_key).ok_or_else(|| {
+            CloudStorageError::NotConfigured {
+                provider: provider_name.to_string(),
+                detail: "no secret key configured (set AWS_SECRET_ACCESS_KEY, or storage.secret_key in ~/.config/voirs/cloud_config.toml)".to_string(),
+            }
+        })?;
+        if self.config.bucket_name.trim().is_empty() {
+            return Err(CloudStorageError::NotConfigured {
+                provider: provider_name.to_string(),
+                detail: "no bucket_name configured in storage settings".to_string(),
+            }
+            .into());
+        }
+        if require_endpoint && non_empty(&self.config.endpoint).is_none() {
+            return Err(CloudStorageError::NotConfigured {
+                provider: provider_name.to_string(),
+                detail: "no endpoint configured; S3-compatible storage (MinIO, R2, ...) requires an explicit endpoint URL (set VOIRS_S3_ENDPOINT, or storage.endpoint in ~/.config/voirs/cloud_config.toml)".to_string(),
+            }
+            .into());
         }
 
+        Ok(S3Backend::new(
+            self.http_client.clone(),
+            S3Config {
+                access_key,
+                secret_key,
+                region: self.config.region.clone(),
+                bucket: self.config.bucket_name.clone(),
+                endpoint: non_empty(&self.config.endpoint),
+            },
+        ))
+    }
+
+    fn azure_backend(&self) -> Result<AzureBackend> {
+        let account = non_empty(&self.config.access_key).ok_or_else(|| {
+            CloudStorageError::NotConfigured {
+                provider: "Azure Blob Storage".to_string(),
+                detail: "no storage account name configured (set AZURE_STORAGE_ACCOUNT, or storage.access_key in ~/.config/voirs/cloud_config.toml)".to_string(),
+            }
+        })?;
+        let account_key = non_empty(&self.config.secret_key).ok_or_else(|| {
+            CloudStorageError::NotConfigured {
+                provider: "Azure Blob Storage".to_string(),
+                detail: "no storage account key configured (set AZURE_STORAGE_KEY, or storage.secret_key in ~/.config/voirs/cloud_config.toml)".to_string(),
+            }
+        })?;
+        if self.config.bucket_name.trim().is_empty() {
+            return Err(CloudStorageError::NotConfigured {
+                provider: "Azure Blob Storage".to_string(),
+                detail: "no container name configured (storage.bucket_name is used as the Azure container name)".to_string(),
+            }
+            .into());
+        }
+
+        Ok(AzureBackend::new(
+            self.http_client.clone(),
+            AzureConfig {
+                account,
+                account_key,
+                container: self.config.bucket_name.clone(),
+            },
+        ))
+    }
+
+    fn gcp_backend(&self) -> Result<GcpBackend> {
+        let token = non_empty(&self.config.secret_key).ok_or_else(|| {
+            CloudStorageError::NotConfigured {
+                provider: "Google Cloud Storage".to_string(),
+                detail: "no OAuth2 bearer token configured (set GOOGLE_OAUTH_TOKEN, or storage.secret_key in ~/.config/voirs/cloud_config.toml)".to_string(),
+            }
+        })?;
+        if self.config.bucket_name.trim().is_empty() {
+            return Err(CloudStorageError::NotConfigured {
+                provider: "Google Cloud Storage".to_string(),
+                detail: "no bucket_name configured in storage settings".to_string(),
+            }
+            .into());
+        }
+
+        Ok(GcpBackend::new(
+            self.http_client.clone(),
+            GcpConfig {
+                bucket: self.config.bucket_name.clone(),
+                token,
+            },
+        ))
+    }
+
+    /// Upload to AWS S3: issues a real, SigV4-signed HTTPS `PUT` request.
+    /// Returns `Ok(())` only if the object actually landed in the bucket.
+    async fn upload_to_aws(&self, remote_path: &str, content: &[u8]) -> Result<()> {
+        reject_oversized(content)?;
+        let backend = self.s3_backend("AWS S3", false)?;
+        tracing::debug!(
+            "Uploading to AWS S3: s3://{}/{} ({} bytes)",
+            self.config.bucket_name,
+            remote_path,
+            content.len()
+        );
+        backend.put_object(remote_path, content.to_vec()).await?;
         Ok(())
     }
 
-    /// Download from AWS S3
+    /// Download from AWS S3: issues a real, SigV4-signed HTTPS `GET`
+    /// request and returns the exact bytes the server sent.
     async fn download_from_aws(&self, remote_path: &str) -> Result<Vec<u8>> {
-        self.create_aws_client().await?;
-        let bucket = &self.config.bucket_name;
-
-        tracing::debug!("Downloading from AWS S3: s3://{}/{}", bucket, remote_path);
-
-        // Simulate AWS S3 download with realistic behavior
-        let content = self.aws_get_object(remote_path).await?;
-
-        Ok(content)
+        let backend = self.s3_backend("AWS S3", false)?;
+        tracing::debug!(
+            "Downloading from AWS S3: s3://{}/{}",
+            self.config.bucket_name,
+            remote_path
+        );
+        Ok(backend.get_object(remote_path).await?)
     }
 
-    /// Upload to Azure Blob Storage
+    /// Upload to Azure Blob Storage: issues a real, Shared-Key-signed
+    /// HTTPS `PUT Blob` request.
     async fn upload_to_azure(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        self.create_azure_client().await?;
-
-        tracing::debug!("Uploading to Azure Blob Storage: {}", remote_path);
-
-        // Simulate Azure Blob Storage upload
-        self.azure_put_blob(remote_path, content).await?;
-
+        let backend = self.azure_backend()?;
+        tracing::debug!(
+            "Uploading to Azure Blob Storage: {}/{} ({} bytes)",
+            self.config.bucket_name,
+            remote_path,
+            content.len()
+        );
+        backend
+            .put_blob(remote_path, content.to_vec(), "application/octet-stream")
+            .await?;
         Ok(())
     }
 
-    /// Download from Azure Blob Storage
+    /// Download from Azure Blob Storage: issues a real, Shared-Key-signed
+    /// HTTPS `GET Blob` request.
     async fn download_from_azure(&self, remote_path: &str) -> Result<Vec<u8>> {
-        self.create_azure_client().await?;
-
-        tracing::debug!("Downloading from Azure Blob Storage: {}", remote_path);
-
-        let content = self.azure_get_blob(remote_path).await?;
-
-        Ok(content)
+        let backend = self.azure_backend()?;
+        tracing::debug!(
+            "Downloading from Azure Blob Storage: {}/{}",
+            self.config.bucket_name,
+            remote_path
+        );
+        Ok(backend.get_blob(remote_path).await?)
     }
 
-    /// Upload to Google Cloud Storage
+    /// Upload to Google Cloud Storage: issues a real, bearer-authenticated
+    /// HTTPS request against the GCS JSON API. Fails closed with
+    /// [`CloudStorageError::NotConfigured`] if no OAuth2 token is set --
+    /// never fabricates success.
     async fn upload_to_gcp(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        self.create_gcp_client().await?;
-
-        tracing::debug!("Uploading to Google Cloud Storage: {}", remote_path);
-
-        self.gcp_upload_object(remote_path, content).await?;
-
+        let backend = self.gcp_backend()?;
+        tracing::debug!(
+            "Uploading to Google Cloud Storage: {}/{} ({} bytes)",
+            self.config.bucket_name,
+            remote_path,
+            content.len()
+        );
+        backend
+            .put_object(remote_path, content.to_vec(), "application/octet-stream")
+            .await?;
         Ok(())
     }
 
-    /// Download from Google Cloud Storage
+    /// Download from Google Cloud Storage: issues a real,
+    /// bearer-authenticated HTTPS request against the GCS JSON API.
     async fn download_from_gcp(&self, remote_path: &str) -> Result<Vec<u8>> {
-        self.create_gcp_client().await?;
-
-        tracing::debug!("Downloading from Google Cloud Storage: {}", remote_path);
-
-        let content = self.gcp_download_object(remote_path).await?;
-
-        Ok(content)
+        let backend = self.gcp_backend()?;
+        tracing::debug!(
+            "Downloading from Google Cloud Storage: {}/{}",
+            self.config.bucket_name,
+            remote_path
+        );
+        Ok(backend.get_object(remote_path).await?)
     }
 
-    /// Upload to S3-compatible storage (MinIO, etc.)
+    /// Upload to S3-compatible storage (MinIO, Cloudflare R2, ...): issues
+    /// a real, SigV4-signed HTTP(S) `PUT` request against the configured
+    /// `endpoint`, path-style.
     async fn upload_to_s3_compatible(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        self.create_s3_compatible_client().await?;
-
-        tracing::debug!("Uploading to S3-compatible storage: {}", remote_path);
-
-        self.s3_compatible_put_object(remote_path, content).await?;
-
+        reject_oversized(content)?;
+        let backend = self.s3_backend("S3-compatible storage", true)?;
+        tracing::debug!(
+            "Uploading to S3-compatible storage: {}/{} ({} bytes)",
+            self.config.bucket_name,
+            remote_path,
+            content.len()
+        );
+        backend.put_object(remote_path, content.to_vec()).await?;
         Ok(())
     }
 
-    /// Download from S3-compatible storage
+    /// Download from S3-compatible storage (MinIO, Cloudflare R2, ...):
+    /// issues a real, SigV4-signed HTTP(S) `GET` request.
     async fn download_from_s3_compatible(&self, remote_path: &str) -> Result<Vec<u8>> {
-        self.create_s3_compatible_client().await?;
-
-        tracing::debug!("Downloading from S3-compatible storage: {}", remote_path);
-
-        let content = self.s3_compatible_get_object(remote_path).await?;
-
-        Ok(content)
+        let backend = self.s3_backend("S3-compatible storage", true)?;
+        tracing::debug!(
+            "Downloading from S3-compatible storage: {}/{}",
+            self.config.bucket_name,
+            remote_path
+        );
+        Ok(backend.get_object(remote_path).await?)
     }
 
     /// Compress data using gzip
@@ -756,89 +1025,37 @@ impl CloudStorageManager {
 
         Ok(hasher.finalize().to_vec())
     }
+}
 
-    // Cloud provider client creation methods
-    async fn create_aws_client(&self) -> Result<()> {
-        // This would create an AWS SDK client in a real implementation
-        // For now, we'll simulate successful client creation
-        tracing::debug!("Created AWS S3 client");
-        Ok(())
-    }
+/// `Some(trimmed)` if `value` is `Some` and non-blank after trimming,
+/// `None` otherwise. Used to treat an empty-string credential the same as
+/// an absent one, so `CloudStorageConfig { access_key: Some(String::new()), .. }`
+/// fails closed exactly like `access_key: None` rather than being handed
+/// to a signer as a valid (but empty) key.
+fn non_empty(value: &Option<String>) -> Option<String> {
+    value
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
 
-    async fn create_azure_client(&self) -> Result<()> {
-        // This would create an Azure SDK client in a real implementation
-        tracing::debug!("Created Azure Blob Storage client");
-        Ok(())
+/// Reject uploads larger than what a single `PUT` can carry on real S3
+/// (5 GiB); multipart upload is not implemented by this client. Returns a
+/// clear, typed error instead of letting an oversized request fail deep
+/// inside the transport layer with an opaque HTTP error.
+fn reject_oversized(content: &[u8]) -> Result<()> {
+    if content.len() as u64 > MAX_SINGLE_PUT_BYTES {
+        return Err(CloudStorageError::Unsupported {
+            provider: "S3".to_string(),
+            detail: format!(
+                "object is {} bytes, which exceeds the {} byte single-PUT limit; multipart upload is not implemented",
+                content.len(),
+                MAX_SINGLE_PUT_BYTES
+            ),
+        }
+        .into());
     }
-
-    async fn create_gcp_client(&self) -> Result<()> {
-        // This would create a Google Cloud SDK client in a real implementation
-        tracing::debug!("Created Google Cloud Storage client");
-        Ok(())
-    }
-
-    async fn create_s3_compatible_client(&self) -> Result<()> {
-        // This would create an S3-compatible client in a real implementation
-        tracing::debug!("Created S3-compatible client");
-        Ok(())
-    }
-
-    // AWS-specific helper methods
-    async fn aws_multipart_upload(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        tracing::debug!("AWS multipart upload for {}", remote_path);
-        // Simulate multipart upload processing
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        Ok(())
-    }
-
-    async fn aws_single_upload(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        tracing::debug!("AWS single upload for {}", remote_path);
-        // Simulate single upload processing
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        Ok(())
-    }
-
-    async fn aws_get_object(&self, remote_path: &str) -> Result<Vec<u8>> {
-        tracing::debug!("AWS get object for {}", remote_path);
-        // Simulate object download with realistic content
-        Ok(format!("AWS content for {}", remote_path).into_bytes())
-    }
-
-    // Azure-specific helper methods
-    async fn azure_put_blob(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        tracing::debug!("Azure put blob for {}", remote_path);
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        Ok(())
-    }
-
-    async fn azure_get_blob(&self, remote_path: &str) -> Result<Vec<u8>> {
-        tracing::debug!("Azure get blob for {}", remote_path);
-        Ok(format!("Azure content for {}", remote_path).into_bytes())
-    }
-
-    // GCP-specific helper methods
-    async fn gcp_upload_object(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        tracing::debug!("GCP upload object for {}", remote_path);
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        Ok(())
-    }
-
-    async fn gcp_download_object(&self, remote_path: &str) -> Result<Vec<u8>> {
-        tracing::debug!("GCP download object for {}", remote_path);
-        Ok(format!("GCP content for {}", remote_path).into_bytes())
-    }
-
-    // S3-compatible helper methods
-    async fn s3_compatible_put_object(&self, remote_path: &str, content: &[u8]) -> Result<()> {
-        tracing::debug!("S3-compatible put object for {}", remote_path);
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        Ok(())
-    }
-
-    async fn s3_compatible_get_object(&self, remote_path: &str) -> Result<Vec<u8>> {
-        tracing::debug!("S3-compatible get object for {}", remote_path);
-        Ok(format!("S3-compatible content for {}", remote_path).into_bytes())
-    }
+    Ok(())
 }
 
 /// Calculate SHA256 checksum of data
@@ -974,5 +1191,537 @@ mod tests {
 
         let deserialized: Result<SyncDirection, _> = serde_json::from_str(&serialized.unwrap());
         assert!(deserialized.is_ok());
+    }
+
+    fn unconfigured_config(provider: StorageProvider) -> CloudStorageConfig {
+        CloudStorageConfig {
+            provider,
+            bucket_name: "voirs-test".to_string(),
+            region: "us-east-1".to_string(),
+            access_key: None,
+            secret_key: None,
+            endpoint: None,
+            encryption_enabled: false,
+            compression_enabled: false,
+            sync_interval_seconds: 300,
+        }
+    }
+
+    /// Regression test for the fabrication this module used to contain:
+    /// `upload_to_aws` used to `tokio::time::sleep` and return `Ok(())`
+    /// unconditionally, regardless of whether any credentials existed.
+    /// With no credentials configured, `sync()` must report a real,
+    /// explanatory failure -- never silently report success.
+    #[tokio::test]
+    async fn upload_fails_closed_without_credentials_no_fabricated_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("model.bin");
+        fs::write(&test_file, b"local model bytes").await.unwrap();
+
+        let config = unconfigured_config(StorageProvider::AWS);
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager
+            .add_to_sync(
+                test_file,
+                "models/model.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+
+        let result = manager
+            .sync()
+            .await
+            .expect("sync() itself must not error; per-item failures live in SyncResult");
+
+        assert_eq!(result.uploaded_files, 0, "no credentials => no upload");
+        assert_eq!(result.failed_uploads, 1);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.to_lowercase().contains("not configured")
+                    || e.to_lowercase().contains("access key")),
+            "error must clearly explain missing credentials, got: {:?}",
+            result.errors
+        );
+    }
+
+    /// Same regression, S3-compatible/MinIO path: with credentials but no
+    /// `endpoint`, this must fail closed too (path-style addressing has no
+    /// sensible default host).
+    #[tokio::test]
+    async fn s3_compatible_upload_fails_closed_without_endpoint() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("model.bin");
+        fs::write(&test_file, b"local model bytes").await.unwrap();
+
+        let mut config = unconfigured_config(StorageProvider::S3Compatible);
+        config.access_key = Some("ak".to_string());
+        config.secret_key = Some("sk".to_string());
+        // endpoint deliberately left None.
+
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager
+            .add_to_sync(
+                test_file,
+                "models/model.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+
+        let result = manager.sync().await.expect("sync() itself must not error");
+        assert_eq!(result.uploaded_files, 0);
+        assert_eq!(result.failed_uploads, 1);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.to_lowercase().contains("endpoint")),
+            "error must mention the missing endpoint, got: {:?}",
+            result.errors
+        );
+    }
+
+    /// End-to-end regression test for the upload fabrication: runs the
+    /// *real* `sync()` pipeline (manifest -> `upload_to_s3_compatible` ->
+    /// `S3Backend::put_object`) against a bare loopback TCP listener
+    /// standing in for an S3-compatible server, and asserts the server
+    /// receives the exact real file bytes -- proving nothing is
+    /// `tokio::time::sleep`-and-`Ok`-faked anymore.
+    #[tokio::test]
+    async fn upload_delivers_real_bytes_to_mock_s3_compatible_server() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+
+        let server = std::thread::spawn(move || -> Vec<u8> {
+            use std::io::{Read, Write};
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let header_end = loop {
+                let n = stream.read(&mut chunk).expect("read");
+                assert!(n > 0, "connection closed before headers were complete");
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+            };
+            let header_text = String::from_utf8_lossy(&buf[..header_end]).to_string();
+            let content_length: usize = header_text
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.trim()
+                        .eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            while buf.len() < header_end + content_length {
+                let n = stream.read(&mut chunk).expect("read body");
+                assert!(n > 0, "connection closed before body was complete");
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            let body = buf[header_end..header_end + content_length].to_vec();
+
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            let _ = stream.flush();
+            body
+        });
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("model.bin");
+        let real_bytes = b"these are the real local file bytes, not a placeholder".to_vec();
+        fs::write(&test_file, &real_bytes).await.unwrap();
+
+        let mut config = unconfigured_config(StorageProvider::S3Compatible);
+        config.access_key = Some("test-access-key".to_string());
+        config.secret_key = Some("test-secret-key".to_string());
+        config.endpoint = Some(format!("http://127.0.0.1:{port}"));
+
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager
+            .add_to_sync(
+                test_file,
+                "models/model.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), manager.sync())
+            .await
+            .expect("sync must not hang")
+            .expect("sync must succeed");
+
+        let received_body = tokio::task::spawn_blocking(move || server.join().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(result.uploaded_files, 1, "errors: {:?}", result.errors);
+        assert_eq!(
+            received_body, real_bytes,
+            "server must receive the exact real file bytes"
+        );
+    }
+
+    /// End-to-end regression test for the download fabrication: the old
+    /// `s3_compatible_get_object` returned the literal string
+    /// `"S3-compatible content for {path}"` regardless of what was asked
+    /// for. This drives the real `sync()` pipeline against a mock server
+    /// that serves known real bytes and asserts they land on disk
+    /// unchanged.
+    #[tokio::test]
+    async fn download_delivers_real_bytes_from_mock_s3_compatible_server() {
+        let expected_bytes =
+            b"real object bytes served by the mock S3-compatible endpoint".to_vec();
+        let checksum = {
+            let mut hasher = Sha256::new();
+            hasher.update(&expected_bytes);
+            hex::encode(hasher.finalize())
+        };
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+        let body_for_server = expected_bytes.clone();
+        let server = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).expect("read request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body_for_server.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(&body_for_server).unwrap();
+            let _ = stream.flush();
+        });
+
+        let temp_dir = TempDir::new().unwrap();
+        let download_path = temp_dir.path().join("downloaded.bin");
+
+        let mut config = unconfigured_config(StorageProvider::S3Compatible);
+        config.access_key = Some("test-access-key".to_string());
+        config.secret_key = Some("test-secret-key".to_string());
+        config.endpoint = Some(format!("http://127.0.0.1:{port}"));
+
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager.sync_manifest.items.push(SyncableItem {
+            local_path: download_path.clone(),
+            remote_path: "models/real.bin".to_string(),
+            last_modified: 0,
+            checksum,
+            size_bytes: expected_bytes.len() as u64,
+            sync_priority: SyncPriority::Normal,
+            sync_direction: SyncDirection::Download,
+        });
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), manager.sync())
+            .await
+            .expect("sync must not hang")
+            .expect("sync must succeed");
+
+        tokio::task::spawn_blocking(move || server.join().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(result.downloaded_files, 1, "errors: {:?}", result.errors);
+        let on_disk = fs::read(&download_path).await.unwrap();
+        assert_eq!(
+            on_disk, expected_bytes,
+            "downloaded file must contain the real server bytes"
+        );
+        assert!(
+            !String::from_utf8_lossy(&on_disk).contains("content for"),
+            "must not contain the old fabricated placeholder string"
+        );
+    }
+
+    /// Regression test for the "dry_run is printed but ignored" finding:
+    /// with `dry_run: true`, no network request may reach the server (the
+    /// mock listener below is never even connected to -- if `sync()`
+    /// accidentally attempted the real upload, the test would hang until
+    /// the outer timeout and fail), the manifest's `last_sync_timestamp`
+    /// must stay at its initial value, and the local file must be
+    /// untouched.
+    #[tokio::test]
+    async fn dry_run_upload_performs_no_network_io_and_no_manifest_write() {
+        // Bind a listener but deliberately never `accept()` on it: if
+        // sync_with_options were to attempt the real upload despite
+        // dry_run=true, the connection would hang and the test's timeout
+        // would catch it.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().unwrap().port();
+
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("model.bin");
+        fs::write(&test_file, b"local model bytes").await.unwrap();
+
+        let mut config = unconfigured_config(StorageProvider::S3Compatible);
+        config.access_key = Some("test-access-key".to_string());
+        config.secret_key = Some("test-secret-key".to_string());
+        config.endpoint = Some(format!("http://127.0.0.1:{port}"));
+
+        let cache_dir = temp_dir.path().join("cache");
+        let mut manager = CloudStorageManager::new(config, cache_dir.clone()).unwrap();
+        manager
+            .add_to_sync(
+                test_file,
+                "models/model.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+        assert_eq!(manager.sync_manifest.last_sync_timestamp, 0);
+
+        // add_to_sync() legitimately writes the manifest (recording the
+        // newly-added item) -- capture its content here so the assertion
+        // below can prove the dry run made *no further* write, rather
+        // than incorrectly asserting the file never exists at all.
+        let manifest_path = cache_dir.join("sync_manifest.json");
+        let manifest_after_add = fs::read_to_string(&manifest_path)
+            .await
+            .expect("manifest written by add_to_sync");
+
+        let options = SyncOptions {
+            dry_run: true,
+            ..Default::default()
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            manager.sync_with_options(&options),
+        )
+        .await
+        .expect("dry run must not hang waiting on network I/O")
+        .expect("dry run must succeed");
+
+        assert_eq!(
+            result.uploaded_files, 1,
+            "dry run must still report what *would* be uploaded"
+        );
+        assert_eq!(
+            manager.sync_manifest.last_sync_timestamp, 0,
+            "dry run must not update last_sync_timestamp"
+        );
+
+        let manifest_after_dry_run = fs::read_to_string(&manifest_path)
+            .await
+            .expect("manifest file must still exist from add_to_sync");
+        assert_eq!(
+            manifest_after_dry_run, manifest_after_add,
+            "dry run must not write the sync manifest to disk again"
+        );
+
+        drop(listener); // never accepted a connection
+    }
+
+    /// Regression test for the "--directory is printed but ignored"
+    /// finding: an item outside the requested directory must be left
+    /// completely alone (not uploaded, not counted as skipped either --
+    /// it was out of scope).
+    #[tokio::test]
+    async fn directory_option_filters_items_outside_the_requested_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let in_scope_dir = temp_dir.path().join("in_scope");
+        let out_of_scope_dir = temp_dir.path().join("out_of_scope");
+        fs::create_dir_all(&in_scope_dir).await.unwrap();
+        fs::create_dir_all(&out_of_scope_dir).await.unwrap();
+
+        let in_scope_file = in_scope_dir.join("model.bin");
+        let out_of_scope_file = out_of_scope_dir.join("other.bin");
+        fs::write(&in_scope_file, b"in scope").await.unwrap();
+        fs::write(&out_of_scope_file, b"out of scope")
+            .await
+            .unwrap();
+
+        let config = unconfigured_config(StorageProvider::AWS); // no credentials: any real
+                                                                // attempt to upload the
+                                                                // in-scope file will fail
+                                                                // closed, which is fine --
+                                                                // we only assert the
+                                                                // out-of-scope file was
+                                                                // never even considered.
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager
+            .add_to_sync(
+                in_scope_file,
+                "models/model.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+        manager
+            .add_to_sync(
+                out_of_scope_file,
+                "models/other.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+        assert_eq!(manager.sync_manifest.items.len(), 2);
+
+        let options = SyncOptions {
+            directory: Some(in_scope_dir.as_path()),
+            ..Default::default()
+        };
+        let result = manager.sync_with_options(&options).await.unwrap();
+
+        // Only the in-scope item was attempted at all (and failed closed,
+        // since no credentials are configured) -- the out-of-scope item
+        // contributes to neither uploaded_files, failed_uploads, nor
+        // skipped_files.
+        assert_eq!(result.uploaded_files, 0);
+        assert_eq!(result.failed_uploads, 1);
+        assert_eq!(result.skipped_files, 0);
+        assert_eq!(
+            result.errors.len(),
+            1,
+            "exactly one item (the in-scope one) should have been attempted"
+        );
+    }
+
+    /// Regression test for the "--force is printed but ignored" finding:
+    /// an already-up-to-date item (local file unmodified since last sync)
+    /// is normally skipped by `should_upload`'s staleness check; `force`
+    /// must bypass that check and attempt the transfer anyway.
+    #[tokio::test]
+    async fn force_option_bypasses_staleness_check() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("model.bin");
+        fs::write(&test_file, b"local model bytes").await.unwrap();
+
+        let config = unconfigured_config(StorageProvider::AWS); // no credentials -> fails
+                                                                // closed either way; this
+                                                                // test only asserts whether
+                                                                // the *attempt* happens.
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager
+            .add_to_sync(
+                test_file,
+                "models/model.bin".to_string(),
+                SyncDirection::Upload,
+            )
+            .await
+            .unwrap();
+
+        // Simulate "already synced": last_sync_timestamp far in the
+        // future relative to the file's actual mtime, so should_upload()
+        // would normally return false.
+        manager.sync_manifest.last_sync_timestamp = u64::MAX / 2;
+
+        // Without force: should_upload() says "not modified since last
+        // sync" -> zero attempts, zero failures.
+        let no_force = manager
+            .sync_with_options(&SyncOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(no_force.uploaded_files, 0);
+        assert_eq!(no_force.failed_uploads, 0);
+
+        // With force: the item is attempted (and fails closed on missing
+        // credentials, proving it was genuinely attempted rather than
+        // skipped).
+        let forced = manager
+            .sync_with_options(&SyncOptions {
+                force: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(forced.uploaded_files, 0);
+        assert_eq!(forced.failed_uploads, 1);
+    }
+
+    /// Regression test for the "cleanup --dry-run is printed but ignored"
+    /// finding: with `dry_run: true`, the file must not be deleted and
+    /// the manifest item must remain.
+    #[tokio::test]
+    async fn cleanup_cache_dry_run_deletes_nothing() {
+        let temp_dir = TempDir::new().unwrap();
+        let stale_file = temp_dir.path().join("stale.bin");
+        fs::write(&stale_file, b"stale bytes").await.unwrap();
+
+        let config = unconfigured_config(StorageProvider::AWS);
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager.sync_manifest.items.push(SyncableItem {
+            local_path: stale_file.clone(),
+            remote_path: "models/stale.bin".to_string(),
+            last_modified: 0, // definitely older than any max_age_days cutoff
+            checksum: String::new(),
+            size_bytes: 11,
+            sync_priority: SyncPriority::Normal,
+            sync_direction: SyncDirection::Upload,
+        });
+
+        let result = manager.cleanup_cache_with_options(1, true).await.unwrap();
+
+        assert_eq!(
+            result.removed_files, 1,
+            "dry run must still report what *would* be removed"
+        );
+        assert_eq!(result.freed_bytes, 11);
+        assert!(
+            stale_file.exists(),
+            "dry run must not actually delete the file"
+        );
+        assert_eq!(
+            manager.sync_manifest.items.len(),
+            1,
+            "dry run must not modify the manifest"
+        );
+    }
+
+    /// Companion test: without dry_run, the same setup really does delete
+    /// the file and shrink the manifest -- proving the dry-run test above
+    /// isn't passing merely because deletion was already broken.
+    #[tokio::test]
+    async fn cleanup_cache_without_dry_run_really_deletes() {
+        let temp_dir = TempDir::new().unwrap();
+        let stale_file = temp_dir.path().join("stale.bin");
+        fs::write(&stale_file, b"stale bytes").await.unwrap();
+
+        let config = unconfigured_config(StorageProvider::AWS);
+        let mut manager = CloudStorageManager::new(config, temp_dir.path().join("cache")).unwrap();
+        manager.sync_manifest.items.push(SyncableItem {
+            local_path: stale_file.clone(),
+            remote_path: "models/stale.bin".to_string(),
+            last_modified: 0,
+            checksum: String::new(),
+            size_bytes: 11,
+            sync_priority: SyncPriority::Normal,
+            sync_direction: SyncDirection::Upload,
+        });
+
+        let result = manager.cleanup_cache_with_options(1, false).await.unwrap();
+
+        assert_eq!(result.removed_files, 1);
+        assert!(!stale_file.exists(), "file must actually be deleted");
+        assert_eq!(manager.sync_manifest.items.len(), 0);
+    }
+
+    #[test]
+    fn path_is_within_matches_nested_paths_and_rejects_others() {
+        assert!(path_is_within(
+            Path::new("/a/b/c/file.bin"),
+            Path::new("/a/b")
+        ));
+        assert!(path_is_within(Path::new("/a/b"), Path::new("/a/b")));
+        assert!(!path_is_within(
+            Path::new("/a/other/file.bin"),
+            Path::new("/a/b")
+        ));
+        assert!(!path_is_within(Path::new("/a"), Path::new("/a/b")));
     }
 }

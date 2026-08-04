@@ -697,7 +697,11 @@ fn get_available_memory_mb() -> u32 {
     #[cfg(target_os = "macos")]
     {
         // Use vm_stat on macOS
-        if let Ok(output) = std::process::Command::new("vm_stat").output() {
+        let mut command = std::process::Command::new("vm_stat");
+        if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+            &mut command,
+            crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+        ) {
             if let Ok(vm_stat) = String::from_utf8(output.stdout) {
                 let mut page_size = 4096; // Default page size
                 let mut free_pages = 0;
@@ -786,10 +790,12 @@ fn get_cpu_usage() -> f32 {
     #[cfg(target_os = "macos")]
     {
         // Use top command to get CPU usage on macOS
-        if let Ok(output) = std::process::Command::new("top")
-            .args(["-l", "1", "-n", "0"])
-            .output()
-        {
+        let mut command = std::process::Command::new("top");
+        command.args(["-l", "1", "-n", "0"]);
+        if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+            &mut command,
+            crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+        ) {
             if let Ok(top_output) = String::from_utf8(output.stdout) {
                 for line in top_output.lines() {
                     if line.contains("CPU usage:") {
@@ -834,10 +840,12 @@ fn get_cpu_usage() -> f32 {
 
 fn get_gpu_memory_mb() -> Option<u32> {
     // Try to get NVIDIA GPU memory using nvidia-smi
-    if let Ok(output) = std::process::Command::new("nvidia-smi")
-        .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
-        .output()
-    {
+    let mut command = std::process::Command::new("nvidia-smi");
+    command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
+    if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+        &mut command,
+        crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+    ) {
         if output.status.success() {
             if let Ok(nvidia_output) = String::from_utf8(output.stdout) {
                 if let Some(memory_line) = nvidia_output.lines().next() {
@@ -912,10 +920,12 @@ fn get_active_threads() -> u32 {
     #[cfg(target_os = "macos")]
     {
         // Use ps command to count threads
-        if let Ok(output) = std::process::Command::new("ps")
-            .args(["-M", "-p", &std::process::id().to_string()])
-            .output()
-        {
+        let mut command = std::process::Command::new("ps");
+        command.args(["-M", "-p", &std::process::id().to_string()]);
+        if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+            &mut command,
+            crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+        ) {
             if let Ok(ps_output) = String::from_utf8(output.stdout) {
                 // Count lines (excluding header)
                 let line_count = ps_output.lines().count();
@@ -961,7 +971,11 @@ fn get_load_average() -> Option<f32> {
         #[cfg(target_os = "macos")]
         {
             // Use uptime command on macOS
-            if let Ok(output) = std::process::Command::new("uptime").output() {
+            let mut command = std::process::Command::new("uptime");
+            if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+                &mut command,
+                crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+            ) {
                 if let Ok(uptime_output) = String::from_utf8(output.stdout) {
                     // Look for pattern like "load averages: 1.23 2.34 3.45"
                     if let Some(load_start) = uptime_output.find("load averages:") {

@@ -1,32 +1,33 @@
-# Configuration for cargo-deny
+# Configuration for cargo-deny (schema: cargo-deny 0.19+)
 # https://embarkstudios.github.io/cargo-deny/
+#
+# Regenerated against the current schema (`cargo deny init`) after the old
+# config's deprecated keys (`[advisories].vulnerability`/`notice`,
+# `[licenses].unlicensed`/`copyleft`/`allow-osi-fsf-free`/`default`) started
+# making `cargo deny check` fail outright with a config-validation error.
 
+[graph]
+# Check the dependency graph as if every feature were enabled, so a
+# COOLJAPAN-banned crate that only shows up behind a non-default feature
+# (e.g. `gpu`, `onnx`, `gamification`) is still caught.
+all-features = true
+
+# This section is considered when running `cargo deny check advisories`
 [advisories]
-# The path where the advisory database is cloned/fetched into
-db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for security vulnerabilities
-vulnerability = "deny"
-# The lint level for unmaintained crates
-unmaintained = "none"
-# The lint level for crates that have been yanked from their source registry
-yanked = "warn"
-# The lint level for crates with security notices
-notice = "warn"
-# A list of advisory IDs to ignore
+# A list of advisory IDs to ignore. Note that ignored advisories will still
+# output a note when they are encountered.
 ignore = [
-    # Add specific advisory IDs to ignore if needed
+    # Add specific advisory IDs to ignore if needed, e.g.:
+    # { id = "RUSTSEC-0000-0000", reason = "why this is acceptable" },
 ]
 
+# This section is considered when running `cargo deny check licenses`
 [licenses]
-# The confidence threshold for detecting a license from a license text.
-confidence-threshold = 0.8
-# The lint level for when a license requirement is not satisfied
-unlicensed = "deny"
-# The lint level for when a license identifier is not recognized
-# unrecognized = "deny"  # This key is not valid in current cargo-deny version
-# Allow the following licenses
+# List of explicitly allowed licenses. Any license not in this list is
+# denied by default under the current cargo-deny schema (there is no
+# separate `unlicensed`/`default` lint-level key anymore).
 allow = [
     "MIT",
     "Apache-2.0",
@@ -34,29 +35,34 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
+    "Unicode-3.0",
     "Unicode-DFS-2016",
     "CC0-1.0",
     "MPL-2.0",
+    "Zlib",
+    "BSL-1.0",
+    "0BSD",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    # Bundled default fonts pulled in transitively by egui/epaint (UI feature)
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    # NOTE: LGPL-3.0 (mp3lame-encoder/mp3lame-sys, transitive via voirs-sdk's
+    # optional mp3 support) is intentionally NOT allow-listed here -- it is a
+    # copyleft license AND mp3lame-sys wraps a C library, a likely Pure Rust
+    # policy violation. See PUBLISHING.md / followups for this batch.
 ]
-# Deny the following licenses
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-1.0",
-    "AGPL-3.0",
-]
-# Lint level for when multiple versions of the same license are detected
-copyleft = "deny"
-# Allow specific license exceptions
-allow-osi-fsf-free = "neither"
-default = "deny"
+# The confidence threshold for detecting a license from a license text.
+confidence-threshold = 0.8
 
 [licenses.private]
-# If true, ignores workspace crates that aren't published
-ignore = false
+# If true, ignores workspace crates that aren't published (e.g. examples/,
+# which sets `publish = false` and carries no `license` field of its own).
+ignore = true
 # One or more registries that you want to ignore sources from
 registries = []
 
+# This section is considered when running `cargo deny check bans`.
 [bans]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "warn"
@@ -64,19 +70,9 @@ multiple-versions = "warn"
 wildcards = "deny"
 # The graph highlighting used when creating dotgraphs for crates
 highlight = "all"
-# The maximum number of versions allowed for a single crate
-# multiple-versions-limit = 3  # This key is not valid in current cargo-deny version
 
 # List of crates that are allowed
 allow = []
-
-# List of crates to deny
-deny = [
-    # Deny old openssl versions with known vulnerabilities
-    { name = "openssl", version = "<0.10.55" },
-    # Deny old tokio versions with known issues
-    { name = "tokio", version = "<1.0" },
-]
 
 # Certain crates/versions that will be skipped when doing duplicate detection
 skip = []
@@ -84,6 +80,129 @@ skip = []
 # Similarly to `skip` allows you to skip certain crates from being checked
 skip-tree = []
 
+# List of crates to deny, expressed as [[bans.deny]] array-of-tables (rather
+# than an inline `deny = [ {...}, ... ]` array) so the `wrappers` lists below
+# can be readably multi-line -- TOML inline tables must stay on one line, and
+# a key can't be defined both ways.
+#
+# COOLJAPAN policy (see ~/.claude/CLAUDE.md "Dependency Replacements"):
+# openblas -> oxiblas, bincode -> oxicode, rustfft -> oxifft/scirs2-fft,
+# Z3 -> oxiz, rusqlite -> oxisql-sqlite-compat,
+# zip/flate2/zstd/bzip2/lz4/tar/snap/brotli/miniz_oxide -> oxiarc-*.
+#
+# None of these are DIRECT workspace dependencies today (verified: no such
+# line in this Cargo.toml's [workspace.dependencies]). Several are still
+# unavoidable *transitive* dependencies of required upstream crates; those
+# are allowed ONLY via their currently-known-good immediate parent(s) using
+# `wrappers`, so a *new, additional, or direct* source of the same banned
+# crate still fails the check. Run `cargo tree -i <crate> --all-features`
+# to re-derive the wrapper list if this check starts failing after a dep
+# upgrade.
+
+# --- Never directly added; zero occurrences today, kept denied outright ---
+
+[[bans.deny]]
+crate = "openblas-src"
+reason = "COOLJAPAN policy: use oxiblas instead"
+
+[[bans.deny]]
+crate = "openblas-sys"
+reason = "COOLJAPAN policy: use oxiblas instead"
+
+[[bans.deny]]
+crate = "bincode"
+reason = "COOLJAPAN policy: use oxicode instead"
+
+[[bans.deny]]
+crate = "z3"
+reason = "COOLJAPAN policy: use oxiz instead"
+
+[[bans.deny]]
+crate = "z3-sys"
+reason = "COOLJAPAN policy: use oxiz instead"
+
+[[bans.deny]]
+crate = "rusqlite"
+reason = "COOLJAPAN policy: use oxisql-sqlite-compat instead"
+
+[[bans.deny]]
+crate = "zstd"
+reason = "COOLJAPAN policy: use oxiarc-* instead"
+
+[[bans.deny]]
+crate = "zstd-sys"
+reason = "COOLJAPAN policy: use oxiarc-* instead"
+
+[[bans.deny]]
+crate = "bzip2"
+reason = "COOLJAPAN policy: use oxiarc-bzip2 instead"
+
+[[bans.deny]]
+crate = "bzip2-sys"
+reason = "COOLJAPAN policy: use oxiarc-bzip2 instead"
+
+[[bans.deny]]
+crate = "lz4"
+reason = "COOLJAPAN policy: use oxiarc-* instead (not lz4_flex, which is a pure-Rust reimplementation and is NOT banned)"
+
+[[bans.deny]]
+crate = "lz4-sys"
+reason = "COOLJAPAN policy: use oxiarc-* instead"
+
+[[bans.deny]]
+crate = "openssl"
+reason = "Pure Rust policy: use rustls instead"
+
+[[bans.deny]]
+crate = "openssl-sys"
+reason = "Pure Rust policy: use rustls instead"
+
+[[bans.deny]]
+crate = "native-tls"
+reason = "Pure Rust policy: use rustls instead"
+
+[[bans.deny]]
+crate = "tokio@<1.0"
+reason = "old tokio versions have known issues"
+
+# --- Currently unavoidable transitive occurrences, scoped to known parents ---
+
+[[bans.deny]]
+crate = "rustfft"
+reason = "COOLJAPAN policy: use scirs2-fft/oxifft directly; only acceptable as a transitive dep of symphonia (audio demux/decode) and tract (ONNX runtime)"
+wrappers = ["symphonia-core", "tract-core", "tract-onnx-opl"]
+
+[[bans.deny]]
+crate = "zip"
+reason = "COOLJAPAN policy: use oxiarc-zip instead; only acceptable as a transitive (dev-only) dep of candle-core"
+wrappers = ["candle-core"]
+
+[[bans.deny]]
+crate = "flate2"
+reason = "COOLJAPAN policy: use oxiarc-deflate instead; only acceptable as a transitive dep of parquet/tower-http's compression stack, image codecs, tract, and procfs (Linux-only target dep, not visible to `cargo tree` on non-Linux hosts)"
+wrappers = ["compression-codecs", "parquet", "png", "tiff", "tract-nnef", "procfs"]
+
+[[bans.deny]]
+crate = "tar"
+reason = "COOLJAPAN policy: use oxiarc-tar instead; only acceptable as a transitive dep of tract's NNEF model format support"
+wrappers = ["tract-nnef"]
+
+[[bans.deny]]
+crate = "snap"
+reason = "COOLJAPAN policy: use oxiarc-snappy instead; only acceptable as a transitive dep of parquet's Snappy codec"
+wrappers = ["parquet"]
+
+[[bans.deny]]
+crate = "brotli"
+reason = "COOLJAPAN policy: use oxiarc-brotli instead; only acceptable as a transitive dep of parquet/tower-http's compression stack"
+wrappers = ["compression-codecs", "parquet"]
+
+[[bans.deny]]
+crate = "miniz_oxide"
+reason = "COOLJAPAN policy: use oxiarc-deflate instead; only acceptable as a transitive dep of panic backtraces, flate2, image codecs, and musicxml"
+wrappers = ["backtrace", "flate2", "musicxml", "png"]
+
+# This section is considered when running `cargo deny check sources`.
 [sources]
 # Lint level for what to happen when a crate from a unknown registry is encountered
 unknown-registry = "warn"

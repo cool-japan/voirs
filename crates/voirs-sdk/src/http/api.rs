@@ -414,7 +414,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_check() {
+        // This test exercises HTTP routing/serialization, not synthesis
+        // quality, so opt explicitly into test mode to avoid real component
+        // initialization (model download) in CI/sandboxed environments.
         let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
             .build()
             .await
             .expect("Failed to build pipeline");
@@ -437,7 +441,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_synthesize_endpoint() {
+        // This test exercises HTTP routing/serialization, not synthesis
+        // quality, so opt explicitly into test mode to avoid real component
+        // initialization (model download) in CI/sandboxed environments.
         let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
             .build()
             .await
             .expect("Failed to build pipeline");
@@ -467,7 +475,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_voices_endpoint() {
+        // This test exercises HTTP routing/serialization, not synthesis
+        // quality, so opt explicitly into test mode to avoid real component
+        // initialization (model download) in CI/sandboxed environments.
         let pipeline = VoirsPipelineBuilder::new()
+            .with_test_mode(true)
             .build()
             .await
             .expect("Failed to build pipeline");

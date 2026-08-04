@@ -644,6 +644,7 @@ fn generate_html_report(report: &voirs_acoustic::performance_targets::Performanc
 async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::error::Error>> {
     use serde::{Deserialize, Serialize};
     use std::time::Instant;
+    use voirs_g2p::G2p;
 
     println!("🔍 VoiRS Performance Profiler");
     println!("============================");
@@ -667,25 +668,79 @@ async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::e
         println!();
     }
 
+    /// Real per-iteration timing. `full_pipeline_ms`/`audio_duration_s` are
+    /// `None` whenever no production `VoirsPipeline` could be built in this
+    /// environment (e.g. no cached/downloadable voice model) -- never a
+    /// fabricated stand-in value.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct ComponentTiming {
+        /// Real standalone G2P conversion time (`voirs_g2p`'s rule-based
+        /// backend on English text -- always measurable, no model weights
+        /// needed).
         g2p_ms: f64,
-        acoustic_ms: f64,
-        vocoder_ms: f64,
-        total_ms: f64,
+        /// Real end-to-end `VoirsPipeline::synthesize` wall-clock time (its
+        /// own G2P + acoustic model + vocoder combined). The SDK does not
+        /// expose a public per-stage hook, so acoustic and vocoder cannot be
+        /// measured separately without fabricating a split.
+        full_pipeline_ms: Option<f64>,
+        /// Real duration (seconds) of the audio `full_pipeline_ms` produced,
+        /// read directly from the returned `AudioBuffer` -- used for a real
+        /// (not assumed-1-second) real-time factor.
+        audio_duration_s: Option<f64>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    struct ComponentTimingSummary {
+        g2p_ms: f64,
+        full_pipeline_ms: Option<f64>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct ProfileResult {
         iterations: usize,
         timings: Vec<ComponentTiming>,
-        average: ComponentTiming,
-        min: ComponentTiming,
-        max: ComponentTiming,
-        std_dev: ComponentTiming,
+        average: ComponentTimingSummary,
+        min: ComponentTimingSummary,
+        max: ComponentTimingSummary,
+        std_dev: ComponentTimingSummary,
+        /// `None` if a full pipeline was never available, explaining why
+        /// `full_pipeline_ms` is `None` throughout `timings`.
+        pipeline_unavailable_reason: Option<String>,
         memory_usage_mb: Option<f64>,
+        /// Real per-iteration peak-RSS deltas are not implemented; honestly
+        /// `None` rather than a formula-derived count. See `--memory` for a
+        /// real (if coarser) memory measurement.
         io_operations: Option<u64>,
     }
+
+    // Real standalone G2P timing needs no model weights, so it always runs.
+    let g2p = voirs_g2p::backends::RuleBasedG2p::new(voirs_g2p::LanguageCode::EnUs);
+
+    // Real full-pipeline attempt, bounded so a missing network connection
+    // (needed to fetch a default voice's model weights) fails fast and
+    // honestly instead of hanging this command for minutes.
+    println!("🚀 Preparing synthesis pipeline for profiling...");
+    let mut pipeline_builder = voirs_sdk::VoirsPipeline::builder();
+    if let Some(voice) = args.voice.as_deref() {
+        pipeline_builder = pipeline_builder.with_voice(voice);
+    }
+    let (pipeline, pipeline_unavailable_reason) =
+        match tokio::time::timeout(Duration::from_secs(15), pipeline_builder.build()).await {
+            Ok(Ok(pipeline)) => (Some(pipeline), None),
+            Ok(Err(e)) => (
+                None,
+                Some(format!("could not build a synthesis pipeline: {e}")),
+            ),
+            Err(_) => (
+                None,
+                Some("building the synthesis pipeline timed out after 15s".to_string()),
+            ),
+        };
+    if let Some(reason) = &pipeline_unavailable_reason {
+        println!("⚠️  Full-pipeline timing unavailable: {reason}");
+        println!("    Only G2P timing will be measured for this run.");
+    }
+    println!();
 
     let mut timings = Vec::new();
     let mut memory_samples = Vec::new();
@@ -694,37 +749,44 @@ async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::e
     let overall_start = Instant::now();
 
     for i in 0..args.iterations {
-        let iter_start = Instant::now();
-
-        // Simulate G2P phase (in real implementation, this would call actual G2P)
+        // Real G2P timing: actually converts `args.text`, not a sleep.
         let g2p_start = Instant::now();
-        tokio::time::sleep(Duration::from_millis(2)).await; // Simulate G2P work
-        let g2p_duration = g2p_start.elapsed();
+        let phonemes = g2p
+            .to_phonemes(&args.text, Some(voirs_g2p::LanguageCode::EnUs))
+            .await;
+        let g2p_ms = g2p_start.elapsed().as_secs_f64() * 1000.0;
+        if let Err(e) = phonemes {
+            eprintln!("\n⚠️  G2P conversion failed for this iteration: {e}");
+        }
 
-        // Simulate acoustic model phase
-        let acoustic_start = Instant::now();
-        tokio::time::sleep(Duration::from_millis(5)).await; // Simulate acoustic work
-        let acoustic_duration = acoustic_start.elapsed();
-
-        // Simulate vocoder phase
-        let vocoder_start = Instant::now();
-        tokio::time::sleep(Duration::from_millis(3)).await; // Simulate vocoder work
-        let vocoder_duration = vocoder_start.elapsed();
-
-        let total_duration = iter_start.elapsed();
+        // Real full-pipeline timing, when a pipeline was actually built.
+        let (full_pipeline_ms, audio_duration_s) = if let Some(pipeline) = &pipeline {
+            let synth_start = Instant::now();
+            match pipeline.synthesize(&args.text).await {
+                Ok(audio) => (
+                    Some(synth_start.elapsed().as_secs_f64() * 1000.0),
+                    Some(audio.duration() as f64),
+                ),
+                Err(e) => {
+                    eprintln!("\n⚠️  Synthesis failed for this iteration: {e}");
+                    (None, None)
+                }
+            }
+        } else {
+            (None, None)
+        };
 
         timings.push(ComponentTiming {
-            g2p_ms: g2p_duration.as_secs_f64() * 1000.0,
-            acoustic_ms: acoustic_duration.as_secs_f64() * 1000.0,
-            vocoder_ms: vocoder_duration.as_secs_f64() * 1000.0,
-            total_ms: total_duration.as_secs_f64() * 1000.0,
+            g2p_ms,
+            full_pipeline_ms,
+            audio_duration_s,
         });
 
-        // Memory profiling
+        // Real memory profiling: actual process RSS, not a growth formula.
         if args.memory {
-            // In real implementation, get actual memory usage
-            let memory_mb = 50.0 + (i as f64 * 0.1); // Simulated memory growth
-            memory_samples.push(memory_mb);
+            if let Some(mb) = measure_current_memory_mb() {
+                memory_samples.push(mb);
+            }
         }
 
         if (i + 1) % 10 == 0 || i == args.iterations - 1 {
@@ -740,79 +802,66 @@ async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::e
 
     // Calculate statistics
     let count = timings.len() as f64;
-    let average = ComponentTiming {
-        g2p_ms: timings.iter().map(|t| t.g2p_ms).sum::<f64>() / count,
-        acoustic_ms: timings.iter().map(|t| t.acoustic_ms).sum::<f64>() / count,
-        vocoder_ms: timings.iter().map(|t| t.vocoder_ms).sum::<f64>() / count,
-        total_ms: timings.iter().map(|t| t.total_ms).sum::<f64>() / count,
+    let g2p_values: Vec<f64> = timings.iter().map(|t| t.g2p_ms).collect();
+    let full_pipeline_values: Vec<f64> =
+        timings.iter().filter_map(|t| t.full_pipeline_ms).collect();
+
+    let mean = |values: &[f64]| -> f64 { values.iter().sum::<f64>() / values.len() as f64 };
+    let mean_opt = |values: &[f64]| -> Option<f64> {
+        if values.is_empty() {
+            None
+        } else {
+            Some(mean(values))
+        }
+    };
+    let min_opt = |values: &[f64]| -> Option<f64> { values.iter().copied().reduce(f64::min) };
+    let max_opt = |values: &[f64]| -> Option<f64> { values.iter().copied().reduce(f64::max) };
+    let std_dev_opt = |values: &[f64], avg: f64| -> Option<f64> {
+        if values.is_empty() {
+            None
+        } else {
+            Some(
+                (values.iter().map(|v| (v - avg).powi(2)).sum::<f64>() / values.len() as f64)
+                    .sqrt(),
+            )
+        }
     };
 
-    let min = ComponentTiming {
-        g2p_ms: timings.iter().map(|t| t.g2p_ms).fold(f64::MAX, f64::min),
-        acoustic_ms: timings
-            .iter()
-            .map(|t| t.acoustic_ms)
-            .fold(f64::MAX, f64::min),
-        vocoder_ms: timings
-            .iter()
-            .map(|t| t.vocoder_ms)
-            .fold(f64::MAX, f64::min),
-        total_ms: timings.iter().map(|t| t.total_ms).fold(f64::MAX, f64::min),
+    let g2p_avg = mean(&g2p_values);
+    let full_pipeline_avg = mean_opt(&full_pipeline_values);
+
+    let average = ComponentTimingSummary {
+        g2p_ms: g2p_avg,
+        full_pipeline_ms: full_pipeline_avg,
     };
-
-    let max = ComponentTiming {
-        g2p_ms: timings.iter().map(|t| t.g2p_ms).fold(f64::MIN, f64::max),
-        acoustic_ms: timings
-            .iter()
-            .map(|t| t.acoustic_ms)
-            .fold(f64::MIN, f64::max),
-        vocoder_ms: timings
-            .iter()
-            .map(|t| t.vocoder_ms)
-            .fold(f64::MIN, f64::max),
-        total_ms: timings.iter().map(|t| t.total_ms).fold(f64::MIN, f64::max),
+    let min = ComponentTimingSummary {
+        g2p_ms: min_opt(&g2p_values).unwrap_or(0.0),
+        full_pipeline_ms: min_opt(&full_pipeline_values),
     };
-
-    // Calculate standard deviation
-    let variance_g2p = timings
-        .iter()
-        .map(|t| (t.g2p_ms - average.g2p_ms).powi(2))
-        .sum::<f64>()
-        / count;
-    let variance_acoustic = timings
-        .iter()
-        .map(|t| (t.acoustic_ms - average.acoustic_ms).powi(2))
-        .sum::<f64>()
-        / count;
-    let variance_vocoder = timings
-        .iter()
-        .map(|t| (t.vocoder_ms - average.vocoder_ms).powi(2))
-        .sum::<f64>()
-        / count;
-    let variance_total = timings
-        .iter()
-        .map(|t| (t.total_ms - average.total_ms).powi(2))
-        .sum::<f64>()
-        / count;
-
-    let std_dev = ComponentTiming {
-        g2p_ms: variance_g2p.sqrt(),
-        acoustic_ms: variance_acoustic.sqrt(),
-        vocoder_ms: variance_vocoder.sqrt(),
-        total_ms: variance_total.sqrt(),
+    let max = ComponentTimingSummary {
+        g2p_ms: max_opt(&g2p_values).unwrap_or(0.0),
+        full_pipeline_ms: max_opt(&full_pipeline_values),
+    };
+    let std_dev = ComponentTimingSummary {
+        g2p_ms: std_dev_opt(&g2p_values, g2p_avg).unwrap_or(0.0),
+        full_pipeline_ms: full_pipeline_avg.and_then(|avg| std_dev_opt(&full_pipeline_values, avg)),
     };
 
     let memory_usage_mb = if args.memory {
-        Some(memory_samples.iter().sum::<f64>() / memory_samples.len() as f64)
+        mean_opt(&memory_samples)
     } else {
         None
     };
 
-    let io_operations = if args.io {
-        Some((args.iterations * 3) as u64) // Simulated I/O count
-    } else {
-        None
-    };
+    // Real per-file I/O instrumentation is not implemented; report that
+    // honestly instead of a formula-derived count.
+    let io_operations = None;
+    if args.io {
+        println!(
+            "ℹ️  I/O profiling requested, but no real per-syscall I/O counter is implemented \
+             in this build; reporting none rather than a fabricated count."
+        );
+    }
 
     let result = ProfileResult {
         iterations: args.iterations,
@@ -821,6 +870,7 @@ async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::e
         min,
         max,
         std_dev,
+        pipeline_unavailable_reason,
         memory_usage_mb,
         io_operations,
     };
@@ -830,96 +880,109 @@ async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::e
     println!("==================");
     println!();
     println!("Component Breakdown (Average):");
-    println!(
-        "  • G2P:      {:>8.2}ms ({:>5.1}%)",
-        result.average.g2p_ms,
-        (result.average.g2p_ms / result.average.total_ms) * 100.0
-    );
-    println!(
-        "  • Acoustic: {:>8.2}ms ({:>5.1}%)",
-        result.average.acoustic_ms,
-        (result.average.acoustic_ms / result.average.total_ms) * 100.0
-    );
-    println!(
-        "  • Vocoder:  {:>8.2}ms ({:>5.1}%)",
-        result.average.vocoder_ms,
-        (result.average.vocoder_ms / result.average.total_ms) * 100.0
-    );
-    println!("  • Total:    {:>8.2}ms", result.average.total_ms);
+    println!("  • G2P (standalone):     {:>8.2}ms", result.average.g2p_ms);
+    match result.average.full_pipeline_ms {
+        Some(full_pipeline_ms) => {
+            println!("  • Full pipeline:        {:>8.2}ms", full_pipeline_ms);
+        }
+        None => {
+            println!(
+                "  • Full pipeline:        unavailable ({})",
+                result
+                    .pipeline_unavailable_reason
+                    .as_deref()
+                    .unwrap_or("unknown reason")
+            );
+        }
+    }
     println!();
 
     if args.detailed {
         println!("Detailed Statistics:");
-        println!("  Component  │  Min (ms) │  Max (ms) │  Avg (ms) │ StdDev (ms)");
-        println!("  ───────────┼───────────┼───────────┼───────────┼────────────");
+        println!("  Component      │  Min (ms) │  Max (ms) │  Avg (ms) │ StdDev (ms)");
+        println!("  ───────────────┼───────────┼───────────┼───────────┼────────────");
         println!(
-            "  G2P        │ {:>9.2} │ {:>9.2} │ {:>9.2} │ {:>11.2}",
+            "  G2P            │ {:>9.2} │ {:>9.2} │ {:>9.2} │ {:>11.2}",
             result.min.g2p_ms, result.max.g2p_ms, result.average.g2p_ms, result.std_dev.g2p_ms
         );
-        println!(
-            "  Acoustic   │ {:>9.2} │ {:>9.2} │ {:>9.2} │ {:>11.2}",
-            result.min.acoustic_ms,
-            result.max.acoustic_ms,
-            result.average.acoustic_ms,
-            result.std_dev.acoustic_ms
-        );
-        println!(
-            "  Vocoder    │ {:>9.2} │ {:>9.2} │ {:>9.2} │ {:>11.2}",
-            result.min.vocoder_ms,
-            result.max.vocoder_ms,
-            result.average.vocoder_ms,
-            result.std_dev.vocoder_ms
-        );
-        println!(
-            "  Total      │ {:>9.2} │ {:>9.2} │ {:>9.2} │ {:>11.2}",
-            result.min.total_ms,
-            result.max.total_ms,
-            result.average.total_ms,
-            result.std_dev.total_ms
-        );
+        match (
+            result.min.full_pipeline_ms,
+            result.max.full_pipeline_ms,
+            result.average.full_pipeline_ms,
+            result.std_dev.full_pipeline_ms,
+        ) {
+            (Some(min), Some(max), Some(avg), Some(std_dev)) => {
+                println!(
+                    "  Full pipeline  │ {:>9.2} │ {:>9.2} │ {:>9.2} │ {:>11.2}",
+                    min, max, avg, std_dev
+                );
+            }
+            _ => {
+                println!("  Full pipeline  │       n/a │       n/a │       n/a │         n/a");
+            }
+        }
         println!();
     }
 
     if let Some(memory) = result.memory_usage_mb {
-        println!("Memory Usage:");
+        println!("Memory Usage (real process RSS):");
         println!("  • Average: {:.1} MB", memory);
         println!();
-    }
-
-    if let Some(io_ops) = result.io_operations {
-        println!("I/O Operations:");
-        println!("  • Total: {} operations", io_ops);
-        println!(
-            "  • Avg per iteration: {:.1}",
-            io_ops as f64 / result.iterations as f64
-        );
+    } else if args.memory {
+        println!("Memory Usage: could not be measured on this platform");
         println!();
     }
 
-    // Performance insights
+    if args.io {
+        println!("I/O Operations: not measured (see note above)");
+        println!();
+    }
+
+    // Performance insights: only computed from real measurements.
     println!("💡 Performance Insights:");
-    let bottleneck = if result.average.acoustic_ms > result.average.g2p_ms
-        && result.average.acoustic_ms > result.average.vocoder_ms
-    {
-        "Acoustic model"
-    } else if result.average.vocoder_ms > result.average.g2p_ms {
-        "Vocoder"
-    } else {
-        "G2P conversion"
-    };
-    println!("  • Bottleneck: {}", bottleneck);
+    match result.average.full_pipeline_ms {
+        Some(full_pipeline_ms) => {
+            let bottleneck = if full_pipeline_ms > result.average.g2p_ms {
+                "Acoustic model + vocoder (full pipeline dominates standalone G2P)"
+            } else {
+                "G2P conversion"
+            };
+            println!("  • Bottleneck: {}", bottleneck);
 
-    let rtf = result.average.total_ms / 1000.0; // Assume 1s of audio
-    println!("  • Real-Time Factor: {:.2}x", rtf);
+            // Real RTF: real synthesis wall time over the real audio
+            // duration that was actually produced (never an assumed 1s).
+            let real_audio_seconds: f64 = timings.iter().filter_map(|t| t.audio_duration_s).sum();
+            if real_audio_seconds > 0.0 {
+                let real_synthesis_seconds: f64 = timings
+                    .iter()
+                    .filter_map(|t| t.full_pipeline_ms)
+                    .sum::<f64>()
+                    / 1000.0;
+                let rtf = real_synthesis_seconds / real_audio_seconds;
+                println!("  • Real-Time Factor: {:.2}x (measured against real synthesized audio duration)", rtf);
 
-    if rtf < 0.1 {
-        println!("  • ✅ Excellent performance (RTF < 0.1)");
-    } else if rtf < 0.5 {
-        println!("  • ✅ Good performance (RTF < 0.5)");
-    } else if rtf < 1.0 {
-        println!("  • ⚠️  Acceptable performance (RTF < 1.0)");
-    } else {
-        println!("  • ❌ Poor performance (RTF >= 1.0) - optimization needed");
+                if rtf < 0.1 {
+                    println!("  • ✅ Excellent performance (RTF < 0.1)");
+                } else if rtf < 0.5 {
+                    println!("  • ✅ Good performance (RTF < 0.5)");
+                } else if rtf < 1.0 {
+                    println!("  • ⚠️  Acceptable performance (RTF < 1.0)");
+                } else {
+                    println!("  • ❌ Poor performance (RTF >= 1.0) - optimization needed");
+                }
+            } else {
+                println!("  • Real-Time Factor: not computed (no audio duration recorded)");
+            }
+        }
+        None => {
+            println!(
+                "  • Bottleneck / Real-Time Factor: not computed (full pipeline unavailable: {})",
+                result
+                    .pipeline_unavailable_reason
+                    .as_deref()
+                    .unwrap_or("unknown reason")
+            );
+        }
     }
     println!();
 
@@ -931,6 +994,52 @@ async fn run_performance_profile(args: ProfileArgs) -> Result<(), Box<dyn std::e
     }
 
     Ok(())
+}
+
+/// Measure this process's real current memory usage in MB.
+///
+/// Prefers `/proc/self/status` `VmRSS` on Linux (current resident set size).
+/// Falls back to `getrusage`'s `ru_maxrss` on other Unix platforms, which is
+/// *peak* RSS rather than current usage (KB on Linux, bytes on macOS) --
+/// still a real measurement, just a different real quantity. Returns `None`
+/// (never a fabricated constant) if no real measurement could be obtained.
+fn measure_current_memory_mb() -> Option<f64> {
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmRSS:") {
+                if let Some(kb) = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<f64>().ok())
+                {
+                    return Some(kb / 1024.0);
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+        let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+        if result == 0 {
+            let usage = unsafe { usage.assume_init() };
+            #[cfg(target_os = "linux")]
+            {
+                return Some(usage.ru_maxrss as f64 / 1024.0);
+            }
+            #[cfg(target_os = "macos")]
+            {
+                return Some(usage.ru_maxrss as f64 / (1024.0 * 1024.0));
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                let _ = usage;
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -1057,5 +1166,129 @@ mod tests {
         // Total should be 100%
         let total_percent = g2p_percent + acoustic_percent + vocoder_percent;
         assert!((total_percent - 100.0_f64).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_measure_current_memory_mb_returns_real_positive_value() {
+        // Regression test for the `50.0 + i * 0.1` fabricated memory-growth
+        // formula: the real measurement must return a plausible positive
+        // number for this actually-running process (never a formula output
+        // masquerading as a measurement).
+        match measure_current_memory_mb() {
+            Some(mb) => assert!(mb > 0.0, "measured RSS must be positive, got {mb}"),
+            None => {
+                // Acceptable on platforms with neither /proc/self/status nor
+                // getrusage, but not on the Unix CI/dev machines this crate
+                // targets.
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_profile_io_and_memory_are_never_fabricated_formulas() {
+        let temp_dir = std::env::temp_dir();
+        let output_file = temp_dir.join(format!(
+            "voirs_profile_honesty_test_{}.json",
+            std::process::id()
+        ));
+
+        let args = ProfileArgs {
+            text: "Regression test for fabricated performance numbers.".to_string(),
+            voice: None,
+            iterations: 4,
+            output: Some(output_file.clone()),
+            detailed: true,
+            flamegraph: false,
+            memory: true,
+            io: true,
+        };
+
+        let result = run_performance_profile(args).await;
+        assert!(
+            result.is_ok(),
+            "profiling should complete even when no production pipeline is available"
+        );
+
+        let content = std::fs::read_to_string(&output_file).expect("output file should exist");
+        let json: serde_json::Value =
+            serde_json::from_str(&content).expect("output should be valid JSON");
+
+        // Regression: `io_operations` must never be the old `iterations * 3`
+        // formula (which for 4 iterations would be exactly 12) -- it must be
+        // absent/null since no real per-syscall I/O counter is implemented.
+        assert!(
+            json["io_operations"].is_null(),
+            "io_operations must be honestly null, not a fabricated iterations*3 count: {json}"
+        );
+
+        // Regression: each per-iteration timing must carry a real,
+        // non-negative, finite G2P measurement (not a JSON-unrepresentable
+        // NaN/Infinity, and not literally negative).
+        let timings = json["timings"]
+            .as_array()
+            .expect("timings should be an array");
+        assert_eq!(timings.len(), 4);
+        let g2p_values: Vec<f64> = timings
+            .iter()
+            .map(|t| t["g2p_ms"].as_f64().expect("g2p_ms should be a number"))
+            .collect();
+        assert!(
+            g2p_values.iter().all(|&ms| ms.is_finite() && ms >= 0.0),
+            "g2p_ms values must be real finite non-negative measurements: {g2p_values:?}"
+        );
+
+        // Whenever a full pipeline was not available, `full_pipeline_ms`
+        // must be `null`, never a fabricated number.
+        if json["pipeline_unavailable_reason"].is_string() {
+            for timing in timings {
+                assert!(
+                    timing["full_pipeline_ms"].is_null(),
+                    "full_pipeline_ms must be null when the pipeline is unavailable, got: {timing}"
+                );
+            }
+        }
+
+        let _ = std::fs::remove_file(&output_file);
+    }
+
+    #[tokio::test]
+    async fn test_g2p_timing_scales_with_real_input_length_direct() {
+        // Directly exercises the same `voirs_g2p::backends::RuleBasedG2p`
+        // call `run_performance_profile` uses, without paying the
+        // pipeline-build timeout cost. Regression test for the old
+        // "Simulate G2P work" `tokio::time::sleep(Duration::from_millis(2))`,
+        // which never read `args.text` at all: real conversion work must
+        // scale with input length, a fixed sleep cannot.
+        use voirs_g2p::G2p;
+        let g2p = voirs_g2p::backends::RuleBasedG2p::new(voirs_g2p::LanguageCode::EnUs);
+
+        let short = "hi";
+        let long = "the quick brown fox jumps over the lazy dog ".repeat(500);
+
+        // Average several repetitions to smooth out scheduler jitter under
+        // a parallel test run.
+        let mut short_total = std::time::Duration::ZERO;
+        let mut long_total = std::time::Duration::ZERO;
+        const REPS: u32 = 20;
+        for _ in 0..REPS {
+            let start = std::time::Instant::now();
+            g2p.to_phonemes(short, Some(voirs_g2p::LanguageCode::EnUs))
+                .await
+                .expect("real G2P conversion should succeed for plain ASCII text");
+            short_total += start.elapsed();
+
+            let start = std::time::Instant::now();
+            g2p.to_phonemes(&long, Some(voirs_g2p::LanguageCode::EnUs))
+                .await
+                .expect("real G2P conversion should succeed for plain ASCII text");
+            long_total += start.elapsed();
+        }
+
+        assert!(
+            long_total > short_total,
+            "G2P conversion of ~23,000 characters must take longer than 2 characters \
+             (short={short_total:?}, long={long_total:?}); a hardcoded sleep would show \
+             no such scaling with input"
+        );
     }
 }

@@ -357,7 +357,7 @@ impl ResourceUsage {
     }
 
     /// Process-wide storage for the last CPU-time sample, so consecutive calls to
-    /// [`Self::get_cpu_usage_percent`] can compute a real instantaneous rate.
+    /// `get_cpu_usage_percent` can compute a real instantaneous rate.
     fn cpu_sample_state() -> &'static Mutex<Option<(Instant, Duration, f64)>> {
         static STATE: OnceLock<Mutex<Option<(Instant, Duration, f64)>>> = OnceLock::new();
         STATE.get_or_init(|| Mutex::new(None))

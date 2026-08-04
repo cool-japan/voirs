@@ -386,6 +386,9 @@ pub enum SpatialBehavior {
     MovePath { waypoints: Vec<Vec3>, speed: f32 },
 }
 
+// `config` is retained for reference/debugging but this illustrative demo
+// doesn't re-read it after construction.
+#[allow(dead_code)]
 pub struct VRARImmersiveEngine {
     config: VRARConfig,
     current_scene: Option<ImmersiveAudioScene>,
@@ -691,11 +694,11 @@ impl SpatialAudioProcessor {
         Ok(())
     }
 
-    pub fn process_frame(&mut self, delta_time: f32) -> Result<AudioProcessingResult, VRARError> {
+    pub fn process_frame(&mut self, _delta_time: f32) -> Result<AudioProcessingResult, VRARError> {
         let mut sources_processed = 0;
         let mut total_latency = 0.0;
 
-        for (id, object) in &mut self.audio_objects {
+        for object in self.audio_objects.values_mut() {
             let distance = self.listener_position.distance_to(&object.position);
 
             // Distance-based volume calculation
@@ -720,7 +723,7 @@ impl SpatialAudioProcessor {
                 1.0
             };
 
-            let final_volume = object.volume * distance_volume * occlusion_factor;
+            let _final_volume = object.volume * distance_volume * occlusion_factor;
 
             sources_processed += 1;
             total_latency += hrtf_result.processing_time_ms;
@@ -737,6 +740,9 @@ impl SpatialAudioProcessor {
     }
 }
 
+// `sample_rate` is stored for reference; this illustrative processor doesn't
+// re-read it after construction (the real HRTF math lives in voirs-spatial).
+#[allow(dead_code)]
 pub struct HRTFProcessor {
     quality: HRTFQuality,
     sample_rate: u32,
@@ -754,9 +760,9 @@ impl HRTFProcessor {
         &self,
         source: &Vec3,
         listener: &Vec3,
-        orientation: &Quaternion,
+        _orientation: &Quaternion,
     ) -> Result<HRTFResult, VRARError> {
-        let relative_pos = Vec3::new(
+        let _relative_pos = Vec3::new(
             source.x - listener.x,
             source.y - listener.y,
             source.z - listener.z,
@@ -780,6 +786,12 @@ impl HRTFProcessor {
 }
 
 pub struct OcclusionProcessor;
+
+impl Default for OcclusionProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl OcclusionProcessor {
     pub fn new() -> Self {
@@ -818,6 +830,12 @@ pub struct AudioProcessingResult {
 pub struct InteractionManager {
     active_zones: Vec<InteractionZone>,
     last_interactions: HashMap<String, Instant>,
+}
+
+impl Default for InteractionManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InteractionManager {
@@ -964,7 +982,7 @@ impl HapticController {
 
     pub fn update(
         &mut self,
-        delta_time: f32,
+        _delta_time: f32,
         audio_result: &AudioProcessingResult,
     ) -> Result<(), VRARError> {
         if self.enabled {

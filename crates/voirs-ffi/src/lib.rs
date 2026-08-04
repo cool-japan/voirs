@@ -507,6 +507,53 @@ fn get_last_error() -> Option<String> {
     LAST_ERROR.with(|e| e.borrow().clone())
 }
 
+/// Run `f` (a private `*_impl()`-style fallible operation), and if it
+/// returns `Err`, ensure `voirs_get_last_error()` reports a diagnostic for
+/// *this* call specifically: `f`'s own [`set_last_error`] call while it ran
+/// (e.g. "Invalid UTF-8 in config: ...", or the honest
+/// `crate::invalid_pipeline_message`), if any, or `fallback` otherwise.
+///
+/// Several C API entry points are a thin `pub extern "C" fn` wrapper around
+/// exactly such a `*_impl()`. Naively checking "is *any* error currently
+/// pending" (`voirs_has_error()`) to decide whether to install `fallback` is
+/// unsound two different ways, both fixed here by snapshotting the message
+/// immediately before calling `f` and only trusting a *change* in it:
+///
+/// - **Clobbering `f`'s own specific message**: an unconditional
+///   `set_last_error(fallback())` after `f` returns `Err` would silently
+///   overwrite whatever specific diagnostic `f` had just set for this exact
+///   failure.
+/// - **Leaking a stale message from a wholly unrelated earlier call**: `f`
+///   may have message-less `Err` paths (e.g. a `pipeline_id == 0` check with
+///   nothing pipeline-specific to say). If a *previous, unrelated* call on
+///   this thread left a message behind and was never cleared, a naive
+///   "is any error pending" check can't tell that message apart from one
+///   `f` just set for *this* call -- and would wrongly skip installing
+///   `fallback`, leaving `voirs_get_last_error()` reporting old, irrelevant
+///   text for a failure it doesn't describe. Comparing the message
+///   *before* vs. *after* `f` runs distinguishes "unchanged stale leftover"
+///   from "`f` just set something new" correctly in both directions, and
+///   (unlike unconditionally clearing at entry) leaves a still-pending
+///   message from an earlier call untouched when `f` *succeeds* -- callers
+///   are only ever guaranteed a specific error after **this** call failed.
+///
+/// `fallback` is lazily evaluated (an `impl FnOnce`, not an already-formatted
+/// `String`) so building the generic message costs nothing on the common
+/// path where a specific one already won.
+pub(crate) fn run_with_fallback_error<T, E>(
+    f: impl FnOnce() -> std::result::Result<T, E>,
+    fallback: impl FnOnce(&E) -> String,
+) -> std::result::Result<T, E> {
+    let before = get_last_error();
+    let result = f();
+    if let Err(ref e) = result {
+        if get_last_error() == before {
+            set_last_error(fallback(e));
+        }
+    }
+    result
+}
+
 /// Get the global pipeline manager
 fn get_pipeline_manager() -> &'static Mutex<PipelineManager> {
     &PIPELINE_MANAGER
@@ -908,6 +955,83 @@ mod tests {
         assert_eq!(offset_of!(VoirsAudioBuffer, sample_rate), 12);
         assert_eq!(offset_of!(VoirsAudioBuffer, channels), 16);
         assert_eq!(offset_of!(VoirsAudioBuffer, duration), 20);
+    }
+
+    /// Regression test for the "outer wrapper clobbers a more specific inner
+    /// error" bug class: found by empirically observing that
+    /// `voirs_create_pipeline()` (`c_api::core`) discarded `create_pipeline_impl`'s
+    /// detailed `"Pipeline creation failed: <real voirs_sdk error>"` message,
+    /// unconditionally overwriting it with the uninformative
+    /// `"Failed to create pipeline: InitializationFailed"` -- the same class
+    /// of bug `c_api::voice`'s wrappers already guarded against, but that
+    /// guard had never been applied to pipeline creation/destruction.
+    #[test]
+    fn test_run_with_fallback_error_preserves_specific_message_from_f() {
+        clear_last_error();
+        let result: std::result::Result<(), &str> = run_with_fallback_error(
+            || {
+                set_last_error("specific inner diagnostic".to_string());
+                Err("boom")
+            },
+            |_| "generic outer fallback".to_string(),
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            get_last_error().as_deref(),
+            Some("specific inner diagnostic")
+        );
+    }
+
+    /// Complementary case: when `f` fails WITHOUT setting its own message,
+    /// the fallback must still be installed -- this isn't a no-op, it's
+    /// specifically non-clobbering (only skips the fallback when `f` truly
+    /// changed the message itself).
+    #[test]
+    fn test_run_with_fallback_error_installs_fallback_when_f_sets_nothing() {
+        clear_last_error();
+        let result: std::result::Result<(), &str> =
+            run_with_fallback_error(|| Err("boom"), |_| "generic outer fallback".to_string());
+        assert!(result.is_err());
+        assert_eq!(get_last_error().as_deref(), Some("generic outer fallback"));
+    }
+
+    /// Regression test for the companion "stale message from a wholly
+    /// unrelated earlier call" bug: naively checking "is any error currently
+    /// pending" (instead of snapshotting the message before/after `f` runs)
+    /// would mistake a leftover message from a previous, unrelated failed
+    /// call for "`f` already handled this one" and skip the fallback --
+    /// leaving `voirs_get_last_error()` reporting old, irrelevant text
+    /// instead of a diagnostic for the failure that actually just happened.
+    #[test]
+    fn test_run_with_fallback_error_does_not_mistake_stale_message_for_fs_own() {
+        clear_last_error();
+        set_last_error("stale message from a totally unrelated earlier call".to_string());
+
+        let result: std::result::Result<(), &str> =
+            run_with_fallback_error(|| Err("boom"), |_| "this call's own message".to_string());
+
+        assert!(result.is_err());
+        assert_eq!(get_last_error().as_deref(), Some("this call's own message"));
+    }
+
+    /// `f` succeeding must never touch a still-pending message left by an
+    /// earlier, unrelated call -- `run_with_fallback_error` only ever
+    /// installs a message in response to `f`'s own `Err`, matching the
+    /// existing sticky-until-explicitly-cleared-or-overwritten contract
+    /// `voirs_clear_error()`'s existence as a distinct public API implies.
+    #[test]
+    fn test_run_with_fallback_error_leaves_pending_message_untouched_on_success() {
+        clear_last_error();
+        set_last_error("earlier unrelated failure".to_string());
+
+        let result: std::result::Result<i32, &str> =
+            run_with_fallback_error(|| Ok(42), |_| "should never be used".to_string());
+
+        assert_eq!(result, Ok(42));
+        assert_eq!(
+            get_last_error().as_deref(),
+            Some("earlier unrelated failure")
+        );
     }
 
     #[test]

@@ -82,6 +82,15 @@ pub enum PluginError {
     #[error("Plugin security violation: {0}")]
     SecurityViolation(String),
 
+    /// A load was requested for a plugin kind that has no real
+    /// implementation yet (e.g. native `.dll`/`.so`/`.dylib` plugins,
+    /// pending a versioned C ABI). Distinct from `LoadingFailed`, which
+    /// means loading was attempted and failed; `NotSupported` means loading
+    /// was never attempted because there is nothing real to run --
+    /// callers must never receive a mock in this case.
+    #[error("Plugin loading not supported: {0}")]
+    NotSupported(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
@@ -154,6 +163,10 @@ pub struct PluginManager {
     plugin_directories: Vec<PathBuf>,
     api_version: String,
     security_enabled: bool,
+    /// Shared WASM engine used to compile every `.wasm` plugin this manager
+    /// loads. One engine per manager (not per plugin) so compiled-code
+    /// caches and configuration are shared across loads.
+    wasm_engine: Arc<wasmtime::Engine>,
 }
 
 impl PluginManager {
@@ -175,6 +188,7 @@ impl PluginManager {
             ],
             api_version: "1.0.0".to_string(),
             security_enabled: true,
+            wasm_engine: Arc::new(wasmtime::Engine::default()),
         }
     }
 
@@ -182,6 +196,16 @@ impl PluginManager {
         self.plugin_directories.push(path.as_ref().to_path_buf());
     }
 
+    /// Scan `plugin_directories` for `plugin.json` manifests and register
+    /// each discovered plugin into `self.plugin_info` (keyed by
+    /// `manifest.name`) so subsequent `load_plugin(name)`/`get_plugin_info`/
+    /// `list_plugins` calls can find it -- without this registration step
+    /// `load_plugin` would always return `PluginError::NotFound` for a
+    /// freshly discovered plugin, no matter what `load_plugin_from_path`
+    /// does. A plugin that's already tracked (e.g. because it was
+    /// previously loaded) keeps its existing `loaded`/`load_count`/
+    /// `last_error` bookkeeping; re-discovery only refreshes its
+    /// manifest/path.
     pub async fn discover_plugins(&self) -> PluginResult<Vec<PluginInfo>> {
         let mut discovered = Vec::new();
 
@@ -220,6 +244,20 @@ impl PluginManager {
                         }
                     }
                 }
+            }
+        }
+
+        {
+            let mut info_guard = self.plugin_info.write().await;
+            for info in &discovered {
+                let name = info.manifest.name.clone();
+                info_guard
+                    .entry(name)
+                    .and_modify(|existing| {
+                        existing.manifest = info.manifest.clone();
+                        existing.path = info.path.clone();
+                    })
+                    .or_insert_with(|| info.clone());
             }
         }
 
@@ -345,15 +383,46 @@ impl PluginManager {
         Ok(manifest)
     }
 
+    /// Actually load the plugin `manifest` names, dispatching on its entry
+    /// point's file extension exactly like `loader::PluginLoader` does:
+    /// `.wasm` is compiled and run through `wasmtime` (real, sandboxed
+    /// dynamic loading), `.dll`/`.so`/`.dylib` fails closed with a typed
+    /// `PluginError::NotSupported` (see `loader::native_plugin_unsupported`
+    /// for why -- no unsound FFI, no mock), and anything else falls back to
+    /// a real builtin implementation selected by `manifest.plugin_type`
+    /// (`loader::build_builtin_plugin`). `path` is the plugin's directory
+    /// (as discovered by `discover_plugins`); the entry point file itself
+    /// must exist on disk for any of these branches to be attempted.
     async fn load_plugin_from_path(
         &self,
-        _path: &Path,
-        _manifest: &PluginManifest,
+        path: &Path,
+        manifest: &PluginManifest,
     ) -> PluginResult<Box<dyn Plugin>> {
-        // For now, return a mock plugin
-        // In a real implementation, this would use dynamic loading (libloading crate)
-        // or WebAssembly (wasmtime crate) for security
-        Ok(Box::new(MockPlugin::new()))
+        let entry_path = path.join(&manifest.entry_point);
+        if !entry_path.exists() {
+            return Err(PluginError::LoadingFailed(format!(
+                "entry point '{}' not found for plugin '{}' (expected at '{}')",
+                manifest.entry_point,
+                manifest.name,
+                entry_path.display()
+            )));
+        }
+
+        let extension = entry_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_lowercase());
+
+        match extension.as_deref() {
+            Some("wasm") => {
+                loader::build_wasm_plugin(&entry_path, manifest, &self.wasm_engine).await
+            }
+            Some("dll") | Some("so") | Some("dylib") => Err(loader::native_plugin_unsupported(
+                &entry_path,
+                &manifest.name,
+            )),
+            _ => Ok(loader::build_builtin_plugin(manifest)),
+        }
     }
 
     fn validate_permissions(&self, permissions: &[Permission]) -> PluginResult<()> {
@@ -386,13 +455,18 @@ impl Default for PluginManager {
     }
 }
 
-// Mock plugin for testing and development
+// Mock plugin, for tests only. `PluginManager::load_plugin_from_path` never
+// constructs this outside `#[cfg(test)]` -- a load that can't be satisfied
+// for real fails closed with a typed `PluginError` instead (see
+// `load_plugin_from_path` and `loader::native_plugin_unsupported`).
+#[cfg(test)]
 struct MockPlugin {
     name: String,
     version: String,
     description: String,
 }
 
+#[cfg(test)]
 impl MockPlugin {
     fn new() -> Self {
         Self {
@@ -403,6 +477,7 @@ impl MockPlugin {
     }
 }
 
+#[cfg(test)]
 impl Plugin for MockPlugin {
     fn name(&self) -> &str {
         &self.name
@@ -450,6 +525,46 @@ impl Plugin for MockPlugin {
 mod tests {
     use super::*;
 
+    /// A tiny WebAssembly Text (WAT) module used to prove
+    /// `PluginManager`/`loader::build_wasm_plugin` perform real dynamic
+    /// compilation and execution: two exports return two different,
+    /// genuinely wasm-computed values (`get_a` returns a raw constant,
+    /// `compute` returns the result of real `i32.add`), and no
+    /// `initialize`/`cleanup` export is defined (exercising the
+    /// "optional export absent" path). `wasmtime::Module::new` (used by
+    /// `build_wasm_plugin`) accepts WAT text directly since this crate
+    /// builds wasmtime with the `wat` feature, so no separate compilation
+    /// step or extra tooling is needed to produce a real `.wasm` file.
+    const WAT_TEST_MODULE: &str = r#"
+        (module
+            (func (export "get_a") (result i32) (i32.const 111))
+            (func (export "compute") (result i32) (i32.add (i32.const 40) (i32.const 2)))
+        )
+    "#;
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "voirs_plugins_test_{label}_{}_{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ))
+    }
+
+    fn test_manifest(plugin_type: PluginType, entry_point: &str) -> PluginManifest {
+        PluginManifest {
+            name: "test-plugin".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Plugin under test".to_string(),
+            author: "test".to_string(),
+            api_version: "1.0.0".to_string(),
+            plugin_type,
+            entry_point: entry_point.to_string(),
+            dependencies: Vec::new(),
+            permissions: Vec::new(),
+            configuration: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_plugin_manager_creation() {
         let manager = PluginManager::new();
@@ -461,8 +576,13 @@ mod tests {
     async fn test_plugin_discovery() {
         let manager = PluginManager::new();
         let plugins = manager.discover_plugins().await.unwrap();
-        // Should not fail even if no plugins found
-        // Plugin discovery should not fail even if no plugins found
+        // Should not fail even if no plugins found. The default plugin
+        // directories (e.g. `./plugins`) may or may not exist depending on
+        // where tests run from, so no assumption is made about `plugins`'
+        // contents here -- `test_discover_plugins_registers_into_plugin_info`
+        // below exercises the registration behavior against a controlled
+        // directory.
+        let _ = plugins;
     }
 
     #[tokio::test]
@@ -488,5 +608,178 @@ mod tests {
         let plugin = MockPlugin::new();
         let result = plugin.execute("unknown", &serde_json::json!({}));
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_load_plugin_from_path_missing_entry_point_errors() {
+        let manager = PluginManager::new();
+        let dir = unique_temp_dir("missing_entry");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let manifest = test_manifest(PluginType::Extension, "does-not-exist.wasm");
+        let result = manager.load_plugin_from_path(&dir, &manifest).await;
+
+        match result {
+            Err(PluginError::LoadingFailed(msg)) => {
+                assert!(msg.contains("does-not-exist.wasm"), "got: {msg}");
+            }
+            Ok(_) => panic!("expected LoadingFailed, got Ok"),
+            Err(other) => panic!("expected LoadingFailed, got {other}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_plugin_from_path_native_extension_fails_closed() {
+        let manager = PluginManager::new();
+        let dir = unique_temp_dir("native_plugin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.so"), b"not a real shared library").unwrap();
+
+        let manifest = test_manifest(PluginType::Extension, "plugin.so");
+        let result = manager.load_plugin_from_path(&dir, &manifest).await;
+
+        match result {
+            Err(PluginError::NotSupported(msg)) => {
+                assert!(
+                    msg.contains("voirs_plugin_entry"),
+                    "error should name the missing ABI contract, got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected NotSupported (fail-closed, no mock), got Ok"),
+            Err(other) => panic!("expected NotSupported (fail-closed, no mock), got {other}"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_plugin_from_path_builtin_fallback_is_real_not_mock() {
+        let manager = PluginManager::new();
+        let dir = unique_temp_dir("builtin_plugin");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Builtin plugins are selected by `plugin_type` alone; the entry
+        // point file just has to exist (matching `loader::PluginLoader`'s
+        // pre-existing convention that every manifest names a real file).
+        std::fs::write(dir.join("marker.txt"), b"builtin plugin marker").unwrap();
+
+        let manifest = test_manifest(PluginType::Processor, "marker.txt");
+        let plugin = manager
+            .load_plugin_from_path(&dir, &manifest)
+            .await
+            .expect("builtin plugin should load");
+
+        assert_eq!(plugin.plugin_type(), PluginType::Processor);
+
+        // The real `TextProcessorPlugin` normalizes full-width ASCII to
+        // half-width via `normalize`; `MockPlugin` has no such command and
+        // only understands "test", so this genuinely distinguishes the two.
+        let result = plugin
+            .execute(
+                "normalize",
+                &serde_json::json!({"text": "\u{FF21}\u{FF22}\u{FF23}"}),
+            )
+            .expect("real TextProcessorPlugin should handle 'normalize'");
+        assert_eq!(result["normalized_text"], serde_json::json!("ABC"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_plugin_from_path_wasm_real_dynamic_execution() {
+        let manager = PluginManager::new();
+        let dir = unique_temp_dir("wasm_plugin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin.wasm"), WAT_TEST_MODULE).unwrap();
+
+        let manifest = test_manifest(PluginType::Extension, "plugin.wasm");
+        let plugin = manager
+            .load_plugin_from_path(&dir, &manifest)
+            .await
+            .expect("wasm plugin should compile and load");
+
+        // Two different exports must yield two different, genuinely
+        // wasm-computed results -- not a canned Rust-side response.
+        let result_a = plugin
+            .execute("get_a", &serde_json::json!({}))
+            .expect("get_a export should execute");
+        assert_eq!(result_a["result"], serde_json::json!(111));
+
+        let result_b = plugin
+            .execute("compute", &serde_json::json!({}))
+            .expect("compute export should execute");
+        assert_eq!(result_b["result"], serde_json::json!(42));
+
+        // A command with no matching export is a real error, not a
+        // fabricated success.
+        assert!(plugin
+            .execute("does_not_exist", &serde_json::json!({}))
+            .is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_discover_plugins_registers_into_plugin_info() {
+        let mut manager = PluginManager::new();
+        let root = unique_temp_dir("discover_root");
+        let plugin_dir = root.join("hello-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("marker.txt"), b"marker").unwrap();
+
+        let manifest = PluginManifest {
+            name: "hello-plugin".to_string(),
+            version: "1.0.0".to_string(),
+            description: "A discoverable plugin".to_string(),
+            author: "test".to_string(),
+            api_version: "1.0.0".to_string(),
+            plugin_type: PluginType::Extension,
+            entry_point: "marker.txt".to_string(),
+            dependencies: Vec::new(),
+            permissions: Vec::new(),
+            configuration: None,
+        };
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        manager.add_plugin_directory(&root);
+        let discovered = manager.discover_plugins().await.unwrap();
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].manifest.name, "hello-plugin");
+
+        // `discover_plugins` must have registered the plugin into
+        // `plugin_info` for `load_plugin`/`get_plugin_info` to find it --
+        // without this, `load_plugin` always fails with `NotFound`
+        // regardless of what `load_plugin_from_path` does.
+        let info = manager
+            .get_plugin_info("hello-plugin")
+            .await
+            .expect("discovered plugin should be registered");
+        assert!(!info.loaded);
+
+        manager
+            .load_plugin("hello-plugin")
+            .await
+            .expect("load_plugin should succeed end-to-end through discover -> load");
+
+        let info_after = manager.get_plugin_info("hello-plugin").await.unwrap();
+        assert!(info_after.loaded);
+        assert_eq!(info_after.load_count, 1);
+
+        let exec_result = manager
+            .execute_plugin(
+                "hello-plugin",
+                "safe_filename",
+                &serde_json::json!({"filename": "a/b?.wav"}),
+            )
+            .await
+            .expect("real UtilityExtensionPlugin should handle 'safe_filename'");
+        assert_eq!(exec_result["safe_filename"], serde_json::json!("a-b-.wav"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

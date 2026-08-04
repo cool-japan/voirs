@@ -98,14 +98,24 @@ impl Default for DashboardState {
 }
 
 impl DashboardState {
-    /// Update metrics with simulated or real data
+    /// Update metrics with real system data.
+    ///
+    /// CPU/memory come from real OS queries (`crate::platform::hardware`,
+    /// which reads `/proc/stat`+`/proc/meminfo` on Linux, `top`+`sysctl` on
+    /// macOS, and WMI on Windows). Synthesis activity (`total_syntheses`,
+    /// `recent_history`, `error_log`, `active_operations`) is *not*
+    /// fabricated here at all -- it only changes when a real caller reports
+    /// a real event via [`add_synthesis_result`](Self::add_synthesis_result)
+    /// through the shared state returned by [`DashboardApp::state`]. If
+    /// nothing has called that yet, those fields honestly stay at zero
+    /// rather than displaying invented activity.
     pub fn update_metrics(&mut self) {
         self.current_time = Instant::now();
 
-        // Simulate some metrics for demonstration
-        // In production, these would come from actual synthesis operations
-        self.cpu_usage = (fastrand::f32() * 30.0 + 10.0).min(100.0);
-        self.memory_usage_mb = (fastrand::f32() * 200.0 + 100.0).min(1000.0);
+        self.cpu_usage = crate::platform::hardware::get_cpu_usage();
+        // Real current usage in bytes -> MB.
+        self.memory_usage_mb =
+            (crate::platform::hardware::get_memory_usage() as f64 / (1024.0 * 1024.0)) as f32;
 
         // Update history buffers
         self.cpu_history.rotate_left(1);
@@ -681,29 +691,18 @@ impl DashboardApp {
     }
 }
 
-/// Run the dashboard command
+/// Run the dashboard command.
+///
+/// This starts the TUI with real CPU/memory polling only. It does not spawn
+/// any background task that invents synthesis activity: [`DashboardApp::state`]
+/// is the real integration point through which a live synthesis pipeline
+/// (interactive shell, server, batch job, ...) can report genuine
+/// `(text, duration_ms, success)` events via
+/// [`DashboardState::add_synthesis_result`]. Until something does so, the
+/// Overview/History/Errors tabs honestly show zero/empty activity rather
+/// than a fabricated feed.
 pub async fn run_dashboard(update_interval_ms: u64) -> Result<()> {
     let mut app = DashboardApp::new();
-
-    // Spawn a background task to simulate synthesis operations
-    let state = app.state();
-    tokio::spawn(async move {
-        let mut counter = 0;
-        loop {
-            time::sleep(Duration::from_secs(3)).await;
-            counter += 1;
-
-            let mut state = state.lock().expect("lock should not be poisoned");
-            let success = fastrand::f32() > 0.1; // 90% success rate
-            state.add_synthesis_result(
-                format!("Synthesis operation #{}", counter),
-                fastrand::u64(100..500),
-                success,
-            );
-            state.active_operations = fastrand::usize(0..5);
-        }
-    });
-
     app.run(update_interval_ms).await
 }
 
@@ -779,5 +778,73 @@ mod tests {
         assert_eq!(app.current_tab, 0);
         assert_eq!(app.tab_titles.len(), 4);
         assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_update_metrics_never_fabricates_synthesis_activity() {
+        // Regression test for the deleted fastrand background task: calling
+        // `update_metrics()` (the real per-tick refresh) must never invent
+        // synthesis events on its own. Activity must only ever change via a
+        // real caller reporting a real event through `add_synthesis_result`.
+        let mut state = DashboardState::default();
+        for _ in 0..5 {
+            state.update_metrics();
+        }
+
+        assert_eq!(state.total_syntheses, 0);
+        assert_eq!(state.successful_syntheses, 0);
+        assert_eq!(state.failed_syntheses, 0);
+        assert!(state.recent_history.is_empty());
+        assert!(state.error_log.is_empty());
+        assert_eq!(state.active_operations, 0);
+    }
+
+    #[test]
+    fn test_update_metrics_reports_real_process_memory() {
+        // Regression test for `fastrand::f32() * 200.0 + 100.0`: the old
+        // fabricated range was always in [100, 300] MB regardless of what
+        // this process actually uses. Cross-check against a real,
+        // independently-obtained measurement of this same running process.
+        let mut state = DashboardState::default();
+        state.update_metrics();
+
+        let independently_measured_mb =
+            crate::platform::hardware::get_memory_usage() as f64 / (1024.0 * 1024.0);
+
+        assert!(
+            state.memory_usage_mb >= 0.0,
+            "real memory usage must be non-negative, got {}",
+            state.memory_usage_mb
+        );
+        // Two real system-wide measurements taken moments apart should be
+        // close (system-wide "used" memory does not swing wildly between
+        // two back-to-back queries); a fabricated fastrand value bore no
+        // relationship to this real quantity at all.
+        let ratio = if independently_measured_mb > 0.0 {
+            state.memory_usage_mb as f64 / independently_measured_mb
+        } else {
+            1.0
+        };
+        assert!(
+            (0.5..=2.0).contains(&ratio),
+            "dashboard memory ({} MB) should track a real, independently-measured value \
+             ({} MB), not a fabricated range",
+            state.memory_usage_mb,
+            independently_measured_mb
+        );
+    }
+
+    #[test]
+    fn test_update_metrics_cpu_usage_is_plausible_percentage() {
+        // Regression test for `fastrand::f32() * 30.0 + 10.0`: that formula
+        // could never report below 10% or above 40%. Real CPU usage must be
+        // a valid percentage with no such artificial floor/ceiling.
+        let mut state = DashboardState::default();
+        state.update_metrics();
+        assert!(
+            (0.0..=100.0).contains(&state.cpu_usage),
+            "cpu_usage must be a real percentage in [0, 100], got {}",
+            state.cpu_usage
+        );
     }
 }

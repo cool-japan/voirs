@@ -64,23 +64,21 @@ impl Default for VoirsVoiceListDetailed {
 /// Returns 0 on success, or error code on failure.
 #[no_mangle]
 pub extern "C" fn voirs_set_voice(pipeline_id: c_uint, voice_id: *const c_char) -> c_int {
-    match set_voice_impl(pipeline_id, voice_id) {
+    // `run_with_fallback_error` only installs the generic message below if
+    // `set_voice_impl` didn't already set a more specific one (e.g. the
+    // honest "this is a VOIRS_BENCHMARK_MODE placeholder" message from
+    // crate::invalid_pipeline_message) -- so this wrapper never clobbers it.
+    // It also can't mistake a stale message from a wholly unrelated earlier
+    // call for "this call already reported something specific" the way a
+    // plain "is any error pending" check could (set_voice_impl has
+    // message-less `Err` paths, e.g. `pipeline_id == 0`) -- see
+    // `run_with_fallback_error`'s doc comment for both failure modes.
+    match crate::run_with_fallback_error(
+        || set_voice_impl(pipeline_id, voice_id),
+        |code| format!("Failed to set voice for pipeline {pipeline_id}: {code:?}"),
+    ) {
         Ok(()) => 0,
-        Err(code) => {
-            // Only install the generic fallback message if set_voice_impl
-            // didn't already set a more specific one (e.g. the honest
-            // "this is a VOIRS_BENCHMARK_MODE placeholder" message from
-            // crate::invalid_pipeline_message) -- otherwise this wrapper
-            // would silently clobber it, and callers of the public
-            // voirs_set_voice() (as opposed to the private set_voice_impl())
-            // would never actually see the more specific diagnostic.
-            if crate::voirs_has_error() == 0 {
-                set_last_error(format!(
-                    "Failed to set voice for pipeline {pipeline_id}: {code:?}"
-                ));
-            }
-            code as c_int
-        }
+        Err(code) => code as c_int,
     }
 }
 
@@ -93,22 +91,22 @@ pub extern "C" fn voirs_set_voice(pipeline_id: c_uint, voice_id: *const c_char) 
 /// The returned string must be freed with `voirs_free_string()`.
 #[no_mangle]
 pub extern "C" fn voirs_get_voice(pipeline_id: c_uint) -> *mut c_char {
-    match get_voice_impl(pipeline_id) {
-        Ok(voice_id) => match CString::new(voice_id) {
-            Ok(c_str) => c_str.into_raw(),
-            Err(e) => {
-                set_last_error(format!("Failed to convert voice ID to C string: {e}"));
-                ptr::null_mut()
-            }
-        },
-        Err(code) => {
-            // See voirs_set_voice's identical guard: don't clobber a more
-            // specific message get_voice_impl may have already set.
-            if crate::voirs_has_error() == 0 {
-                set_last_error(format!(
-                    "Failed to get voice for pipeline {pipeline_id}: {code:?}"
-                ));
-            }
+    // See voirs_set_voice's identical use of run_with_fallback_error and
+    // rationale: don't clobber a more specific message get_voice_impl may
+    // have already set, and don't mistake a stale message from an unrelated
+    // earlier call for one either.
+    let voice_id = match crate::run_with_fallback_error(
+        || get_voice_impl(pipeline_id),
+        |code| format!("Failed to get voice for pipeline {pipeline_id}: {code:?}"),
+    ) {
+        Ok(voice_id) => voice_id,
+        Err(_) => return ptr::null_mut(),
+    };
+
+    match CString::new(voice_id) {
+        Ok(c_str) => c_str.into_raw(),
+        Err(e) => {
+            set_last_error(format!("Failed to convert voice ID to C string: {e}"));
             ptr::null_mut()
         }
     }
@@ -186,12 +184,17 @@ unsafe fn free_voice_info(voice: &mut VoirsVoiceInfoDetailed) {
 /// The returned info must be freed with `voirs_free_voice_info()`.
 #[no_mangle]
 pub extern "C" fn voirs_get_voice_info(voice_id: *const c_char) -> *mut VoirsVoiceInfoDetailed {
-    match get_voice_info_impl(voice_id) {
+    // Same non-clobbering/non-stale-leak guard as voirs_set_voice:
+    // get_voice_info_impl sets a specific message for invalid UTF-8 (but not
+    // for a null pointer or an unrecognized voice ID), which an unconditional
+    // set_last_error here used to silently overwrite with the generic
+    // "Failed to get voice info: InvalidParameter" for every failure alike.
+    match crate::run_with_fallback_error(
+        || get_voice_info_impl(voice_id),
+        |code| format!("Failed to get voice info: {code:?}"),
+    ) {
         Ok(voice_info) => Box::into_raw(Box::new(voice_info)),
-        Err(code) => {
-            set_last_error(format!("Failed to get voice info: {code:?}"));
-            ptr::null_mut()
-        }
+        Err(_) => ptr::null_mut(),
     }
 }
 
@@ -552,6 +555,127 @@ mod tests {
         assert!(
             voice_info.is_null(),
             "Getting info for invalid voice should fail"
+        );
+    }
+
+    /// Regression test for a stale-error-leak bug: `set_voice_impl`'s
+    /// `pipeline_id == 0` check returns `Err` without calling
+    /// `set_last_error` (there's nothing pipeline-specific to say about ID
+    /// `0`). A naive "is an error already pending" check would mistake a
+    /// message left over from a completely unrelated EARLIER call on this
+    /// thread for "this call already reported something specific," silently
+    /// leaving the stale text in place instead of reporting this call's own
+    /// outcome. `run_with_fallback_error` (see its doc comment in `lib.rs`)
+    /// avoids this by comparing the message immediately before/after
+    /// `set_voice_impl`/`get_voice_impl` run rather than checking "any error
+    /// pending." Deterministic and feature-independent: the
+    /// `pipeline_id == 0` check happens before any `ffi-test-mocks`/
+    /// production split.
+    #[test]
+    fn test_set_and_get_voice_do_not_leak_stale_error_from_earlier_call() {
+        let stale = "stale message from a totally unrelated earlier call";
+
+        crate::voirs_clear_error();
+        crate::set_last_error(stale.to_string());
+        let voice_id = std::ffi::CString::new("default").unwrap();
+        let result = voirs_set_voice(0, voice_id.as_ptr());
+        assert_ne!(result, 0);
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert!(
+            !message.contains(stale),
+            "voirs_set_voice must not leak a stale error from an unrelated \
+             earlier call: {message}"
+        );
+
+        crate::voirs_clear_error();
+        crate::set_last_error(stale.to_string());
+        let voice_ptr = voirs_get_voice(0);
+        assert!(voice_ptr.is_null());
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert!(
+            !message.contains(stale),
+            "voirs_get_voice must not leak a stale error from an unrelated \
+             earlier call: {message}"
+        );
+    }
+
+    /// Regression test for `voirs_get_voice_info` specifically: unlike
+    /// `voirs_set_voice`/`voirs_get_voice` (fixed earlier), this wrapper
+    /// still called `set_last_error` unconditionally, so
+    /// `get_voice_info_impl`'s specific "Invalid UTF-8 in voice ID: ..."
+    /// message (set when `voice_id` isn't valid UTF-8) was silently
+    /// discarded in favor of the generic
+    /// "Failed to get voice info: InvalidParameter". Deterministic and
+    /// feature-independent: UTF-8 validation happens unconditionally, before
+    /// any pipeline/runtime access.
+    #[test]
+    fn test_get_voice_info_invalid_utf8_error_is_not_clobbered() {
+        crate::voirs_clear_error();
+
+        let invalid_utf8 = std::ffi::CString::new(vec![0xFFu8, 0xFEu8]).expect("no interior NUL");
+        let info = voirs_get_voice_info(invalid_utf8.as_ptr());
+        assert!(info.is_null());
+
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert!(
+            message.contains("Invalid UTF-8"),
+            "the specific inner diagnostic must survive to the caller, got: {message}"
+        );
+        assert!(
+            !message.contains("Failed to get voice info: InvalidParameter"),
+            "must not be clobbered by the generic VoirsErrorCode-only \
+             fallback: {message}"
+        );
+    }
+
+    /// A *successful* `voirs_get_voice_info`/`voirs_set_voice` call must
+    /// never clear or touch a message still pending from an earlier,
+    /// unrelated failed call -- `run_with_fallback_error` only ever installs
+    /// a message in response to its own `f`'s `Err`, matching the existing
+    /// sticky-until-explicitly-cleared-or-overwritten contract
+    /// `voirs_clear_error()`'s existence as a distinct public API implies.
+    /// (This is the property an earlier, since-reverted fix -- clearing the
+    /// error unconditionally at each wrapper's entry -- would have violated.)
+    #[test]
+    fn test_successful_get_voice_info_leaves_unrelated_pending_message_untouched() {
+        crate::voirs_clear_error();
+        crate::set_last_error("earlier unrelated failure".to_string());
+
+        let default_voice = std::ffi::CString::new("default").unwrap();
+        let info = voirs_get_voice_info(default_voice.as_ptr());
+        assert!(!info.is_null(), "\"default\" is a recognized voice ID");
+        unsafe {
+            voirs_free_voice_info(info);
+        }
+
+        let message = unsafe {
+            let ptr = crate::voirs_get_last_error();
+            assert!(!ptr.is_null());
+            let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
+            crate::voirs_free_string(ptr);
+            s
+        };
+        assert_eq!(
+            message, "earlier unrelated failure",
+            "a successful call must not disturb an unrelated pending message"
         );
     }
 }

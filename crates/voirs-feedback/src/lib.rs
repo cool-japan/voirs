@@ -182,6 +182,8 @@ pub mod accessibility;
 pub mod adaptive;
 pub mod ai_coaching;
 pub mod analytics;
+// Uses sha2/hex (HMAC-signed audit log entries) - requires the `privacy` feature.
+#[cfg(feature = "privacy")]
 pub mod audit_trail;
 pub mod batch_utils;
 pub mod bi_dashboard;
@@ -189,6 +191,8 @@ pub mod cdn_support;
 pub mod cloud_deployment;
 pub mod computer_vision;
 pub mod cultural_adaptation;
+// Uses sha2/hex (data hashing for anonymization) - requires the `privacy` feature.
+#[cfg(feature = "privacy")]
 pub mod data_anonymization;
 pub mod data_management;
 pub mod data_pipeline;
@@ -206,12 +210,20 @@ pub mod error_tracking;
 pub mod float_utils;
 #[cfg(feature = "gamification")]
 pub mod gamification;
+// gdpr::encryption uses aes_gcm/sha2 unconditionally (see gdpr/mod.rs:20,27), so the whole
+// subtree requires the `privacy` feature. A more surgical per-submodule gate would need an
+// edit inside gdpr/mod.rs itself (out of scope here - see followups).
+#[cfg(feature = "privacy")]
 pub mod gdpr;
 pub mod google_classroom;
 pub mod group_learning;
 pub mod health;
 pub mod i18n_formatting;
 pub mod i18n_support;
+// integration::zoom uses hmac/sha2/hex unconditionally for webhook signature verification -
+// requires the `privacy` feature. (Its reqwest usage is already internally gated on
+// `microservices` and unaffected by this gate.)
+#[cfg(feature = "privacy")]
 pub mod integration;
 pub mod load_balancer;
 pub mod memory_monitor;
@@ -219,6 +231,8 @@ pub mod metrics_dashboard;
 #[cfg(feature = "microservices")]
 pub mod microservices;
 pub mod natural_language_generation;
+// Uses reqwest (:11) AND sha2 (:13, PKCE S256 challenge) unconditionally - requires both.
+#[cfg(all(feature = "privacy", feature = "microservices"))]
 pub mod oauth2_auth;
 pub mod peer_learning;
 pub mod performance_helpers;
@@ -230,6 +244,8 @@ pub mod quality_monitor;
 pub mod rate_limiting;
 pub mod realtime;
 pub mod recovery;
+// Uses sha2 (share token hashing) unconditionally - requires the `privacy` feature.
+#[cfg(feature = "privacy")]
 pub mod secure_sharing;
 pub mod statistical_helpers;
 pub mod third_party_bots;
@@ -244,6 +260,9 @@ pub mod ux_analytics;
 pub mod validation_helpers;
 pub mod visualization;
 pub mod voice_control;
+// Uses sha2 (HMAC payload signing) unconditionally - requires the `privacy` feature.
+// (Its reqwest-based delivery path is already internally gated on `microservices`.)
+#[cfg(feature = "privacy")]
 pub mod webhooks;
 
 // Re-export all public types from traits
@@ -293,6 +312,7 @@ pub mod prelude {
     pub use crate::error_context::{
         ErrorCategory, ErrorContext, ErrorContextBuilder, ErrorSeverity,
     };
+    #[cfg(feature = "privacy")]
     pub use crate::gdpr::{
         ConsentRecord, DataSubject, GdprCompliance, GdprComplianceManager, ProcessingPurpose,
     };
@@ -322,6 +342,7 @@ pub mod prelude {
     pub use crate::voice_control::{
         CommandCategory, VoiceCommand, VoiceControlConfig, VoiceControlManager, VoiceIntent,
     };
+    #[cfg(feature = "privacy")]
     pub use crate::webhooks::{
         DeliveryStatus, RetryConfig, WebhookConfig, WebhookEvent, WebhookManager, WebhookStats,
     };
@@ -331,6 +352,7 @@ pub mod prelude {
         AccessibilityConfig, AccessibilityManager, AnnouncementPriority, Color, ColorBlindnessMode,
         FocusNavigation, KeyboardShortcut, ScreenReaderAnnouncement, ShortcutCategory, WcagLevel,
     };
+    #[cfg(feature = "privacy")]
     pub use crate::audit_trail::{
         AuditAction, AuditContext, AuditEntry, AuditLogger, AuditQuery, ComplianceReport,
         ResourceType,
@@ -338,6 +360,7 @@ pub mod prelude {
     pub use crate::batch_utils::{
         process_batches, AdaptiveBatchSize, BatchConfig, BatchProcessor, BatchResult, ChunkIterator,
     };
+    #[cfg(feature = "privacy")]
     pub use crate::data_anonymization::{
         AnonymizationPolicy, AnonymizationRule, AnonymizationTechnique, DataAnonymizer,
         RiskAssessment, SensitivityLevel,
@@ -362,6 +385,7 @@ pub mod prelude {
     pub use crate::performance_monitoring::{
         AlertRule, AlertSeverity, MetricStatistics, MetricType, PerformanceMonitor,
     };
+    #[cfg(feature = "privacy")]
     pub use crate::secure_sharing::{
         AccessLevel, AccessLogEntry, AccessResult, DataCategory as SharingDataCategory,
         SecureSharingManager, ShareConfig, ShareStatus, ShareToken, SharedDataPackage,

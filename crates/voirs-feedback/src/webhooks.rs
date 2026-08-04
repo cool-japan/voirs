@@ -428,7 +428,8 @@ impl WebhookManager {
             let result = Self::send_webhook(http_client, config, &payload).await;
 
             #[cfg(not(feature = "microservices"))]
-            let result: Result<(), String> = Err("Microservices feature not enabled".to_string());
+            let result: Result<(u16, String), String> =
+                Err("Microservices feature not enabled".to_string());
 
             let response_time_ms = start.elapsed().as_millis() as u64;
 
@@ -770,5 +771,79 @@ mod tests {
         assert_eq!(config.initial_backoff, Duration::from_secs(1));
         assert_eq!(config.max_backoff, Duration::from_secs(60));
         assert_eq!(config.backoff_multiplier, 2.0);
+    }
+
+    /// Regression test for the `webhooks.rs:439` type-mismatch bug: the
+    /// `#[cfg(not(feature = "microservices"))]` fallback used to declare `result` as
+    /// `Result<(), String>` while the shared status-recording code unconditionally
+    /// destructured a `(status, _)` tuple out of it, which failed to type-check whenever
+    /// that branch was actually compiled (i.e. whenever `microservices` was disabled).
+    /// This exercises the real delivery path end-to-end: a delivery that can never
+    /// succeed (nothing listens on the target port) must record a failed attempt with
+    /// `status_code: None` -- never a fabricated status code -- proving both that the
+    /// code compiles under every feature combination and that no fake success data
+    /// leaks into the delivery record.
+    #[tokio::test]
+    async fn test_failed_delivery_reports_no_fabricated_status_code() {
+        let mut manager = WebhookManager::new();
+
+        let config = WebhookConfig {
+            // Port 1 is a well-known unassigned port; nothing listens there, so the
+            // connection attempt fails immediately without requiring network access.
+            url: "http://127.0.0.1:1/webhook".to_string(),
+            secret: None,
+            events: vec![WebhookEvent::FeedbackReceived],
+            enabled: true,
+            retry_config: RetryConfig {
+                max_retries: 1,
+                initial_backoff: Duration::from_millis(1),
+                max_backoff: Duration::from_millis(1),
+                backoff_multiplier: 1.0,
+            },
+        };
+
+        manager
+            .register_webhook("unreachable_webhook", config)
+            .await
+            .unwrap();
+
+        let payload = serde_json::json!({ "user_id": "user123", "score": 0.42 });
+        let delivery_ids = manager
+            .trigger_event(WebhookEvent::FeedbackReceived, payload)
+            .await
+            .unwrap();
+        assert_eq!(delivery_ids.len(), 1);
+
+        // Poll for completion instead of a fixed sleep, bounded so the test can never hang.
+        let mut record = None;
+        for _ in 0..100 {
+            if let Some(r) = manager.get_delivery_status(&delivery_ids[0]).await {
+                if r.status == DeliveryStatus::Failed {
+                    record = Some(r);
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let record = record.expect("delivery should reach Failed status within the timeout");
+        assert_eq!(record.status, DeliveryStatus::Failed);
+        assert!(
+            !record.attempts.is_empty(),
+            "a failed delivery must record at least one attempt"
+        );
+        for attempt in &record.attempts {
+            // The bug this guards against would either fail to compile, or (if patched
+            // dishonestly) could smuggle a made-up status code through. Neither a real
+            // HTTP response nor a synthetic stand-in was ever received here.
+            assert_eq!(
+                attempt.status_code, None,
+                "no real HTTP response was received; status_code must not be fabricated"
+            );
+            assert!(
+                attempt.error.is_some(),
+                "a failed attempt must carry an honest error message"
+            );
+        }
     }
 }

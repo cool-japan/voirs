@@ -297,41 +297,35 @@ impl SafeTensorsLoader {
             return Ok(());
         }
 
-        // For PyTorch bin files, we need to implement conversion
-        // This is a realistic implementation that handles the conversion process
-        let conversion_result = self.convert_pytorch_to_safetensors(&file_content, pytorch_path)?;
-
-        // Write the converted SafeTensors file
-        std::fs::write(output_path, conversion_result).map_err(|e| VoirsError::IoError {
-            path: output_path.to_path_buf(),
-            operation: voirs_sdk::error::IoOperation::Write,
-            source: e,
-        })?;
-
-        // Validate the output file
-        if self.validate_on_load {
-            let validation_result = self.validate_file(output_path)?;
-            if !validation_result.is_valid {
-                return Err(VoirsError::config_error(format!(
-                    "Conversion produced invalid SafeTensors file: {:?}",
-                    validation_result.validation_errors
-                )));
-            }
-        }
+        // For PyTorch bin files (real pickle-encoded state dicts), we cannot
+        // honestly convert them: see `convert_pytorch_to_safetensors` for why,
+        // and why we fail closed here rather than emit a plausible-looking but
+        // all-zero-weight file.
+        self.convert_pytorch_to_safetensors(&file_content, pytorch_path)?;
 
         Ok(())
     }
 
-    /// Convert PyTorch binary data to SafeTensors format
+    /// Convert PyTorch binary data to SafeTensors format.
+    ///
+    /// A real conversion requires parsing Python's pickle opcode stream (the
+    /// container PyTorch's `torch.save`/`torch.load` use for `.pt`/`.pth`/
+    /// `.bin` files) plus, for newer checkpoints, unwrapping the surrounding
+    /// ZIP archive -- reconstructing tensor storage from opcodes such as
+    /// `GLOBAL`, `REDUCE`, `BININT`, and `BINPERSID` without executing
+    /// arbitrary pickle code. That is a real, nontrivial pure-Rust
+    /// implementation project and is not implemented in voirs-cli today.
+    ///
+    /// Fail closed instead of fabricating output: previously this generated
+    /// a structurally valid SafeTensors file with plausible TTS-shaped tensor
+    /// names but 100% zero weights (guessed purely from the input file's
+    /// byte size), which would silently load "successfully" downstream and
+    /// produce garbage or silent audio with no error anywhere in the chain.
     fn convert_pytorch_to_safetensors(
         &self,
         pytorch_data: &[u8],
         source_path: &Path,
-    ) -> Result<Vec<u8>> {
-        // This implements a realistic conversion process for PyTorch to SafeTensors
-        // Since we don't have direct PyTorch tensor access in Rust, we simulate the conversion
-
-        // Check if this is a PyTorch pickle file (most common format)
+    ) -> Result<()> {
         if pytorch_data.len() < 8 {
             return Err(VoirsError::config_error(
                 "PyTorch file is too small to be valid",
@@ -349,274 +343,22 @@ impl SafeTensorsLoader {
             ));
         }
 
-        // Generate a realistic SafeTensors conversion
-        // In a real-world scenario, this would involve:
-        // 1. Loading the PyTorch state_dict
-        // 2. Extracting tensor data and metadata
-        // 3. Converting to SafeTensors format
-
-        // For this implementation, we'll create a SafeTensors file with simulated tensor data
-        // that represents the structure of a typical TTS model
-        let converted_data =
-            self.generate_safetensors_from_pytorch_structure(pytorch_data, source_path)?;
-
-        Ok(converted_data)
-    }
-
-    /// Generate SafeTensors data from PyTorch file structure
-    fn generate_safetensors_from_pytorch_structure(
-        &self,
-        pytorch_data: &[u8],
-        source_path: &Path,
-    ) -> Result<Vec<u8>> {
-        use std::collections::HashMap;
-
-        // Extract model information from filename and file size
-        let model_name = source_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
-
-        let file_size = pytorch_data.len();
-
-        // Create a realistic tensor structure based on file size and name
-        let mut metadata = HashMap::new();
-
-        // Add metadata
-        metadata.insert("model_type".to_string(), "tts".to_string());
-        metadata.insert("source_format".to_string(), "pytorch".to_string());
-        metadata.insert("converted_by".to_string(), "voirs-cli".to_string());
-        metadata.insert("original_file".to_string(), model_name.to_string());
-        metadata.insert(
-            "conversion_date".to_string(),
-            chrono::Utc::now().to_rfc3339(),
-        );
-
-        // Generate realistic tensor shapes based on file size
-        let tensor_specs = self.generate_tensor_specs_from_size(file_size);
-
-        // Create tensor data
-        let mut total_data = Vec::new();
-        let mut tensor_info = Vec::new();
-
-        for (name, shape, dtype) in tensor_specs {
-            let tensor_size = shape.iter().product::<usize>() * dtype_size(&dtype);
-            let tensor_data = vec![0u8; tensor_size]; // Initialize with zeros
-
-            let tensor_start = total_data.len();
-            total_data.extend_from_slice(&tensor_data);
-            let tensor_end = total_data.len();
-
-            tensor_info.push((name, shape, dtype, tensor_start, tensor_end));
-        }
-
-        // Build SafeTensors header
-        let header = self.build_safetensors_header(tensor_info, metadata)?;
-
-        // Combine header and data
-        let header_bytes = serde_json::to_vec(&header)
-            .map_err(|e| VoirsError::config_error(format!("Failed to serialize header: {}", e)))?;
-
-        let header_size = header_bytes.len() as u64;
-        let mut result = Vec::new();
-
-        // SafeTensors format: [header_size][header][data]
-        result.extend_from_slice(&header_size.to_le_bytes());
-        result.extend_from_slice(&header_bytes);
-        result.extend_from_slice(&total_data);
-
-        Ok(result)
-    }
-
-    /// Generate tensor specifications based on file size
-    fn generate_tensor_specs_from_size(
-        &self,
-        file_size: usize,
-    ) -> Vec<(String, Vec<usize>, String)> {
-        let mut specs = Vec::new();
-
-        // Estimate model complexity based on file size
-        let complexity = if file_size < 10 * 1024 * 1024 {
-            "small"
-        } else if file_size < 100 * 1024 * 1024 {
-            "medium"
-        } else {
-            "large"
-        };
-
-        // Generate tensor specs based on complexity
-        match complexity {
-            "small" => {
-                specs.push((
-                    "encoder.embedding.weight".to_string(),
-                    vec![1000, 256],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.linear.weight".to_string(),
-                    vec![256, 128],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.linear.bias".to_string(),
-                    vec![128],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "decoder.projection.weight".to_string(),
-                    vec![128, 80],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "decoder.projection.bias".to_string(),
-                    vec![80],
-                    "F32".to_string(),
-                ));
-            }
-            "medium" => {
-                specs.push((
-                    "encoder.embedding.weight".to_string(),
-                    vec![5000, 512],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.transformer.0.self_attn.q_proj.weight".to_string(),
-                    vec![512, 512],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.transformer.0.self_attn.k_proj.weight".to_string(),
-                    vec![512, 512],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.transformer.0.self_attn.v_proj.weight".to_string(),
-                    vec![512, 512],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.transformer.0.self_attn.out_proj.weight".to_string(),
-                    vec![512, 512],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.transformer.0.linear1.weight".to_string(),
-                    vec![512, 2048],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "encoder.transformer.0.linear2.weight".to_string(),
-                    vec![2048, 512],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "decoder.mel_projection.weight".to_string(),
-                    vec![512, 80],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "decoder.stop_projection.weight".to_string(),
-                    vec![512, 1],
-                    "F32".to_string(),
-                ));
-            }
-            "large" => {
-                specs.push((
-                    "encoder.embedding.weight".to_string(),
-                    vec![10000, 1024],
-                    "F32".to_string(),
-                ));
-                for layer in 0..12 {
-                    specs.push((
-                        format!("encoder.transformer.{}.self_attn.q_proj.weight", layer),
-                        vec![1024, 1024],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.self_attn.k_proj.weight", layer),
-                        vec![1024, 1024],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.self_attn.v_proj.weight", layer),
-                        vec![1024, 1024],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.self_attn.out_proj.weight", layer),
-                        vec![1024, 1024],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.linear1.weight", layer),
-                        vec![1024, 4096],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.linear2.weight", layer),
-                        vec![4096, 1024],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.norm1.weight", layer),
-                        vec![1024],
-                        "F32".to_string(),
-                    ));
-                    specs.push((
-                        format!("encoder.transformer.{}.norm2.weight", layer),
-                        vec![1024],
-                        "F32".to_string(),
-                    ));
-                }
-                specs.push((
-                    "decoder.mel_projection.weight".to_string(),
-                    vec![1024, 80],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "decoder.stop_projection.weight".to_string(),
-                    vec![1024, 1],
-                    "F32".to_string(),
-                ));
-                specs.push((
-                    "decoder.attention.weight".to_string(),
-                    vec![1024, 1024],
-                    "F32".to_string(),
-                ));
-            }
-            _ => {}
-        }
-
-        specs
-    }
-
-    /// Build SafeTensors header
-    fn build_safetensors_header(
-        &self,
-        tensor_info: Vec<(String, Vec<usize>, String, usize, usize)>,
-        metadata: HashMap<String, String>,
-    ) -> Result<serde_json::Value> {
-        let mut header = serde_json::Map::new();
-
-        // Add metadata
-        for (key, value) in metadata {
-            header.insert(
-                format!("__metadata__.{}", key),
-                serde_json::Value::String(value),
-            );
-        }
-
-        // Add tensor information
-        for (name, shape, dtype, start, end) in tensor_info {
-            let tensor_data = serde_json::json!({
-                "dtype": dtype,
-                "shape": shape,
-                "data_offsets": [start, end]
-            });
-            header.insert(name, tensor_data);
-        }
-
-        Ok(serde_json::Value::Object(header))
+        Err(VoirsError::config_error(format!(
+            "Cannot convert '{}': real PyTorch pickle parsing (opcode stream + ZIP container) is \
+             not implemented in voirs-cli, and fabricating placeholder tensor data would produce a \
+             file that loads 'successfully' while containing no real weights. Convert it with \
+             Python instead (weights_only=True avoids unpickling arbitrary objects -- only use \
+             False if you trust the file's origin):\n\
+             \n\
+             \u{20}\u{20}import torch\n\
+             \u{20}\u{20}from safetensors.torch import save_file\n\
+             \u{20}\u{20}state_dict = torch.load('{}', map_location='cpu', weights_only=True)\n\
+             \u{20}\u{20}save_file(state_dict, 'output.safetensors')\n\
+             \n\
+             or export to ONNX and use `voirs convert-model --from onnx` instead.",
+            source_path.display(),
+            source_path.display()
+        )))
     }
 
     /// Compare two SafeTensors files for compatibility
@@ -953,5 +695,87 @@ mod tests {
         let wrong_ext_path = temp_dir.path().join("model.bin");
         fs::write(&wrong_ext_path, b"some data").unwrap();
         assert!(!loader.is_safetensors_file(&wrong_ext_path));
+    }
+
+    /// Regression test: `convert_from_pytorch` on a real PyTorch pickle
+    /// header must fail closed with a clear, actionable error -- it must
+    /// NEVER fabricate a plausible-looking all-zero-weight SafeTensors file.
+    #[test]
+    fn test_convert_from_pytorch_pickle_fails_closed() {
+        let temp_dir = tempdir().unwrap();
+        let pytorch_path = temp_dir.path().join("pytorch_model.bin");
+        let output_path = temp_dir.path().join("output.safetensors");
+
+        // Real PyTorch pickle protocol-2 magic bytes, followed by arbitrary
+        // payload (a real state_dict would follow, but the magic bytes alone
+        // are enough to be recognized as "this is a pickle file").
+        let mut pickle_bytes = vec![0x80u8, 0x02];
+        pickle_bytes.extend_from_slice(b"fake pickled state_dict payload, not real tensor data");
+        fs::write(&pytorch_path, &pickle_bytes).unwrap();
+
+        let loader = SafeTensorsLoader::new();
+        let result = loader.convert_from_pytorch(&pytorch_path, &output_path);
+
+        assert!(
+            result.is_err(),
+            "converting a PyTorch pickle file must fail closed, not fabricate a zero-weight file"
+        );
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.to_lowercase().contains("pickle") || message.to_lowercase().contains("python"),
+            "error should explain that pickle parsing isn't implemented, got: {message}"
+        );
+
+        // Crucially: no output file (fabricated or otherwise) may be written.
+        assert!(
+            !output_path.exists(),
+            "no SafeTensors output should be written when conversion fails"
+        );
+    }
+
+    /// Regression test: a file that is neither valid SafeTensors nor a
+    /// recognizable PyTorch pickle magic header must also fail closed with
+    /// a clear message, not silently produce output.
+    #[test]
+    fn test_convert_from_pytorch_unrecognized_format_fails_closed() {
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("model.bin");
+        let output_path = temp_dir.path().join("output.safetensors");
+
+        fs::write(&input_path, b"not a pickle file and not safetensors either").unwrap();
+
+        let loader = SafeTensorsLoader::new();
+        let result = loader.convert_from_pytorch(&input_path, &output_path);
+
+        assert!(result.is_err());
+        assert!(!output_path.exists());
+    }
+
+    /// Real safetensors input must still pass through correctly (this path
+    /// does not touch the pickle fail-closed logic at all).
+    #[test]
+    fn test_convert_from_pytorch_passthrough_for_real_safetensors() {
+        use safetensors::tensor::{Dtype, TensorView};
+
+        let temp_dir = tempdir().unwrap();
+        let input_path = temp_dir.path().join("model.safetensors");
+        let output_path = temp_dir.path().join("output.safetensors");
+
+        let values: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let view = TensorView::new(Dtype::F32, vec![4], &bytes).unwrap();
+        let mut tensors = HashMap::new();
+        tensors.insert("weight".to_string(), view);
+        let data = safetensors::serialize(&tensors, None).unwrap();
+        fs::write(&input_path, &data).unwrap();
+
+        let loader = SafeTensorsLoader::new();
+        loader
+            .convert_from_pytorch(&input_path, &output_path)
+            .expect("real SafeTensors input must pass through successfully");
+
+        assert!(output_path.exists());
+        let out_data = fs::read(&output_path).unwrap();
+        assert_eq!(out_data, data, "passthrough must be byte-identical");
     }
 }

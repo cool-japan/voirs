@@ -568,13 +568,14 @@ pub struct ModelInfo {
 /// Model cache for performance optimization
 pub struct ModelCache {
     /// Cached models
-    cached_models: HashMap<String, CachedModel>,
+    pub(crate) cached_models: HashMap<String, CachedModel>,
     /// Current cache size in MB
-    current_size_mb: usize,
+    pub(crate) current_size_mb: usize,
     /// Maximum cache size in MB
-    max_size_mb: usize,
+    pub(crate) max_size_mb: usize,
     /// Access history for LRU eviction
-    access_history: Vec<String>,
+    #[allow(dead_code)]
+    pub(crate) access_history: Vec<String>,
 }
 
 /// Cached model entry

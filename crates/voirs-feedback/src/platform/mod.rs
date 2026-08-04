@@ -12,7 +12,6 @@ use std::time::Duration;
 
 pub mod desktop;
 pub mod mobile;
-pub mod notification_reliability;
 pub mod notifications;
 pub mod offline;
 pub mod reliable_notifications;

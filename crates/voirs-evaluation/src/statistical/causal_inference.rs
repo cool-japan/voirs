@@ -265,7 +265,11 @@ mod tests {
             "expected DiD estimate near 0.25, got {}",
             result.estimate
         );
-        assert!(result.p_value < 0.05, "effect should be significant, p = {}", result.p_value);
+        assert!(
+            result.p_value < 0.05,
+            "effect should be significant, p = {}",
+            result.p_value
+        );
     }
 
     #[test]
@@ -332,7 +336,10 @@ mod tests {
         let treatment = vec![0.0, 0.0, 1.0, 1.0];
         let confounded_covariate = vec![1.0, 2.0, 8.0, 9.0];
         let balance = covariate_balance(&treatment, &confounded_covariate).unwrap();
-        assert!(balance > 0.9, "expected strong confounding correlation, got {balance}");
+        assert!(
+            balance > 0.9,
+            "expected strong confounding correlation, got {balance}"
+        );
 
         let balanced_covariate = vec![5.0, 4.0, 5.0, 4.0];
         let balance2 = covariate_balance(&treatment, &balanced_covariate).unwrap();

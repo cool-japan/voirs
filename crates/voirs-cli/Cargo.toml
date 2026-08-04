@@ -150,5 +150,11 @@ conversion = ["dep:voirs-conversion"]
 singing = ["dep:voirs-singing", "voirs-singing/musicxml-support", "voirs-singing/midi-support"]
 spatial = ["dep:voirs-spatial"]
 cloud = []
+# Forwards to voirs-dataset's `ffi-codecs` feature (Pure-Rust FLAC encode via
+# OxiAudio, plus C-FFI MP3 decode/encode). OFF by default to keep the default
+# build Pure Rust; `commands::dataset` tests use this to know, at compile
+# time, whether `voirs_dataset::audio::io::save_flac` will actually encode
+# FLAC or fall back to WAV.
+ffi-codecs = ["voirs-dataset/ffi-codecs"]
 [lints]
 workspace = true

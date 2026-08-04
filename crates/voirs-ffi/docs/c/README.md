@@ -1,286 +1,121 @@
 # VoiRS C API Documentation
 
-This directory contains comprehensive documentation for the VoiRS C API, including platform-specific integrations for Windows, macOS, and Linux.
+This directory documents the real, currently-exported C API of the `voirs-ffi` crate (library
+name `voirs`). It replaces an earlier revision that linked to files which never existed
+(`api_reference.md`, `data_types.md`, `quick_start.md`, `error_handling.md`,
+`memory_management.md`, `threading.md`, `performance.md`, an `examples/` directory) and that
+called functions with no real implementation (`voirs_create_pipeline(NULL)` taking an argument it
+doesn't take, `voirs_synthesize(pipeline, text)`, `voirs_save_audio`, `voirs_destroy_audio_buffer`,
+`voirs_synthesize_to_file`, `voirs_get_last_error_message`, `voirs_get_performance_metrics`, and
+more). Every function named below was verified against `crates/voirs-ffi/src/**/*.rs` directly.
 
-## Documentation Structure
+No C header ships with this crate (there is no `cbindgen` build step), so callers declare
+prototypes themselves — see the [crate README's Quick Start](../../README.md#quick-start) for a
+complete, compilable example that does exactly that.
 
-### Core References
-- [**API Reference**](api_reference.md) - Complete C API function documentation
-- [**Data Types**](data_types.md) - Structures, enums, and type definitions
-- [**Quick Start Guide**](quick_start.md) - Getting started with the C API
-- [**Error Handling**](error_handling.md) - Error codes and debugging
+## Documentation in this directory
 
-### Platform-Specific Documentation
-- [**Windows Integration**](windows.md) - COM, WASAPI, and Windows-specific features
-- [**macOS Integration**](macos.md) - Core Audio, AVFoundation, and Objective-C bindings
-- [**Linux Integration**](linux.md) - PulseAudio, ALSA, D-Bus, and SystemD integration
+- [`../../README.md`](../../README.md) — crate overview, feature flags, Quick Start (C and
+  Python), pipeline-handle vs. self-contained synthesis, error handling, memory ownership rules.
+- [**Linux Integration**](linux.md) — building, linking (`LD_LIBRARY_PATH`/rpath), the 9
+  `voirs_linux_*` functions, and the full cross-platform function index.
+- [**macOS Integration**](macos.md) — building, linking (`DYLD_LIBRARY_PATH`/rpath/codesigning),
+  the 9 `voirs_macos_*` functions, and the full cross-platform function index.
+- [**Windows Integration**](windows.md) — building (including the `windows-platform` feature
+  requirement), linking (MSVC/MinGW), the 5 `voirs_windows_*` functions, and the full
+  cross-platform function index.
 
-### Advanced Topics
-- [**Memory Management**](memory_management.md) - Memory pools, allocation strategies, and optimization
-- [**Threading**](threading.md) - Multi-threading, real-time audio processing
-- [**Performance Optimization**](performance.md) - Platform-specific optimizations and benchmarking
+## Getting started
 
-### Examples and Tutorials
-- [**Basic Examples**](examples/) - Simple usage examples
-- [**Platform Examples**](platform_examples/) - Platform-specific code samples
-- [**Integration Examples**](integration_examples/) - Real-world integration scenarios
-
-## Getting Started
-
-### Basic Usage
-
-```c
-#include "voirs/voirs_ffi.h"
-
-int main() {
-    // Initialize VoiRS
-    VoirsPipeline* pipeline = voirs_create_pipeline(NULL);
-    if (!pipeline) {
-        fprintf(stderr, "Failed to create pipeline\n");
-        return 1;
-    }
-    
-    // Synthesize speech
-    const char* text = "Hello, world!";
-    VoirsAudioBuffer* audio = voirs_synthesize(pipeline, text);
-    
-    if (audio) {
-        // Save to file
-        voirs_save_audio(audio, "output.wav", VOIRS_FORMAT_WAV);
-        
-        // Clean up
-        voirs_destroy_audio_buffer(audio);
-    }
-    
-    voirs_destroy_pipeline(pipeline);
-    return 0;
-}
-```
-
-### Compilation
-
-#### Linux/macOS
 ```bash
-gcc -o example example.c -lvoirs_ffi -lpthread
+cargo build --release -p voirs-ffi
 ```
 
-#### Windows (MSVC)
-```cmd
-cl example.c voirs_ffi.lib
-```
+Produces `target/release/libvoirs.so` (Linux), `libvoirs.dylib` (macOS), or `voirs.dll` +
+`voirs.dll.lib` (Windows) — `[lib] name = "voirs"`, `crate-type = ["cdylib", "rlib"]`.
 
-#### Windows (MinGW)
 ```bash
-gcc -o example.exe example.c -lvoirs_ffi -lws2_32 -lole32
+gcc example.c -Ltarget/release -lvoirs -o example      # Linux/macOS
+cl example.c /link /LIBPATH:target\release voirs.dll.lib  # Windows/MSVC
 ```
 
-## Platform-Specific Features
+See the platform pages above for runtime library-path setup (`LD_LIBRARY_PATH`,
+`DYLD_LIBRARY_PATH`, or DLL placement/`PATH`).
 
-### Windows
-- **COM Integration**: Access Windows audio system through COM interfaces
-- **WASAPI Support**: Low-latency audio input/output
-- **Registry Configuration**: Store and retrieve settings from Windows Registry
-- **Performance Monitoring**: Windows Performance Counters integration
+## Memory management (`c_api::allocator` and `c_api::memory`)
 
-### macOS
-- **Core Audio Integration**: Native macOS audio framework support
-- **AVFoundation Support**: Audio session management and permissions
-- **Objective-C Runtime**: Access to native macOS APIs
-- **Metal Performance Shaders**: Hardware-accelerated audio processing
-
-### Linux
-- **PulseAudio Integration**: Modern Linux audio server support
-- **ALSA Support**: Low-level ALSA (Advanced Linux Sound Architecture) access
-- **D-Bus Integration**: System service communication
-- **SystemD Integration**: Service management and system integration
-- **Real-time Scheduling**: RT priority for audio threads
-
-## Advanced Memory Management
-
-VoiRS provides sophisticated memory management features:
-
-### Memory Pools
-```c
-// Create a memory pool for audio buffers
-VoirsMemoryPool* pool = voirs_create_memory_pool(65536, 10, 50);
-
-// Allocate from pool
-void* buffer = voirs_pool_allocate(pool, 4096);
-
-// Return to pool
-voirs_pool_deallocate(pool, buffer, 4096);
-
-// Destroy pool
-voirs_destroy_memory_pool(pool);
-```
-
-### Lock-Free Audio Ring
-```c
-// Create lock-free ring buffer for real-time audio
-VoirsLockFreeRing* ring = voirs_create_lockfree_audio_ring(8, 4096);
-
-// Producer thread
-VoirsAudioBuffer* write_buffer = voirs_ring_get_write_buffer(ring);
-if (write_buffer) {
-    // Fill buffer with audio data
-    voirs_ring_commit_write_buffer(ring);
-}
-
-// Consumer thread  
-VoirsAudioBuffer* read_buffer = voirs_ring_get_read_buffer(ring);
-if (read_buffer) {
-    // Process audio data
-    voirs_ring_commit_read_buffer(ring);
-}
-
-voirs_destroy_lockfree_audio_ring(ring);
-```
-
-### Adaptive Memory Allocation
-```c
-// Create adaptive allocator that optimizes strategy based on usage
-VoirsAdaptiveAllocator* allocator = voirs_create_adaptive_allocator();
-
-// Allocator automatically chooses best strategy
-void* ptr = voirs_adaptive_allocate(allocator, 1024);
-
-voirs_adaptive_deallocate(allocator, ptr, 1024);
-voirs_destroy_adaptive_allocator(allocator);
-```
-
-## Real-Time Audio Processing
-
-### Lock-Free Threading
-```c
-// Set up real-time audio processing
-voirs_enable_realtime_mode();
-
-// Create lock-free structures for audio pipeline
-VoirsLockFreeQueue* queue = voirs_create_lockfree_queue(1024);
-
-// Audio callback (runs in real-time thread)
-void audio_callback(float* output, int frames) {
-    VoirsAudioChunk chunk;
-    if (voirs_queue_try_pop(queue, &chunk)) {
-        memcpy(output, chunk.data, frames * sizeof(float));
-    }
-}
-```
-
-### Platform-Specific Optimizations
-```c
-// Enable platform-specific optimizations
-#ifdef _WIN32
-    voirs_windows_enable_audio_session();
-#elif __APPLE__
-    voirs_macos_enable_low_latency_mode();
-#elif __linux__
-    voirs_linux_enable_rt_scheduling();
-#endif
-```
-
-## Error Handling
-
-VoiRS provides comprehensive error reporting:
+These functions are real and always compiled (no feature flag needed):
 
 ```c
-VoirsErrorCode result = voirs_synthesize_to_file(pipeline, text, "output.wav");
+/* Choose a pluggable global allocator strategy. Constants from
+ * crates/voirs-ffi/src/c_api/allocator.rs. */
+#define VOIRS_ALLOCATOR_SYSTEM          0
+#define VOIRS_ALLOCATOR_POOL            1
+#define VOIRS_ALLOCATOR_DEBUG           2
+#define VOIRS_ALLOCATOR_TRACKED_SYSTEM  3
 
-switch (result) {
-    case VOIRS_SUCCESS:
-        printf("Synthesis completed successfully\n");
-        break;
-    case VOIRS_ERROR_INVALID_PARAMETER:
-        fprintf(stderr, "Invalid parameter provided\n");
-        break;
-    case VOIRS_ERROR_OUT_OF_MEMORY:
-        fprintf(stderr, "Out of memory\n");
-        break;
-    default:
-        fprintf(stderr, "Unknown error: %d\n", result);
-}
+typedef struct {
+    unsigned int total_allocations;
+    unsigned int total_deallocations;
+    unsigned int current_allocations;
+    unsigned int peak_allocations;
+    unsigned int total_bytes_allocated;
+    unsigned int total_bytes_deallocated;
+    unsigned int current_bytes_allocated;
+    unsigned int peak_bytes_allocated;
+} VoirsAllocatorStats;
 
-// Get detailed error message
-const char* error_msg = voirs_get_last_error_message();
-if (error_msg) {
-    fprintf(stderr, "Error details: %s\n", error_msg);
-}
+extern int voirs_set_allocator(int allocator_type, unsigned int block_size,
+                                unsigned int blocks_per_chunk, int enable_backtrace);
+extern int voirs_get_allocator_stats(VoirsAllocatorStats *stats);
+extern int voirs_reset_allocator_stats(void);
+extern char *voirs_memory_get_stats(void); /* JSON string; free with voirs_free_string */
+extern void voirs_free_string(char *s);
 ```
-
-## Performance Monitoring
 
 ```c
-// Get performance metrics
-VoirsPerformanceMetrics metrics;
-voirs_get_performance_metrics(&metrics);
+voirs_set_allocator(VOIRS_ALLOCATOR_POOL, /*block_size=*/4096, /*blocks_per_chunk=*/50, 0);
 
-printf("CPU Usage: %.2f%%\n", metrics.cpu_usage);
-printf("Memory Usage: %zu MB\n", metrics.memory_usage_mb);
-printf("Audio Latency: %.2f ms\n", metrics.audio_latency_ms);
+VoirsAllocatorStats stats;
+voirs_get_allocator_stats(&stats);
+printf("current bytes allocated: %u\n", stats.current_bytes_allocated);
 
-// Platform-specific metrics
-#ifdef _WIN32
-VoirsWindowsMetrics win_metrics;
-voirs_windows_get_metrics(&win_metrics);
-printf("COM Objects Active: %u\n", win_metrics.com_objects_active);
-#endif
+voirs_reset_allocator_stats();
+
+char *stats_json = voirs_memory_get_stats();
+printf("%s\n", stats_json);
+voirs_free_string(stats_json);
 ```
 
-## Thread Safety
+Note: an earlier revision of this document described a `perf`-module family of APIs (lock-free
+audio rings, an adaptive allocator, a memory profiler, a generic
+`voirs_create_memory_pool`/`voirs_pool_allocate`). That module was never wired into the compiled
+crate (`mod perf;` was never declared in `lib.rs`), so none of those symbols were ever actually
+linkable, and it has since been removed from the source tree entirely rather than left to bit-rot
+unreachable. The allocator/memory APIs shown above are the real, shipped equivalent for allocator
+selection and allocation statistics.
 
-All VoiRS C API functions are thread-safe unless otherwise noted. For optimal performance in multi-threaded applications:
+## Error handling
 
 ```c
-// Create pipeline per thread for best performance
-VoirsPipeline* pipeline = voirs_create_pipeline(NULL);
-
-// Or use thread-safe synthesis with shared pipeline
-voirs_synthesize_threadsafe(shared_pipeline, text, callback, user_data);
+extern int voirs_has_error(void);
+extern char *voirs_get_last_error(void);   /* caller frees with voirs_free_string */
+extern void voirs_clear_error(void);
 ```
 
-## Best Practices
+Error codes (`VoirsErrorCode`, `crates/voirs-ffi/src/lib.rs`) are `#[repr(C)]` with explicit
+values: `VOIRS_SUCCESS = 0`, `VOIRS_ERROR_INVALID_PARAMETER = 1`,
+`VOIRS_ERROR_INITIALIZATION_FAILED = 2`, `VOIRS_ERROR_SYNTHESIS_FAILED = 3`,
+`VOIRS_ERROR_VOICE_NOT_FOUND = 4`, `VOIRS_ERROR_IO_ERROR = 5`, `VOIRS_ERROR_OUT_OF_MEMORY = 6`,
+`VOIRS_ERROR_OPERATION_CANCELLED = 7`, `VOIRS_ERROR_INTERNAL_ERROR = 99`.
 
-1. **Memory Management**: Always match create/destroy calls
-2. **Error Checking**: Check return values and error codes
-3. **Resource Cleanup**: Use proper cleanup in error paths
-4. **Thread Safety**: Use appropriate synchronization for shared resources
-5. **Platform Optimization**: Enable platform-specific features when available
+## Full function reference
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Linking Errors**: Ensure all required libraries are linked
-2. **Audio Device Issues**: Check audio device permissions and availability
-3. **Memory Leaks**: Use memory debugging tools and proper cleanup
-4. **Performance Issues**: Enable platform optimizations and use appropriate buffer sizes
-
-### Debug Mode
-
-```c
-// Enable debug mode for detailed logging
-voirs_set_debug_mode(true);
-voirs_set_log_level(VOIRS_LOG_DEBUG);
-
-// Memory debugging
-voirs_enable_memory_debugging();
-VoirsMemoryStats stats;
-voirs_get_memory_stats(&stats);
-```
-
-## Examples
-
-See the [examples/](examples/) directory for complete working examples:
-
-- `basic_synthesis.c` - Simple text-to-speech
-- `streaming_synthesis.c` - Real-time streaming synthesis  
-- `platform_integration.c` - Platform-specific features
-- `memory_optimization.c` - Advanced memory management
-- `threading_example.c` - Multi-threaded synthesis
+The C API is large — roughly 199 functions available on every desktop OS, plus 5-13 more per
+platform. Rather than repeat the same ~199-entry categorized index on every page, it lives once,
+identically, at the bottom of [`linux.md`](linux.md), [`macos.md`](macos.md), and
+[`windows.md`](windows.md), alongside each platform's own extra functions.
 
 ## Support
 
-For issues and questions:
-- GitHub Issues: [VoiRS Issues](https://github.com/voirs/voirs/issues)
-- Documentation: [VoiRS Docs](https://docs.voirs.com)
-- Community: [VoiRS Discord](https://discord.gg/voirs)
+- Source repository: <https://github.com/cool-japan/voirs>

@@ -50,7 +50,12 @@ fn mel_to_hz(mel: f64) -> f64 {
 
 /// Build a triangular mel filterbank as a list of `(bin_index, weight)`
 /// pairs per filter, spanning `0..=Nyquist` over `num_filters` filters.
-fn mel_filterbank(num_filters: usize, num_bins: usize, n_fft: usize, sample_rate: u32) -> Vec<Vec<(usize, f64)>> {
+fn mel_filterbank(
+    num_filters: usize,
+    num_bins: usize,
+    n_fft: usize,
+    sample_rate: u32,
+) -> Vec<Vec<(usize, f64)>> {
     let f_max = sample_rate as f64 / 2.0;
     let mel_min = hz_to_mel(0.0);
     let mel_max = hz_to_mel(f_max);
@@ -129,7 +134,10 @@ fn analyze_frames(samples: &[f32], sample_rate: u32, num_mel_filters: usize) -> 
             let log_mel: Vec<f64> = filterbank
                 .iter()
                 .map(|filter| {
-                    let energy: f64 = filter.iter().map(|&(bin, weight)| weight * power[bin]).sum();
+                    let energy: f64 = filter
+                        .iter()
+                        .map(|&(bin, weight)| weight * power[bin])
+                        .sum();
                     (energy + 1e-10).ln()
                 })
                 .collect();
@@ -167,7 +175,8 @@ pub(super) fn mfcc_frames(
                 .map(|c| {
                     let mut sum = 0.0;
                     for (m, &log_energy) in frame.log_mel.iter().enumerate() {
-                        let angle = std::f64::consts::PI * c as f64 * (m as f64 + 0.5) / num_mel_filters as f64;
+                        let angle = std::f64::consts::PI * c as f64 * (m as f64 + 0.5)
+                            / num_mel_filters as f64;
                         sum += log_energy * angle.cos();
                     }
                     sum as f32
@@ -179,7 +188,11 @@ pub(super) fn mfcc_frames(
 
 /// Per-frame mel-scale log-energy spectrogram (before the DCT step of
 /// [`mfcc_frames`]), one `Vec<f32>` of length `num_mel_filters` per frame.
-pub(super) fn mel_spectrogram_frames(samples: &[f32], sample_rate: u32, num_mel_filters: usize) -> Vec<Vec<f32>> {
+pub(super) fn mel_spectrogram_frames(
+    samples: &[f32],
+    sample_rate: u32,
+    num_mel_filters: usize,
+) -> Vec<Vec<f32>> {
     analyze_frames(samples, sample_rate, num_mel_filters)
         .iter()
         .map(|frame| frame.log_mel.iter().map(|&v| v as f32).collect())
@@ -320,7 +333,10 @@ pub(super) fn zero_crossing_rate(samples: &[f32]) -> f32 {
     if samples.len() < 2 {
         return 0.0;
     }
-    let crossings = samples.windows(2).filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0)).count();
+    let crossings = samples
+        .windows(2)
+        .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
+        .count();
     crossings as f32 / (samples.len() - 1) as f32
 }
 
@@ -356,7 +372,9 @@ mod tests {
 
     fn sine(freq: f64, len: usize, sample_rate: u32) -> Vec<f32> {
         (0..len)
-            .map(|i| (2.0 * std::f64::consts::PI * freq * i as f64 / sample_rate as f64).sin() as f32)
+            .map(|i| {
+                (2.0 * std::f64::consts::PI * freq * i as f64 / sample_rate as f64).sin() as f32
+            })
             .collect()
     }
 
@@ -367,7 +385,9 @@ mod tests {
         let mut state = seed;
         (0..len)
             .map(|_| {
-                state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
                 let unit = (state >> 33) as f32 / (1u64 << 31) as f32;
                 2.0 * unit - 1.0
             })
@@ -394,8 +414,10 @@ mod tests {
     fn test_autocorrelation_f0_varies_with_frequency() {
         // The defining property a fabricated/random F0 could never have:
         // real, distinct input frequencies must produce distinct outputs.
-        let f0_low = autocorrelation_f0(&sine(150.0, SAMPLE_RATE as usize, SAMPLE_RATE), SAMPLE_RATE);
-        let f0_high = autocorrelation_f0(&sine(300.0, SAMPLE_RATE as usize, SAMPLE_RATE), SAMPLE_RATE);
+        let f0_low =
+            autocorrelation_f0(&sine(150.0, SAMPLE_RATE as usize, SAMPLE_RATE), SAMPLE_RATE);
+        let f0_high =
+            autocorrelation_f0(&sine(300.0, SAMPLE_RATE as usize, SAMPLE_RATE), SAMPLE_RATE);
         assert!(
             (f0_low - 150.0).abs() < 5.0,
             "expected ~150 Hz, got {f0_low}"

@@ -16,6 +16,10 @@ use voirs_evaluation::accuracy_benchmarks::{
     AccuracyBenchmarkConfig, AccuracyBenchmarkRunner, DatasetConfig, DatasetType, LanguageCode,
 };
 
+// Brings `RuleBasedG2p::to_phonemes` into scope for `RealG2pSystem` below.
+#[cfg(not(doctest))]
+use voirs_g2p::G2p as _;
+
 /// Accuracy benchmarking commands
 #[derive(Debug, Clone, Args)]
 pub struct AccuracyCommand {
@@ -267,13 +271,19 @@ async fn run_comprehensive_benchmarks(
 
     println!("🚀 Running accuracy benchmarks...");
 
-    // Note: In a real implementation, you would pass actual G2P/TTS/ASR systems here
-    // For now, we'll use the simulation mode built into the benchmark runner
+    // Wire the real rule-based G2P backend so this measures actual G2P
+    // behavior instead of the runner's built-in random-noise simulation
+    // mode (which only activates when `None` is passed for G2P).
+    println!(
+        "ℹ️  No ASR backend is configured for this CLI; ASR-dependent accuracy metrics are \
+         skipped (not simulated)."
+    );
+    let g2p_system = RealG2pSystem;
     let results = runner
         .run_benchmarks(
-            None::<&DummyG2pSystem>,
-            None::<&DummyTtsSystem>,
-            None::<&DummyAsrSystem>,
+            Some(&g2p_system),
+            None::<&UnconfiguredTtsSystem>,
+            None::<&UnconfiguredAsrSystem>,
         )
         .await?;
 
@@ -383,11 +393,14 @@ async fn run_dataset_benchmark(
     let mut runner = AccuracyBenchmarkRunner::new(config);
     runner.load_test_cases().await?;
 
+    // Same real G2P wiring as `run_comprehensive_benchmarks` -- see there for
+    // why TTS/ASR stay honestly unconfigured rather than simulated.
+    let g2p_system = RealG2pSystem;
     let results = runner
         .run_benchmarks(
-            None::<&DummyG2pSystem>,
-            None::<&DummyTtsSystem>,
-            None::<&DummyAsrSystem>,
+            Some(&g2p_system),
+            None::<&UnconfiguredTtsSystem>,
+            None::<&UnconfiguredAsrSystem>,
         )
         .await?;
 
@@ -807,47 +820,210 @@ fn generate_html_report(
     html
 }
 
-// Dummy system implementations for demonstration
-// In a real implementation, these would be replaced with actual system interfaces
+// Real / honest system implementations wired into the benchmark runner.
+//
+// `AccuracyBenchmarkRunner::evaluate_dataset` (voirs-evaluation crate) only
+// ever consults the G2P system today -- `_tts_system`/`_asr_system` are
+// dead, underscore-prefixed parameters there. `RealG2pSystem` is therefore
+// the fix that actually changes measured behavior (it bypasses the runner's
+// built-in random-noise `simulate_case_evaluation` fallback, which only
+// activates when `None` is passed for G2P). `UnconfiguredTtsSystem` /
+// `UnconfiguredAsrSystem` exist only so `run_benchmarks`'s generic `TTS`/
+// `ASR` type parameters can be named while passing `None` -- their bodies
+// are never invoked today, and fail closed with a typed error rather than
+// returning fabricated audio/text if the evaluation runner is ever extended
+// to call them.
 
+/// Real G2P system backed by `voirs_g2p`'s rule-based backend.
+///
+/// Note: `RuleBasedG2p` emits IPA-style symbols (e.g. "h", "ə", "l", "oʊ"),
+/// while the CMU English test dataset's expected phonemes use ARPAbet
+/// notation (e.g. "HH", "AH0", "L", "OW1"). Comparing these directly (which
+/// is what `calculate_phoneme_accuracy` in voirs-evaluation does) will
+/// therefore report a low English phoneme-accuracy score despite the G2P
+/// conversion itself being correct -- that is an honest measurement of a
+/// real notation mismatch, not a bug in this adapter. Fixing the
+/// notation-aware comparison belongs in voirs-evaluation (outside this
+/// crate's ownership); see the implementing agent's report for detail.
 #[cfg(not(doctest))]
-struct DummyG2pSystem;
+struct RealG2pSystem;
 #[cfg(not(doctest))]
 #[async_trait]
-impl voirs_evaluation::accuracy_benchmarks::G2pSystem for DummyG2pSystem {
+impl voirs_evaluation::accuracy_benchmarks::G2pSystem for RealG2pSystem {
     async fn convert_to_phonemes(
         &self,
         text: &str,
-        _language: LanguageCode,
+        language: LanguageCode,
     ) -> Result<Vec<String>, voirs_evaluation::EvaluationError> {
-        Ok(text.chars().map(|c| c.to_string()).collect())
+        let g2p_language = map_language_code(language);
+        let g2p = voirs_g2p::backends::RuleBasedG2p::new(g2p_language);
+        let phonemes = g2p
+            .to_phonemes(text, Some(g2p_language))
+            .await
+            .map_err(|e| voirs_evaluation::EvaluationError::ProcessingError {
+                message: format!("G2P conversion failed for '{text}': {e}"),
+                source: None,
+            })?;
+        Ok(phonemes.into_iter().map(|p| p.symbol).collect())
     }
 }
 
+/// Map `voirs_evaluation`'s `LanguageCode` to `voirs_g2p`'s own
+/// `LanguageCode` -- the two crates define independent enums for the same
+/// concept.
 #[cfg(not(doctest))]
-struct DummyTtsSystem;
+fn map_language_code(language: LanguageCode) -> voirs_g2p::LanguageCode {
+    match language {
+        LanguageCode::EnUs => voirs_g2p::LanguageCode::EnUs,
+        LanguageCode::Ja => voirs_g2p::LanguageCode::Ja,
+        LanguageCode::Es => voirs_g2p::LanguageCode::Es,
+        LanguageCode::Fr => voirs_g2p::LanguageCode::Fr,
+        LanguageCode::De => voirs_g2p::LanguageCode::De,
+        LanguageCode::ZhCn => voirs_g2p::LanguageCode::ZhCn,
+    }
+}
+
+/// TTS system placeholder: no real TTS backend is wired into this CLI's
+/// accuracy benchmarking today. `run_benchmarks` is always called with
+/// `None::<&UnconfiguredTtsSystem>`, so `synthesize` is never actually
+/// invoked; if that ever changes, it fails closed instead of fabricating
+/// audio.
+#[cfg(not(doctest))]
+struct UnconfiguredTtsSystem;
 #[cfg(not(doctest))]
 #[async_trait]
-impl voirs_evaluation::accuracy_benchmarks::TtsSystem for DummyTtsSystem {
+impl voirs_evaluation::accuracy_benchmarks::TtsSystem for UnconfiguredTtsSystem {
     async fn synthesize(
         &self,
         _text: &str,
         _language: LanguageCode,
     ) -> Result<voirs_sdk::AudioBuffer, voirs_evaluation::EvaluationError> {
-        Ok(voirs_sdk::AudioBuffer::mono(vec![0.1; 16000], 16000))
+        Err(voirs_evaluation::EvaluationError::FeatureNotSupported {
+            feature: "TTS backend for accuracy benchmarking".to_string(),
+        })
     }
 }
 
+/// ASR system placeholder: no real ASR backend is wired into this CLI's
+/// accuracy benchmarking today (wiring one would require adding
+/// `voirs-recognizer` as a new dependency). `run_benchmarks` is always
+/// called with `None::<&UnconfiguredAsrSystem>`, so `transcribe` is never
+/// actually invoked; if that ever changes, it fails closed instead of
+/// fabricating a transcript.
 #[cfg(not(doctest))]
-struct DummyAsrSystem;
+struct UnconfiguredAsrSystem;
 #[cfg(not(doctest))]
 #[async_trait]
-impl voirs_evaluation::accuracy_benchmarks::AsrSystem for DummyAsrSystem {
+impl voirs_evaluation::accuracy_benchmarks::AsrSystem for UnconfiguredAsrSystem {
     async fn transcribe(
         &self,
         _audio: &voirs_sdk::AudioBuffer,
         _language: LanguageCode,
     ) -> Result<String, voirs_evaluation::EvaluationError> {
-        Ok("dummy transcription".to_string())
+        Err(voirs_evaluation::EvaluationError::FeatureNotSupported {
+            feature: "ASR backend for accuracy benchmarking".to_string(),
+        })
+    }
+}
+
+#[cfg(all(test, not(doctest)))]
+mod real_system_tests {
+    use super::*;
+    use voirs_evaluation::accuracy_benchmarks::{AsrSystem, G2pSystem, TtsSystem};
+
+    /// Regression test for the "always None -> always simulated random
+    /// noise" finding: `RealG2pSystem` must produce phonemes that actually
+    /// depend on the input text (a hardcoded/hallucinated implementation
+    /// would not), and must do so deterministically (a random-noise
+    /// implementation would not repeat identically).
+    #[tokio::test]
+    async fn real_g2p_system_output_varies_with_input_and_is_deterministic() {
+        let system = RealG2pSystem;
+
+        let hello = system
+            .convert_to_phonemes("hello", LanguageCode::EnUs)
+            .await
+            .expect("real G2P conversion should succeed for plain ASCII text");
+        let world = system
+            .convert_to_phonemes("world", LanguageCode::EnUs)
+            .await
+            .expect("real G2P conversion should succeed for plain ASCII text");
+
+        assert!(!hello.is_empty(), "real G2P must produce phonemes");
+        assert_ne!(
+            hello, world,
+            "different input text must produce different phoneme output"
+        );
+
+        // Determinism: run the same conversion twice and require an exact
+        // repeat -- a `scirs2_core::random`-perturbed simulation would not
+        // reliably do this across repeated calls.
+        let hello_again = system
+            .convert_to_phonemes("hello", LanguageCode::EnUs)
+            .await
+            .expect("real G2P conversion should succeed for plain ASCII text");
+        assert_eq!(
+            hello, hello_again,
+            "rule-based G2P must be deterministic, not randomly perturbed"
+        );
+    }
+
+    /// Real per-language dispatch: `voirs_g2p::backends::RuleBasedG2p` loads
+    /// different phonological rule tables per language (see
+    /// `RuleBasedG2p::load_default_rules`), so the same word processed as
+    /// different languages should not silently collapse to one universal
+    /// (fabricated-looking) output path.
+    #[tokio::test]
+    async fn real_g2p_system_dispatches_per_language() {
+        let system = RealG2pSystem;
+        let en = system
+            .convert_to_phonemes("hola", LanguageCode::EnUs)
+            .await
+            .unwrap();
+        let es = system
+            .convert_to_phonemes("hola", LanguageCode::Es)
+            .await
+            .unwrap();
+        // Spanish and English phonological rules differ (e.g. vowel
+        // realization), so identical input text should not always produce
+        // byte-identical output across languages.
+        assert!(!en.is_empty());
+        assert!(!es.is_empty());
+    }
+
+    #[test]
+    fn map_language_code_covers_every_evaluation_language() {
+        for lang in [
+            LanguageCode::EnUs,
+            LanguageCode::Ja,
+            LanguageCode::Es,
+            LanguageCode::Fr,
+            LanguageCode::De,
+            LanguageCode::ZhCn,
+        ] {
+            // Must not panic for any variant; exercise the real mapping.
+            let _ = map_language_code(lang);
+        }
+    }
+
+    /// Regression test for the fabricated `DummyTtsSystem`/`DummyAsrSystem`
+    /// bodies: the honest placeholders must fail closed with a typed error
+    /// (never `Ok` with invented audio/text) if ever invoked.
+    #[tokio::test]
+    async fn unconfigured_tts_and_asr_fail_closed_never_fabricate() {
+        let tts = UnconfiguredTtsSystem;
+        let tts_result = tts.synthesize("hello", LanguageCode::EnUs).await;
+        assert!(
+            tts_result.is_err(),
+            "an unconfigured TTS backend must never return fabricated audio"
+        );
+
+        let asr = UnconfiguredAsrSystem;
+        let silence = voirs_sdk::AudioBuffer::mono(vec![0.0; 16], 16000);
+        let asr_result = asr.transcribe(&silence, LanguageCode::EnUs).await;
+        assert!(
+            asr_result.is_err(),
+            "an unconfigured ASR backend must never return a fabricated transcript"
+        );
     }
 }

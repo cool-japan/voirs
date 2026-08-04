@@ -15,10 +15,9 @@
 //! `voirs-acoustic` implements real backward passes / optimizer steps for both
 //! trainers.
 
-use crate::error::CliError;
+use crate::error::{CliError, Result};
 use crate::GlobalOptions;
 use std::path::{Path, PathBuf};
-use voirs_sdk::Result;
 
 /// Arguments for acoustic model training
 ///
@@ -96,7 +95,7 @@ pub async fn run_train_acoustic(
 
     // Validate input
     if !args.data.exists() {
-        return Err(voirs_sdk::VoirsError::config_error(format!(
+        return Err(CliError::config(format!(
             "Training data directory not found: {}",
             args.data.display()
         )));
@@ -138,7 +137,7 @@ pub async fn run_train_acoustic(
             )
             .await
         }
-        _ => Err(voirs_sdk::VoirsError::config_error(format!(
+        _ => Err(CliError::config(format!(
             "Unsupported acoustic model type: {}. Supported: vits, fastspeech2",
             args.model_type
         ))),
@@ -239,8 +238,7 @@ fn fail_closed_acoustic_training(
          batch_size={batch_size}, lr={lr}, gpu={use_gpu}) but refused: {reason}",
         data.display(),
         output.display(),
-    ))
-    .into())
+    )))
 }
 
 async fn train_vits(args: AcousticTrainingArgs, _global: &GlobalOptions) -> Result<()> {

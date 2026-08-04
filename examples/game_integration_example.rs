@@ -136,6 +136,9 @@ impl Vector3D {
 }
 
 /// Unity Integration Components
+// `config`/`unity_callbacks` are retained for reference; this illustrative
+// integration shape doesn't re-read them after construction.
+#[allow(dead_code)]
 pub struct UnityIntegration {
     config: GameAudioConfig,
     character_manager: Arc<Mutex<CharacterManager>>,
@@ -339,6 +342,10 @@ public class VoiRSNPC : MonoBehaviour {
 }
 
 /// Unreal Engine Integration Components
+// Fields are retained for reference; this illustrative integration shape
+// doesn't re-read them after construction (see `UnityIntegration` above for
+// the equivalent Unity-side shape).
+#[allow(dead_code)]
 pub struct UnrealIntegration {
     config: GameAudioConfig,
     character_manager: Arc<Mutex<CharacterManager>>,
@@ -675,8 +682,19 @@ int32 AVoiRSUnrealIntegration::GetActiveVoiceCount() const
     }
 }
 
+/// Callback invoked with a completed dialogue id
+type DialogueCompleteCallback = Box<dyn Fn(u32) + Send + Sync>;
+/// Callback invoked with an audio event name and intensity
+type AudioEventCallback = Box<dyn Fn(&str, f32) + Send + Sync>;
+
 pub struct UnityCallbacks {
-    dialogue_complete_callbacks: Vec<Box<dyn Fn(u32) + Send + Sync>>,
+    dialogue_complete_callbacks: Vec<DialogueCompleteCallback>,
+}
+
+impl Default for UnityCallbacks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UnityCallbacks {
@@ -686,7 +704,7 @@ impl UnityCallbacks {
         }
     }
 
-    pub fn on_dialogue_complete(&mut self, callback: Box<dyn Fn(u32) + Send + Sync>) {
+    pub fn on_dialogue_complete(&mut self, callback: DialogueCompleteCallback) {
         self.dialogue_complete_callbacks.push(callback);
     }
 
@@ -698,7 +716,13 @@ impl UnityCallbacks {
 }
 
 pub struct UnrealCallbacks {
-    audio_event_callbacks: Vec<Box<dyn Fn(&str, f32) + Send + Sync>>,
+    audio_event_callbacks: Vec<AudioEventCallback>,
+}
+
+impl Default for UnrealCallbacks {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UnrealCallbacks {
@@ -708,7 +732,7 @@ impl UnrealCallbacks {
         }
     }
 
-    pub fn on_audio_event(&mut self, callback: Box<dyn Fn(&str, f32) + Send + Sync>) {
+    pub fn on_audio_event(&mut self, callback: AudioEventCallback) {
         self.audio_event_callbacks.push(callback);
     }
 
@@ -834,6 +858,9 @@ impl CharacterManager {
     }
 }
 
+// `synthesis_thread` is reserved as a join-handle slot for a background
+// synthesis worker; this illustrative pipeline doesn't spawn/join it yet.
+#[allow(dead_code)]
 pub struct GameAudioPipeline {
     config: GameAudioConfig,
     listener_position: Vector3D,

@@ -16,11 +16,10 @@
 //! guard should be removed once `voirs-g2p` implements real gradient-based
 //! training.
 
-use crate::error::CliError;
+use crate::error::{CliError, Result};
 use crate::GlobalOptions;
 use std::path::PathBuf;
 use voirs_g2p::LanguageCode;
-use voirs_sdk::Result;
 
 /// Run G2P model training
 pub async fn run_train_g2p(
@@ -50,7 +49,7 @@ pub async fn run_train_g2p(
 
     // Validate dictionary file
     if !dictionary.exists() {
-        return Err(voirs_sdk::VoirsError::config_error(format!(
+        return Err(CliError::config(format!(
             "Dictionary file not found: {}",
             dictionary.display()
         )));
@@ -101,8 +100,7 @@ async fn train_g2p_model(
         "G2P training requested (language={language}, dictionary entries={entry_count}, \
          output={output_display}, epochs={epochs}, lr={lr}) but refused: \
          {G2P_TRAINING_BLOCKED_REASON}"
-    ))
-    .into())
+    )))
 }
 
 /// Why G2P training refuses to run.
@@ -146,21 +144,16 @@ async fn load_pronunciation_dictionary(
 ) -> Result<Vec<DictionaryEntry>> {
     // Check if file exists
     if !path.exists() {
-        return Err(voirs_sdk::VoirsError::config_error(format!(
+        return Err(CliError::config(format!(
             "Dictionary file not found: {}",
             path.display()
         )));
     }
 
     // Read file contents
-    let contents =
-        tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| voirs_sdk::VoirsError::IoError {
-                path: path.clone(),
-                operation: voirs_sdk::error::IoOperation::Read,
-                source: e,
-            })?;
+    let contents = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| CliError::file_operation("read".to_string(), path.display().to_string(), e))?;
 
     // Parse dictionary entries
     let mut entries = Vec::new();
@@ -194,9 +187,7 @@ async fn load_pronunciation_dictionary(
     }
 
     if entries.is_empty() {
-        return Err(voirs_sdk::VoirsError::config_error(
-            "No valid dictionary entries found",
-        ));
+        return Err(CliError::config("No valid dictionary entries found"));
     }
 
     Ok(entries)

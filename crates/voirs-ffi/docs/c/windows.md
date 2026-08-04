@@ -1,446 +1,203 @@
 # Windows Integration Guide
 
-VoiRS provides comprehensive Windows integration through COM interfaces, WASAPI support, Registry configuration, and Windows-specific performance optimizations.
+This page documents the real, currently-exported C API of the `voirs-ffi` crate (library name
+`voirs`) as built for Windows, and how to build/link against it. It replaces an earlier revision
+that documented roughly 53 functions, of which only about 8 actually existed (COM device
+enumeration, WASAPI exclusive mode, and a `VoirsWindowsPerformanceProfiler` API never existed in
+this crate); every symbol listed below was verified against `crates/voirs-ffi/src/**/*.rs`
+directly.
 
-## Table of Contents
+No C header ships with this crate (there is no `cbindgen` build step), so every prototype below is
+what a caller must declare itself.
 
-- [COM Integration](#com-integration)
-- [WASAPI Audio Support](#wasapi-audio-support)
-- [Registry Configuration](#registry-configuration)
-- [Performance Monitoring](#performance-monitoring)
-- [Build Configuration](#build-configuration)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
+## Building
 
-## COM Integration
+```powershell
+# From the workspace root
+cargo build --release -p voirs-ffi
+```
 
-VoiRS integrates with Windows Component Object Model (COM) for advanced audio device management.
+This produces `target\release\voirs.dll` plus the import library `target\release\voirs.dll.lib`
+(crate `[lib] name = "voirs"`, `crate-type = ["cdylib", "rlib"]` — dynamic library only, no static
+`.lib`-only build).
 
-### Basic COM Setup
+**Build note:** `crates/voirs-ffi/src/platform/windows.rs` unconditionally imports the `winapi`
+crate whenever `target_os = "windows"`, but `winapi` (and the `windows` crate) are only pulled in
+as dependencies by the optional `windows-platform` Cargo feature
+(`crates/voirs-ffi/Cargo.toml`). Build with that feature enabled on Windows:
+
+```powershell
+cargo build --release -p voirs-ffi --features windows-platform
+```
+
+## Linking
+
+### MSVC
+
+```cmd
+cl myapp.c /I. /link /LIBPATH:target\release voirs.dll.lib
+```
+
+Copy `voirs.dll` next to `myapp.exe`, or ensure it is on `PATH`, before running.
+
+### MinGW
+
+```bash
+gcc myapp.c -I. -Ltarget/release -lvoirs -o myapp.exe
+```
+
+Unlike Linux/macOS, there is no environment-variable equivalent of `LD_LIBRARY_PATH`/
+`DYLD_LIBRARY_PATH` that Windows honors for arbitrary DLL search directories by default — the
+loader searches (in order) the application directory, system directories, and `PATH`. Placing
+`voirs.dll` next to the `.exe`, or adding its directory to `PATH`, are the two practical options.
+
+## Minimal example
+
+See the [crate README's Quick Start](../../README.md#quick-start) for a complete, compilable
+`voirs_synthesize_advanced` example (it declares the small subset of the real ABI it uses, since no
+header ships). Nothing in it is Windows-specific; it builds and links the same way as shown above.
+
+## Windows-specific functions (`src/platform/windows.rs`)
+
+These 5 functions only compile when `target_os = "windows"` (`crates/voirs-ffi/src/platform/mod.rs`
+gates `pub mod windows;` on it), and internally use real WASAPI/COM calls (`winapi` crate) rather
+than placeholders:
 
 ```c
-#include "voirs/platform/windows.h"
+/* Opaque handle -- only ever used through the functions below. */
+typedef struct WindowsAudioSession WindowsAudioSession;
 
-// Initialize COM for Windows integration
-VoirsComManager* com_manager = voirs_windows_init_com();
-if (!com_manager) {
-    fprintf(stderr, "Failed to initialize COM\n");
-    return -1;
-}
+WindowsAudioSession *voirs_windows_init_audio_session(void);
+void voirs_windows_destroy_audio_session(WindowsAudioSession *session);
 
-// COM is automatically cleaned up when manager is destroyed
-voirs_windows_destroy_com(com_manager);
+float voirs_windows_get_system_volume(WindowsAudioSession *session);
+bool  voirs_windows_set_system_volume(WindowsAudioSession *session, float volume);
+
+/* Caller must free the returned string with voirs_free_string(). Returns NULL on failure
+ * (including when key_name is NULL). */
+char *voirs_windows_read_registry_config(const char *key_name);
 ```
 
-### Audio Device Enumeration
+`voirs_windows_init_audio_session` calls `CoInitialize` and `CoCreateInstance` for
+`MMDeviceEnumerator` internally (real COM usage, not a placeholder); `voirs_windows_get_system_volume`/
+`voirs_windows_set_system_volume` go through `IAudioEndpointVolume`.
 
-```c
-// Create Windows Audio Session manager
-VoirsWindowsAudioSession* session = voirs_windows_init_audio_session();
-if (!session) {
-    fprintf(stderr, "Failed to initialize Windows Audio Session\n");
-    return -1;
-}
+## Cross-platform functions (identical on Linux/macOS/Windows)
 
-// Get available audio devices
-char** devices;
-int device_count = voirs_windows_get_audio_devices(session, &devices);
+Everything below compiles regardless of target OS. Full signatures live in the source files named;
+this is a complete, machine-checked name index grouped by module (not padded, not invented):
 
-for (int i = 0; i < device_count; i++) {
-    printf("Device %d: %s\n", i, devices[i]);
-}
+**Pipeline lifecycle** (`src/c_api/core.rs`, 6 functions)
 
-// Clean up
-voirs_windows_free_device_list(devices, device_count);
-voirs_windows_destroy_audio_session(session);
-```
+`voirs_create_pipeline`, `voirs_create_pipeline_with_config`, `voirs_destroy_pipeline`, `voirs_get_pipeline_count`, `voirs_is_pipeline_benchmark_placeholder`, `voirs_is_pipeline_valid`
 
-## WASAPI Audio Support
+**Synthesis** (`src/c_api/synthesis.rs`, 10 functions)
 
-Windows Audio Session API (WASAPI) provides low-latency audio I/O capabilities.
+`voirs_free_batch_synthesis_result`, `voirs_free_synthesis_result`, `voirs_get_synthesis_stats`, `voirs_reset_synthesis_stats`, `voirs_synthesize_advanced`, `voirs_synthesize_batch`, `voirs_synthesize_batch_advanced`, `voirs_synthesize_streaming`, `voirs_synthesize_streaming_advanced`, `voirs_synthesize_streaming_realtime`
 
-### Basic WASAPI Usage
+**Voice management** (`src/c_api/voice.rs`, 6 functions)
 
-```c
-// Configure for low-latency audio
-VoirsAudioConfig config = voirs_get_optimal_audio_config();
-config.use_exclusive_mode = true;  // Enable exclusive mode for lower latency
-config.buffer_size = 128;          // Smaller buffer for lower latency
+`voirs_free_voice_info`, `voirs_free_voice_list`, `voirs_get_voice`, `voirs_get_voice_info`, `voirs_list_voices`, `voirs_set_voice`
 
-VoirsPipeline* pipeline = voirs_create_pipeline_with_config(&config);
+**Audio post-processing / effects (extended)** (`src/c_api/audio.rs`, 8 functions)
 
-// Set WASAPI-specific options
-voirs_windows_set_audio_session_guid(pipeline, "{12345678-1234-1234-1234-123456789ABC}");
-voirs_windows_enable_audio_ducking(pipeline, true);  // Duck other audio when synthesizing
-```
+`voirs_audio_apply_effects`, `voirs_audio_crossfade`, `voirs_audio_duplicate`, `voirs_audio_get_statistics`, `voirs_audio_get_supported_formats`, `voirs_audio_mix`, `voirs_audio_save_flac`, `voirs_audio_save_mp3`
 
-### Volume Control
+**Audio analysis & DSP utilities** (`src/utils/audio.rs`, 27 functions)
 
-```c
-VoirsWindowsAudioSession* session = voirs_windows_init_audio_session();
+`voirs_audio_analyze`, `voirs_audio_apply_compression`, `voirs_audio_apply_multiband_eq`, `voirs_audio_calculate_brightness`, `voirs_audio_calculate_hnr`, `voirs_audio_calculate_spectral_flux`, `voirs_audio_calculate_spectral_rolloff`, `voirs_audio_enhance_quality`, `voirs_audio_fade_in`, `voirs_audio_fade_out`, `voirs_audio_get_peak`, `voirs_audio_get_rms`, `voirs_audio_low_pass_filter`, `voirs_audio_normalize`, `voirs_audio_remove_dc`, `voirs_audio_soft_limiter`, `voirs_performance_monitor_create`, `voirs_performance_monitor_free`, `voirs_performance_monitor_get_summary`, `voirs_performance_monitor_record_audio_time`, `voirs_performance_monitor_record_cpu`, `voirs_performance_monitor_record_memory`, `voirs_regression_detector_add_measurement`, `voirs_regression_detector_check`, `voirs_regression_detector_create`, `voirs_regression_detector_free`, `voirs_regression_detector_set_baseline`
 
-// Get current system volume (0.0 to 1.0)
-float volume = voirs_windows_get_system_volume(session);
-printf("Current volume: %.0f%%\n", volume * 100);
+**Sample format / rate conversion** (`src/c_api/convert.rs`, 17 functions)
 
-// Set system volume
-voirs_windows_set_system_volume(session, 0.75f);  // 75% volume
+`voirs_audio_convert_format`, `voirs_convert_double_to_float`, `voirs_convert_float_to_double`, `voirs_convert_float_to_int16`, `voirs_convert_float_to_int24`, `voirs_convert_float_to_int32`, `voirs_convert_float_to_uint16`, `voirs_convert_float_to_uint32`, `voirs_convert_float_to_uint8`, `voirs_convert_int16_to_float`, `voirs_convert_int24_to_float`, `voirs_convert_mono_to_stereo`, `voirs_convert_sample_rate`, `voirs_convert_stereo_to_mono`, `voirs_convert_uint16_to_float`, `voirs_convert_uint32_to_float`, `voirs_convert_uint8_to_float`
 
-voirs_windows_destroy_audio_session(session);
-```
+**Configuration builders & validation** (`src/c_api/config.rs`, 8 functions)
 
-### Audio Session Management
+`voirs_config_apply_synthesis_preset`, `voirs_config_create_model_default`, `voirs_config_create_performance_default`, `voirs_config_create_synthesis_default`, `voirs_config_get_synthesis_info`, `voirs_config_validate_model`, `voirs_config_validate_performance`, `voirs_config_validate_synthesis`
 
-```c
-// Register for audio session notifications
-void audio_session_callback(VoirsAudioSessionEvent event, void* user_data) {
-    switch (event) {
-        case VOIRS_AUDIO_SESSION_DISCONNECTED:
-            printf("Audio device disconnected\n");
-            break;
-        case VOIRS_AUDIO_SESSION_FORMAT_CHANGED:
-            printf("Audio format changed\n");
-            break;
-        case VOIRS_AUDIO_SESSION_VOLUME_CHANGED:
-            printf("Volume changed\n");
-            break;
-    }
-}
+**Threading & async/callback synthesis** (`src/c_api/threading.rs`, 13 functions)
 
-voirs_windows_register_session_callback(session, audio_session_callback, NULL);
-```
+`voirs_cancel_synthesis`, `voirs_get_active_operations`, `voirs_get_global_thread_count`, `voirs_get_max_concurrent`, `voirs_get_thread_stats`, `voirs_is_thread_pool_enabled`, `voirs_register_callbacks`, `voirs_set_global_thread_count`, `voirs_set_max_concurrent`, `voirs_set_thread_pool_enabled`, `voirs_synthesize_async`, `voirs_synthesize_parallel`, `voirs_unregister_callbacks`
 
-## Registry Configuration
+**Custom allocator control** (`src/c_api/allocator.rs`, 6 functions)
 
-VoiRS can store and retrieve configuration from the Windows Registry.
+`voirs_get_allocator_name`, `voirs_get_allocator_stats`, `voirs_get_memory_fragmentation`, `voirs_has_custom_allocator`, `voirs_reset_allocator_stats`, `voirs_set_allocator`
 
-### Reading Configuration
+**Zero-copy buffers, ring buffers, memory-mapped files** (`src/c_api/zero_copy.rs`, 32 functions)
 
-```c
-// Read VoiRS configuration from Registry
-char* voice_model = voirs_windows_read_registry_config("DefaultVoiceModel");
-if (voice_model) {
-    printf("Default voice model: %s\n", voice_model);
-    voirs_free_string(voice_model);
-}
+`voirs_memory_map_advise_random`, `voirs_memory_map_advise_sequential`, `voirs_memory_map_data`, `voirs_memory_map_data_mut`, `voirs_memory_map_destroy`, `voirs_memory_map_open_read`, `voirs_memory_map_open_write`, `voirs_memory_map_size`, `voirs_memory_map_sync`, `voirs_zero_copy_batch_copy`, `voirs_zero_copy_buffer_capacity`, `voirs_zero_copy_buffer_clone`, `voirs_zero_copy_buffer_create`, `voirs_zero_copy_buffer_data`, `voirs_zero_copy_buffer_data_mut`, `voirs_zero_copy_buffer_destroy`, `voirs_zero_copy_buffer_len`, `voirs_zero_copy_buffer_ref_count`, `voirs_zero_copy_buffer_set_len`, `voirs_zero_copy_buffer_slice`, `voirs_zero_copy_deinterleave`, `voirs_zero_copy_interleave`, `voirs_zero_copy_ring_available_read`, `voirs_zero_copy_ring_available_write`, `voirs_zero_copy_ring_capacity`, `voirs_zero_copy_ring_create`, `voirs_zero_copy_ring_destroy`, `voirs_zero_copy_ring_read`, `voirs_zero_copy_ring_write`, `voirs_zero_copy_view_data`, `voirs_zero_copy_view_destroy`, `voirs_zero_copy_view_len`
 
-// Read with default value
-char* quality_setting = voirs_windows_read_registry_config_with_default(
-    "QualityLevel", "high"
-);
-printf("Quality level: %s\n", quality_setting);
-voirs_free_string(quality_setting);
-```
+**Misc utilities (version, logging, validation)** (`src/c_api/utils.rs`, 16 functions)
 
-### Writing Configuration
+`voirs_calculate_aligned_size`, `voirs_get_build_info`, `voirs_get_error_description`, `voirs_get_memory_stats`, `voirs_get_process_memory_usage`, `voirs_get_recommended_buffer_size`, `voirs_get_system_info`, `voirs_get_version_string`, `voirs_is_log_level_enabled`, `voirs_log_message`, `voirs_reset_memory_stats`, `voirs_set_log_callback`, `voirs_validate_audio_format`, `voirs_validate_buffer`, `voirs_validate_range_float`, `voirs_validate_range_uint`
 
-```c
-// Write configuration to Registry
-bool success = voirs_windows_write_registry_config("DefaultVoiceModel", "neural_voice_v2");
-if (!success) {
-    fprintf(stderr, "Failed to write to registry\n");
-}
+**Memory statistics (buffer tracking)** (`src/memory.rs`, 4 functions)
 
-// Write numeric configuration
-voirs_windows_write_registry_config_int("BufferSize", 512);
-voirs_windows_write_registry_config_float("DefaultSpeed", 1.0f);
-```
+`voirs_memory_check_leaks`, `voirs_memory_clear_pools`, `voirs_memory_get_stats`, `voirs_memory_reset_stats`
 
-### Registry Paths
+**Performance / SIMD / batch helpers** (`src/performance.rs`, 6 functions)
 
-VoiRS uses the following registry locations:
-- User settings: `HKEY_CURRENT_USER\SOFTWARE\VoiRS\Config`
-- System settings: `HKEY_LOCAL_MACHINE\SOFTWARE\VoiRS\Config`
-- Voice models: `HKEY_CURRENT_USER\SOFTWARE\VoiRS\VoiceModels`
+`voirs_batch_convert_format`, `voirs_batch_process_audio`, `voirs_convert_f32_to_i16_optimized`, `voirs_detect_cpu_features`, `voirs_get_optimal_performance_config`, `voirs_interleave_audio_optimized`
 
-## Performance Monitoring
+**Batch-config helpers** (`src/utils/batch_ops.rs`, 6 functions)
 
-Windows-specific performance monitoring using Performance Counters and system APIs.
+`voirs_batch_config_create`, `voirs_batch_config_free`, `voirs_batch_config_set_cache`, `voirs_batch_config_set_sample_rate`, `voirs_batch_config_set_voice`, `voirs_batch_config_set_workers`
 
-### System Performance Metrics
+**Error message localization** (`src/error/i18n.rs`, 3 functions)
 
-```c
-VoirsWindowsMetrics metrics;
-VoirsErrorCode result = voirs_windows_get_performance_metrics(&metrics);
+`voirs_get_locale`, `voirs_get_localized_message`, `voirs_set_locale`
 
-if (result == VOIRS_SUCCESS) {
-    printf("CPU Usage: %.2f%%\n", metrics.cpu_usage);
-    printf("Memory Usage: %.2f%%\n", metrics.memory_usage);
-    printf("Audio Latency: %.2f ms\n", metrics.audio_latency_ms);
-    printf("Audio Dropouts: %u\n", metrics.audio_dropouts);
-    printf("COM Objects Active: %u\n", metrics.com_objects_active);
-}
-```
+**Structured error aggregation** (`src/error/structured.rs`, 3 functions)
 
-### Performance Optimization
+`voirs_clear_error_aggregator`, `voirs_get_error_stats`, `voirs_get_recent_errors`
 
-```c
-// Enable Windows-specific optimizations
-voirs_windows_enable_mmcss();          // Multimedia Class Scheduler Service
-voirs_windows_set_timer_resolution(1); // 1ms timer resolution
-voirs_windows_enable_large_pages();    // Large page support (requires privilege)
+**Error recovery hints** (`src/error/recovery.rs`, 2 functions)
 
-// Set process priority for audio processing
-voirs_windows_set_process_priority(VOIRS_PRIORITY_HIGH);
+`voirs_attempt_recovery`, `voirs_get_recovery_stats`
 
-// Configure thread priorities
-voirs_windows_set_audio_thread_priority(VOIRS_THREAD_PRIORITY_TIME_CRITICAL);
-```
+**Generic platform info** (`src/platform/mod.rs`, 6 functions)
 
-### Memory Management
+`voirs_get_audio_config_low_latency`, `voirs_get_audio_config_optimal`, `voirs_get_optimal_buffer_size`, `voirs_get_optimal_threads`, `voirs_get_platform_info`, `voirs_supports_hardware_acceleration`
 
-```c
-// Windows-specific memory optimizations
-voirs_windows_enable_heap_optimization();
-voirs_windows_set_working_set_size(64 * 1024 * 1024, 128 * 1024 * 1024); // 64-128 MB
+**Linux package building (.deb) — compiled on every OS this crate builds for** (`src/platform/packages.rs`, 4 functions)
 
-// Use Windows memory pools
-VoirsWindowsMemoryPool* pool = voirs_windows_create_memory_pool(
-    65536,      // chunk size
-    10,         // initial chunks
-    100,        // max chunks
-    true        // use large pages
-);
-```
+`voirs_package_build_all`, `voirs_package_build_debian`, `voirs_package_create_manager`, `voirs_package_destroy_manager`
 
-## Build Configuration
+**Visual Studio project integration** (`src/platform/vs.rs`, 5 functions) — compiled on every OS this crate builds for, but naturally most relevant here:
 
-### CMake Configuration
+`voirs_vs_create_integration`, `voirs_vs_destroy_integration`, `voirs_vs_get_version`, `voirs_vs_install_integration`, `voirs_vs_verify_installation`
 
-```cmake
-# Windows-specific configuration
-if(WIN32)
-    target_link_libraries(your_app voirs_ffi ole32 oleaut32 winmm)
-    
-    # For COM support
-    target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_COM=1)
-    
-    # For WASAPI support
-    target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_WASAPI=1)
-    
-    # Windows version targeting
-    target_compile_definitions(your_app PRIVATE 
-        WINVER=0x0A00 
-        _WIN32_WINNT=0x0A00
-    )
-endif()
-```
+**Xcode project integration — compiled on every OS this crate builds for** (`src/platform/xcode.rs`, 5 functions)
 
-### MSVC Project Configuration
+`voirs_xcode_build_framework`, `voirs_xcode_create_integration`, `voirs_xcode_destroy_integration`, `voirs_xcode_install_integration`, `voirs_xcode_verify_installation`
 
-```xml
-<!-- .vcxproj settings -->
-<PropertyGroup>
-    <TargetPlatformVersion>10.0</TargetPlatformVersion>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-</PropertyGroup>
+**Core error/string/buffer plumbing** (`src/lib.rs`, 6 functions)
 
-<ItemDefinitionGroup>
-    <ClCompile>
-        <PreprocessorDefinitions>
-            VOIRS_ENABLE_COM=1;
-            VOIRS_ENABLE_WASAPI=1;
-            %(PreprocessorDefinitions)
-        </PreprocessorDefinitions>
-    </ClCompile>
-    <Link>
-        <AdditionalDependencies>
-            voirs_ffi.lib;
-            ole32.lib;
-            oleaut32.lib;
-            winmm.lib;
-            %(AdditionalDependencies)
-        </AdditionalDependencies>
-    </Link>
-</ItemDefinitionGroup>
-```
+`voirs_clear_error`, `voirs_error_message`, `voirs_free_audio_buffer`, `voirs_free_string`, `voirs_get_last_error`, `voirs_has_error`
 
-## Examples
+*(cross-platform total: 199 functions, identical on Linux/macOS/Windows)*
 
-### Complete Windows Integration Example
+Full prototypes for the core subset used in the Quick Start example (pipeline lifecycle, synthesis,
+voice management, error handling) are in the [crate README](../../README.md).
 
-```c
-#include "voirs/voirs_ffi.h"
-#include "voirs/platform/windows.h"
+## Visual Studio project integration
 
-int main() {
-    // Initialize Windows-specific features
-    if (!voirs_windows_initialize()) {
-        fprintf(stderr, "Failed to initialize Windows features\n");
-        return 1;
-    }
-    
-    // Create COM manager
-    VoirsComManager* com = voirs_windows_init_com();
-    if (!com) {
-        fprintf(stderr, "Failed to initialize COM\n");
-        return 1;
-    }
-    
-    // Create audio session
-    VoirsWindowsAudioSession* session = voirs_windows_init_audio_session();
-    if (!session) {
-        fprintf(stderr, "Failed to initialize audio session\n");
-        voirs_windows_destroy_com(com);
-        return 1;
-    }
-    
-    // Configure for optimal Windows performance
-    VoirsAudioConfig config = {
-        .backend = "wasapi",
-        .sample_rate = 48000,
-        .buffer_size = 256,
-        .channels = 2,
-        .use_exclusive_mode = true
-    };
-    
-    // Create pipeline with Windows optimizations
-    VoirsPipeline* pipeline = voirs_create_pipeline_with_config(&config);
-    
-    // Enable Windows-specific optimizations
-    voirs_windows_enable_mmcss();
-    voirs_windows_set_timer_resolution(1);
-    
-    // Synthesize speech
-    const char* text = "Hello from VoiRS on Windows!";
-    VoirsAudioBuffer* audio = voirs_synthesize(pipeline, text);
-    
-    if (audio) {
-        // Save using Windows Media Foundation (if available)
-        voirs_windows_save_audio_wmf(audio, "output.wav", VOIRS_WMF_FORMAT_WAV);
-        voirs_destroy_audio_buffer(audio);
-    }
-    
-    // Clean up
-    voirs_destroy_pipeline(pipeline);
-    voirs_windows_destroy_audio_session(session);
-    voirs_windows_destroy_com(com);
-    voirs_windows_cleanup();
-    
-    return 0;
-}
-```
-
-### Real-time Audio Processing
-
-```c
-// Windows-specific real-time audio processing
-void setup_realtime_audio() {
-    // Set multimedia thread characteristics
-    DWORD task_index;
-    HANDLE mmcss_handle = AvSetMmThreadCharacteristics(L"Audio", &task_index);
-    
-    // Set thread priority
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-    
-    // Create WASAPI client
-    VoirsWasapiClient* client = voirs_windows_create_wasapi_client();
-    voirs_windows_set_exclusive_mode(client, true);
-    voirs_windows_set_buffer_size(client, 128);
-    
-    // Start real-time processing
-    voirs_windows_start_audio_processing(client, audio_callback, NULL);
-}
-
-void audio_callback(float* output, int frames, void* user_data) {
-    // Process audio in real-time
-    VoirsPipeline* pipeline = (VoirsPipeline*)user_data;
-    voirs_process_audio_realtime(pipeline, output, frames);
-}
-```
+`voirs_vs_create_integration`, `voirs_vs_install_integration`, `voirs_vs_verify_installation`,
+`voirs_vs_get_version`, and `voirs_vs_destroy_integration` (`src/platform/vs.rs`) are real
+dev-tooling entry points (MSBuild target files, IntelliSense configuration generation for this
+crate's own build), not something a typical embedding application calls at synthesis time.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### COM Initialization Failed
-```c
-// Check if COM is already initialized
-HRESULT hr = CoInitialize(NULL);
-if (hr == RPC_E_CHANGED_MODE) {
-    // COM already initialized in different mode
-    printf("COM already initialized\n");
-} else if (FAILED(hr)) {
-    printf("COM initialization failed: 0x%x\n", hr);
-}
-```
-
-#### Audio Device Access Issues
-```c
-// Check audio device permissions
-if (!voirs_windows_check_audio_permissions()) {
-    printf("Audio permissions not granted\n");
-    // Guide user to grant permissions
-}
-
-// Verify exclusive mode support
-if (!voirs_windows_supports_exclusive_mode()) {
-    printf("Exclusive mode not supported, using shared mode\n");
-    config.use_exclusive_mode = false;
-}
-```
-
-#### Registry Access Problems
-```c
-// Check registry permissions
-if (!voirs_windows_check_registry_access()) {
-    printf("Registry access denied, using default configuration\n");
-    // Fall back to file-based configuration
-}
-```
-
-### Debug Tools
-
-```c
-// Enable Windows-specific debugging
-voirs_windows_enable_debug_mode();
-voirs_windows_set_debug_output_console();
-
-// Monitor COM object lifetime
-voirs_windows_enable_com_debugging();
-
-// Audio session debugging
-voirs_windows_enable_audio_debugging();
-voirs_windows_log_audio_devices();
-```
-
-### Performance Tuning
-
-```c
-// Measure and optimize performance
-VoirsWindowsPerformanceProfiler* profiler = voirs_windows_create_profiler();
-
-voirs_windows_start_profiling(profiler);
-// ... perform audio operations ...
-voirs_windows_stop_profiling(profiler);
-
-VoirsWindowsPerformanceReport report;
-voirs_windows_get_performance_report(profiler, &report);
-
-printf("Average latency: %.2f ms\n", report.average_latency_ms);
-printf("Max latency: %.2f ms\n", report.max_latency_ms);
-printf("Buffer underruns: %u\n", report.buffer_underruns);
-
-voirs_windows_destroy_profiler(profiler);
-```
-
-## Security Considerations
-
-- COM initialization requires appropriate security contexts
-- Registry access may require elevated privileges for system-wide settings
-- Exclusive mode audio requires appropriate process privileges
-- Large page support requires `SeLockMemoryPrivilege`
-
-## Version Compatibility
-
-VoiRS Windows integration supports:
-- Windows 10 version 1903 and later (recommended)
-- Windows Server 2019 and later
-- Limited support for Windows 8.1 (without exclusive mode features)
-
-## Related Documentation
-
-- [C API Reference](api_reference.md)
-- [Memory Management](memory_management.md)
-- [Threading Guide](threading.md)
-- [Performance Optimization](performance.md)
+- **`The code execution cannot proceed because voirs.dll was not found`** — the loader can't find
+  the DLL; see [Linking](#linking) above (place `voirs.dll` next to the `.exe` or add it to `PATH`).
+- **Build fails with unresolved `winapi::...` imports** — build with
+  `--features windows-platform` (see the build note above).
+- **`undefined symbol: voirs_synthesize`** — that function does not exist. The one-shot
+  self-contained entry point is `voirs_synthesize_advanced`; the streaming entry points are
+  `voirs_synthesize_streaming`, `voirs_synthesize_streaming_advanced`, and
+  `voirs_synthesize_streaming_realtime`. See [C API overview](../../README.md#c-api-overview) in
+  the crate README.
+- **Synthesis returns `VOIRS_ERROR_SYNTHESIS_FAILED`/`VOIRS_ERROR_INITIALIZATION_FAILED`** — real
+  model weights could not be loaded (e.g. no network access on first run). Call
+  `voirs_get_last_error()` for the underlying `voirs_sdk` error message.

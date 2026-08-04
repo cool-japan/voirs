@@ -344,7 +344,7 @@ impl IoTEdgeEngine {
             let next_id = Arc::clone(&self.next_request_id);
 
             move || {
-                let voice_commands = vec![
+                let voice_commands = [
                     (
                         "Good morning! The weather today is sunny with a high of 75 degrees.",
                         RequestPriority::Normal,
@@ -364,7 +364,7 @@ impl IoTEdgeEngine {
                     ),
                 ];
 
-                for (i, (text, priority)) in voice_commands.iter().enumerate() {
+                for (text, priority) in voice_commands.iter() {
                     thread::sleep(Duration::from_secs(2)); // Space out requests
 
                     let request_id = {
@@ -613,7 +613,7 @@ impl QuantizedModelManager {
             "default_voice"
         };
 
-        let model = self
+        let _model = self
             .models
             .get(model_key)
             .ok_or_else(|| IoTError::ModelNotFound(model_key.to_string()))?;
@@ -651,6 +651,9 @@ impl QuantizedModelManager {
     }
 }
 
+// Fields are populated for illustrative completeness (Debug output shows
+// them); this demo doesn't otherwise read them back after quantization.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct QuantizedModel {
     name: String,
@@ -724,6 +727,9 @@ pub struct NetworkStatus {
     pub signal_strength: f32,
 }
 
+// `max_memory_mb`/`cpu_cores` are captured from the device config for
+// reference; this illustrative monitor doesn't re-read them after construction.
+#[allow(dead_code)]
 pub struct ResourceMonitor {
     device_type: IoTDeviceType,
     max_memory_mb: u32,
@@ -773,7 +779,7 @@ pub struct DeviceManager {
 }
 
 impl DeviceManager {
-    pub fn new(config: &IoTDeviceConfig) -> Result<Self, IoTError> {
+    pub fn new(_config: &IoTDeviceConfig) -> Result<Self, IoTError> {
         Ok(Self {
             rooms: HashMap::new(),
         })
@@ -957,7 +963,7 @@ pub fn run_iot_edge_synthesis_example() -> Result<(), IoTError> {
         if config.cache_size_mb > 0 {
             // Repeat a message to test caching
             engine.synthesize_text(messages[0], "default_voice", RequestPriority::Normal)?;
-            let cache_result = engine.process_requests()?;
+            let _cache_result = engine.process_requests()?;
 
             let final_status = engine.get_device_status();
             println!(
@@ -1102,7 +1108,7 @@ pub fn run_iot_edge_synthesis_example() -> Result<(), IoTError> {
 
         let start_time = Instant::now();
         let result = device.process_requests()?;
-        let total_time = start_time.elapsed();
+        let _total_time = start_time.elapsed();
 
         println!(
             "   {:?}: {}ms processing, {:.1}% CPU, {:.1}% Memory",

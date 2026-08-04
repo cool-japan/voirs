@@ -265,7 +265,13 @@ pub struct MRFStats {
 impl MultiReceptiveField {
     /// Get MRF statistics
     pub fn stats(&self) -> MRFStats {
-        let num_blocks = self.residual_blocks.len();
+        // `residual_blocks` only exists with the `candle` feature enabled;
+        // `kernel_sizes` always has exactly one entry per residual block
+        // (enforced by both `new()` constructors), so it is the
+        // feature-independent way to get the block count. See
+        // `receptive_field_size`/`estimate_parameters` below, which use the
+        // same approach.
+        let num_blocks = self.kernel_sizes.len();
         let num_parameters = self.estimate_parameters();
         let receptive_field_size = self.receptive_field_size();
 

@@ -55,10 +55,10 @@
 //! ```bash
 //! # macOS with Metal acceleration
 //! cargo run --example basic_configuration --features="metal"
-//! 
+//!
 //! # Linux with CUDA (if available)
 //! cargo run --example basic_configuration --features="cuda"
-//! 
+//!
 //! # Windows with DirectML
 //! cargo run --example basic_configuration --features="directml"
 //! ```
@@ -104,10 +104,7 @@
 
 use anyhow::{Context, Result as AnyhowResult};
 use std::time::Instant;
-use voirs::{
-    create_acoustic, create_g2p, create_vocoder, AcousticBackend, AudioFormat, G2pBackend,
-    LanguageCode, QualityLevel, Result, SynthesisConfig, VocoderBackend, VoirsPipelineBuilder,
-};
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> AnyhowResult<()> {
@@ -235,16 +232,10 @@ async fn test_configuration(config: SynthesisConfig) -> AnyhowResult<String> {
     // Step 1: Validate configuration
     validate_config(&config).context("Configuration validation failed")?;
 
-    // Step 2: Create components with error handling
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
-    // Step 3: Build pipeline with proper error context
+    // Step 2: Build pipeline with proper error context
+    // The unified VoirsPipelineBuilder wires the default G2P, acoustic model, and
+    // vocoder together automatically based on the requested quality/rate settings.
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .with_quality(config.quality)
         .with_speaking_rate(config.speaking_rate)
         .build()

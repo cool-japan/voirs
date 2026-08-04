@@ -14,8 +14,34 @@ use voirs::c_api::core::*;
 use voirs::c_api::synthesis::*;
 use voirs::{VoirsErrorCode, VoirsSynthesisResult};
 
+/// Serializes the tests in this file that mutate the process-wide
+/// `VOIRS_BENCHMARK_MODE` environment variable.
+///
+/// `cargo nextest run` (this workspace's preferred/documented runner) gives
+/// every `#[test]` its own process, making this a no-op there; plain `cargo
+/// test` runs every `#[test]` in this file as threads within one process by
+/// default, where an unguarded concurrent `set_var`/`remove_var` from two of
+/// these tests would race (see `voirs-ffi/tests/pipeline_real_path.rs`'s
+/// identical guard for the full rationale).
+static TEST_SERIALIZATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serialize_test() -> std::sync::MutexGuard<'static, ()> {
+    TEST_SERIALIZATION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn test_burst_synthesis_load() {
+    let _guard = serialize_test();
+    // This stress-tests pipeline-management throughput under concurrent
+    // load (creation/validation/destruction plumbing), not real model
+    // loading -- the comment below explicitly notes "we'll just test
+    // pipeline creation/validation rather than full synthesis". Use
+    // VOIRS_BENCHMARK_MODE so 50 concurrent pipeline creations don't each
+    // require network access to fetch model weights.
+    std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
+
     // Test burst of 50 requests using C FFI directly
     let burst_size = 50;
     let max_duration = Duration::from_secs(30);
@@ -94,10 +120,18 @@ fn test_burst_synthesis_load() {
         "Throughput too low: {:.2} ops/sec",
         throughput
     );
+
+    std::env::remove_var("VOIRS_BENCHMARK_MODE");
 }
 
 #[test]
 fn test_basic_stress_infrastructure() {
+    let _guard = serialize_test();
+    // Validates stress-testing plumbing (pipeline creation/destruction
+    // under concurrent load), not real model loading -- see
+    // test_burst_synthesis_load's identical rationale for VOIRS_BENCHMARK_MODE.
+    std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
+
     // Basic test to validate stress testing infrastructure is working
     let test_count = 10;
     let success_count = Arc::new(AtomicU64::new(0));
@@ -148,6 +182,8 @@ fn test_basic_stress_infrastructure() {
         "Basic stress infrastructure should work"
     );
     assert_eq!(errors, 0, "No errors expected in basic infrastructure test");
+
+    std::env::remove_var("VOIRS_BENCHMARK_MODE");
 }
 
 #[cfg(test)]
@@ -156,7 +192,13 @@ mod integration_tests {
 
     #[test]
     fn test_stress_test_runner() {
-        // Integration test that runs multiple stress scenarios
+        let _guard = serialize_test();
+        // Integration test that runs multiple stress scenarios. Validates
+        // FFI plumbing, not real model loading -- see
+        // test_burst_synthesis_load's identical rationale for
+        // VOIRS_BENCHMARK_MODE.
+        std::env::set_var("VOIRS_BENCHMARK_MODE", "1");
+
         unsafe {
             // Quick validation that the FFI infrastructure works
             let pipeline = voirs_create_pipeline();
@@ -166,8 +208,11 @@ mod integration_tests {
                 voirs_destroy_pipeline(pipeline);
                 println!("All stress test infrastructure validated successfully");
             } else {
+                std::env::remove_var("VOIRS_BENCHMARK_MODE");
                 panic!("Failed to create pipeline for stress test validation");
             }
         }
+
+        std::env::remove_var("VOIRS_BENCHMARK_MODE");
     }
 }

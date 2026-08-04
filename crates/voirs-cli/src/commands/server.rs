@@ -1101,7 +1101,7 @@ async fn detailed_health_handler(State(state): State<AppState>) -> Json<Detailed
 
     // Authentication system health check
     let auth_start = Instant::now();
-    let auth_check = check_auth_health(&state);
+    let auth_check = check_auth_health(&state.auth);
     checks.push(HealthCheck {
         name: "authentication".to_string(),
         status: auth_check.0,
@@ -1146,10 +1146,13 @@ async fn readiness_handler(State(state): State<AppState>) -> impl IntoResponse {
     // Check if the service is ready to serve traffic
     let pipeline_ready = (state.pipeline.list_voices().await).is_ok();
 
-    let auth_ready = {
-        let auth_state = state.auth.lock().expect("lock should not be poisoned");
-        true // Allow unauthenticated access for development
-    };
+    // Derive readiness from the real authentication subsystem state (the same
+    // check the detailed health endpoint uses) instead of a hardcoded value.
+    // `check_auth_health` returns "healthy" or "degraded" ("degraded" signals
+    // the auth system is under memory pressure from unbounded log/rate-limit
+    // growth, which is a genuine not-ready condition for a readiness probe).
+    let (auth_status, _) = check_auth_health(&state.auth);
+    let auth_ready = auth_status == "healthy";
 
     if pipeline_ready && auth_ready {
         (
@@ -1250,9 +1253,18 @@ fn check_memory_health() -> (String, String) {
     }
 }
 
-/// Check authentication system health
-fn check_auth_health(state: &AppState) -> (String, String) {
-    let auth_state = state.auth.lock().expect("lock should not be poisoned");
+/// Check authentication system health.
+///
+/// Takes the auth mutex directly (rather than the whole `AppState`) so this
+/// real check -- and the readiness/detailed-health endpoints that depend on
+/// it -- can be exercised in tests against a bare `AuthState` without also
+/// having to stand up a real `VoirsPipeline`.
+fn check_auth_health(auth: &Mutex<AuthState>) -> (String, String) {
+    // Recover from a poisoned lock rather than panicking: a health/readiness
+    // endpoint must never crash the process just because some other request
+    // handler panicked while holding this mutex. The recovered guard's data
+    // is still meaningful for a read-only health snapshot.
+    let auth_state = auth.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let api_key_count = auth_state.api_keys.len();
     let active_buckets = auth_state.rate_limits.len();
@@ -1789,5 +1801,98 @@ mod tests {
         let encoded = base64::encode(data);
         assert!(!encoded.is_empty());
         assert!(encoded.is_ascii());
+    }
+
+    fn empty_auth_state() -> AuthState {
+        AuthState {
+            api_keys: HashMap::new(),
+            rate_limits: HashMap::new(),
+            usage_stats: HashMap::new(),
+            access_logs: Vec::new(),
+        }
+    }
+
+    // Regression tests for the "readiness probe hardcodes auth_ready = true"
+    // finding: `check_auth_health` (which both `readiness_handler` and the
+    // detailed health endpoint now derive their auth status from) must
+    // really inspect the auth state it's given, not report "healthy"
+    // unconditionally. Constructed directly against `Mutex<AuthState>`
+    // (rather than a full `AppState`, which would require standing up a
+    // real `VoirsPipeline`) so these run fast and offline.
+
+    #[test]
+    fn check_auth_health_is_healthy_for_a_normal_auth_state() {
+        let mut auth_state = empty_auth_state();
+        auth_state.api_keys.insert(
+            "test-key".to_string(),
+            ApiKeyConfig {
+                key: "test-key".to_string(),
+                name: "Test Key".to_string(),
+                rate_limit: 100,
+                enabled: true,
+                created_at: SystemTime::now(),
+            },
+        );
+        let auth = Mutex::new(auth_state);
+
+        let (status, message) = check_auth_health(&auth);
+        assert_eq!(status, "healthy");
+        assert!(
+            message.contains("1 API keys"),
+            "message should reflect the real key count: {message}"
+        );
+    }
+
+    #[test]
+    fn check_auth_health_reports_degraded_when_access_logs_are_unbounded() {
+        // Real, input-dependent behavior: this must actually count
+        // `access_logs`, not report "healthy" regardless of content (which
+        // is exactly what the old hardcoded `auth_ready = true` did one
+        // layer up, in `readiness_handler`).
+        let mut auth_state = empty_auth_state();
+        auth_state.access_logs = (0..50_001)
+            .map(|i| AccessLogEntry {
+                timestamp: SystemTime::now(),
+                ip_address: "127.0.0.1".to_string(),
+                api_key: None,
+                method: "POST".to_string(),
+                path: "/api/v1/synthesize".to_string(),
+                status_code: 200,
+                response_time_ms: i,
+                bytes_transferred: 0,
+            })
+            .collect();
+        let auth = Mutex::new(auth_state);
+
+        let (status, _message) = check_auth_health(&auth);
+        assert_eq!(
+            status, "degraded",
+            "an auth state with an unbounded access log must not report healthy"
+        );
+    }
+
+    #[test]
+    fn check_auth_health_differs_between_healthy_and_degraded_states() {
+        // Directly proves this is a real function of its input rather than
+        // a constant: two different real states must be able to produce two
+        // different real verdicts.
+        let healthy = Mutex::new(empty_auth_state());
+        let mut degraded_state = empty_auth_state();
+        degraded_state.rate_limits = (0..10_001)
+            .map(|i| {
+                (
+                    format!("bucket-{i}"),
+                    RateLimitBucket {
+                        requests: 1,
+                        window_start: Instant::now(),
+                        limit: 100,
+                    },
+                )
+            })
+            .collect();
+        let degraded = Mutex::new(degraded_state);
+
+        assert_eq!(check_auth_health(&healthy).0, "healthy");
+        assert_eq!(check_auth_health(&degraded).0, "degraded");
     }
 }

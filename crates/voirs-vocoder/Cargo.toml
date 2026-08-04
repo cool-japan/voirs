@@ -19,8 +19,15 @@ crate-type = ["lib"]
 
 [dependencies]
 # ML/Tensor libraries
-candle-core = { workspace = true, optional = true }
-candle-nn = { workspace = true, optional = true }
+# candle-core/candle-nn are hard (non-optional) dependencies: model modules
+# (e.g. models/diffwave/*, models/vits2/*, backends/candle.rs) reference
+# candle_core/candle_nn types unconditionally with no feature gate, so the
+# crate has never actually been able to compile without them. Making that
+# explicit here (instead of advertising a "candle" feature that silently
+# can't be disabled) is the honest fix; see the (now-empty) `candle` feature
+# below for backward compatibility.
+candle-core.workspace = true
+candle-nn.workspace = true
 oxionnx = { workspace = true, optional = true }
 safetensors.workspace = true
 
@@ -89,7 +96,23 @@ criterion.workspace = true
 
 [features]
 default = ["candle"]
-candle = ["dep:candle-core", "dep:candle-nn"]
+# candle-core/candle-nn are now hard dependencies (see above), so this
+# feature no longer controls whether the crate *links* candle - it is always
+# linked. It is kept (non-empty, unlike voirs-acoustic's now-fully-unified
+# equivalent) because a large fraction of the model code
+# (models/{bigvgan,univnet,hifigan}/*, backends/candle.rs, ...) still uses
+# `#[cfg(feature = "candle")]`, in two different ways depending on the
+# module: some (backends/candle.rs, models/hifigan/*) pair it with a real
+# `cfg(not(feature = "candle"))` fallback/stub implementation of the same
+# type, so disabling the feature switches to that fallback; others
+# (models/bigvgan/*, models/univnet/generator+lvc) have no fallback at all -
+# disabling the feature compiles the candle-backed type out entirely (the
+# gate is on the `use`/re-export, not an alternate implementation). Either
+# way it does not remove the candle-core/candle-nn dependency itself.
+# Existing `--features candle` usages (this crate's own
+# [[example]]/[[bench]] entries, downstream Cargo.toml files) keep resolving
+# unchanged.
+candle = []
 # Optional audio encoders: Opus (libopus, C-FFI), LAME MP3 (C-FFI), and
 # Pure-Rust FLAC (OxiAudio, via flacenc). OFF by default so the default build
 # stays Pure Rust (COOLJAPAN Pure-Rust policy). Enables MP3 / Opus / compressed
@@ -97,7 +120,7 @@ candle = ["dep:candle-core", "dep:candle-nn"]
 ffi-codecs = ["dep:opus", "dep:oxiaudio-core", "dep:oxiaudio-encode", "dep:mp3lame-encoder"]
 onnx = ["dep:oxionnx"]
 gpu = ["metal", "oxionnx?/gpu"]  # On macOS, use Metal; on Linux/Windows would use cuda
-cuda = ["candle-core?/cuda", "oxionnx?/gpu"]
+cuda = ["candle-core/cuda", "oxionnx?/gpu"]
 metal = ["dep:metal-rs"]  # Only available on macOS
 coreml = []  # oxionnx does not have a separate coreml feature; GPU via oxionnx/gpu
 asio = ["cpal/asio"]  # Windows ASIO low-latency audio (requires ASIO SDK)

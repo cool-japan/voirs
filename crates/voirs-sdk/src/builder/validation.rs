@@ -447,6 +447,13 @@ impl VoirsPipelineBuilder {
     }
 
     /// Check if CUDA is available
+    ///
+    /// The underlying `nvidia-smi` probe runs at most once per process
+    /// (cached in a [`std::sync::OnceLock`]) under a hard timeout via
+    /// [`crate::process_probe::run_with_timeout`], so a slow or wedged
+    /// `nvidia-smi` can never hang `VoirsPipelineBuilder::build()` (which
+    /// calls this synchronously, from inside an async context, through
+    /// `validate()` -> `validate_device()` / `validate_resource_requirements()`).
     fn is_cuda_available(&self) -> bool {
         // Skip expensive checks in explicit test mode or when validation is disabled
         if !self.validation_enabled || self.test_mode {
@@ -454,69 +461,16 @@ impl VoirsPipelineBuilder {
             return false;
         }
 
-        // Check for CUDA availability through multiple methods
-
-        // Method 1: Check for nvidia-smi with timeout
-        if let Ok(output) = std::process::Command::new("nvidia-smi")
-            .arg("--query-gpu=count")
-            .arg("--format=csv,noheader,nounits")
-            .output()
-        {
-            if output.status.success() {
-                if let Ok(count_str) = String::from_utf8(output.stdout) {
-                    if let Ok(gpu_count) = count_str.trim().parse::<u32>() {
-                        tracing::debug!("Found {} CUDA GPU(s)", gpu_count);
-                        return gpu_count > 0;
-                    }
-                }
-            }
-        }
-
-        // Method 2: Check for CUDA runtime library
-        #[cfg(unix)]
-        {
-            let cuda_lib_paths = [
-                "/usr/local/cuda/lib64/libcudart.so",
-                "/usr/lib/x86_64-linux-gnu/libcudart.so",
-                "/opt/cuda/lib64/libcudart.so",
-            ];
-
-            for path in &cuda_lib_paths {
-                if std::path::Path::new(path).exists() {
-                    tracing::debug!("Found CUDA runtime library at {}", path);
-                    return true;
-                }
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            // Check for CUDA on Windows
-            if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
-                let cudart_path = std::path::Path::new(&cuda_path)
-                    .join("bin")
-                    .join("cudart64_*.dll");
-
-                if let Ok(entries) = glob::glob(&cudart_path.to_string_lossy()) {
-                    if entries.count() > 0 {
-                        tracing::debug!("Found CUDA runtime on Windows");
-                        return true;
-                    }
-                }
-            }
-        }
-
-        // Method 3: Environment variable check
-        if std::env::var("CUDA_VISIBLE_DEVICES").is_ok() {
-            tracing::debug!("CUDA_VISIBLE_DEVICES environment variable found");
-            return true;
-        }
-
-        tracing::debug!("CUDA not detected");
-        false
+        static CUDA_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *CUDA_AVAILABLE.get_or_init(probe_cuda_available)
     }
 
     /// Check if MPS (Metal Performance Shaders) is available
+    ///
+    /// Cached and timeout-guarded for the same reason as
+    /// [`Self::is_cuda_available`]: the `sw_vers` probe it uses on
+    /// non-Apple-Silicon macOS is a subprocess call that must never be
+    /// allowed to block the build path indefinitely.
     fn is_mps_available(&self) -> bool {
         // Skip expensive checks in explicit test mode or when validation is disabled
         if !self.validation_enabled || self.test_mode {
@@ -524,41 +478,8 @@ impl VoirsPipelineBuilder {
             return false;
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            // Check if we're on Apple Silicon (ARM64)
-            if cfg!(target_arch = "aarch64") {
-                // MPS is available on Apple Silicon Macs (M1, M2, M3, etc.)
-                tracing::debug!("MPS available on Apple Silicon");
-                return true;
-            }
-
-            // Check for macOS version that supports MPS on Intel Macs
-            if let Ok(output) = std::process::Command::new("sw_vers")
-                .args(["-productVersion"])
-                .output()
-            {
-                if let Ok(version_str) = String::from_utf8(output.stdout) {
-                    let version = version_str.trim();
-                    // Parse version (e.g., "12.3.1" -> [12, 3, 1])
-                    let parts: Vec<u32> =
-                        version.split('.').filter_map(|s| s.parse().ok()).collect();
-
-                    // MPS requires macOS 12.3+ for Intel Macs with discrete GPUs
-                    if parts.len() >= 2 {
-                        let major = parts[0];
-                        let minor = parts[1];
-                        if major > 12 || (major == 12 && minor >= 3) {
-                            tracing::debug!("MPS potentially available on macOS {}", version);
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        tracing::debug!("MPS not available");
-        false
+        static MPS_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *MPS_AVAILABLE.get_or_init(probe_mps_available)
     }
 
     /// Check if device format is valid
@@ -1002,6 +923,134 @@ impl VoirsPipelineBuilder {
     }
 }
 
+/// Probe CUDA availability. Runs `nvidia-smi` under a hard timeout (see
+/// [`crate::process_probe::run_with_timeout`]) before falling back to
+/// filesystem/environment checks that need no subprocess. Called at most
+/// once per process; the result is cached by the caller.
+fn probe_cuda_available() -> bool {
+    // Method 1: Check for nvidia-smi with a hard timeout
+    let mut command = std::process::Command::new("nvidia-smi");
+    command
+        .arg("--query-gpu=count")
+        .arg("--format=csv,noheader,nounits");
+    match crate::process_probe::run_with_timeout(
+        &mut command,
+        crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+    ) {
+        Ok(Some(output)) if output.status.success() => {
+            if let Ok(count_str) = String::from_utf8(output.stdout) {
+                if let Ok(gpu_count) = count_str.trim().parse::<u32>() {
+                    tracing::debug!("Found {} CUDA GPU(s)", gpu_count);
+                    return gpu_count > 0;
+                }
+            }
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            tracing::warn!(
+                "nvidia-smi did not respond within the probe timeout; \
+                 falling back to filesystem/environment CUDA detection"
+            );
+        }
+        Err(_) => {}
+    }
+
+    // Method 2: Check for CUDA runtime library
+    #[cfg(unix)]
+    {
+        let cuda_lib_paths = [
+            "/usr/local/cuda/lib64/libcudart.so",
+            "/usr/lib/x86_64-linux-gnu/libcudart.so",
+            "/opt/cuda/lib64/libcudart.so",
+        ];
+
+        for path in &cuda_lib_paths {
+            if std::path::Path::new(path).exists() {
+                tracing::debug!("Found CUDA runtime library at {}", path);
+                return true;
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // Check for CUDA on Windows
+        if let Ok(cuda_path) = std::env::var("CUDA_PATH") {
+            let cudart_path = std::path::Path::new(&cuda_path)
+                .join("bin")
+                .join("cudart64_*.dll");
+
+            if let Ok(entries) = glob::glob(&cudart_path.to_string_lossy()) {
+                if entries.count() > 0 {
+                    tracing::debug!("Found CUDA runtime on Windows");
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Method 3: Environment variable check
+    if std::env::var("CUDA_VISIBLE_DEVICES").is_ok() {
+        tracing::debug!("CUDA_VISIBLE_DEVICES environment variable found");
+        return true;
+    }
+
+    tracing::debug!("CUDA not detected");
+    false
+}
+
+/// Probe MPS (Metal Performance Shaders) availability. Apple Silicon short-
+/// circuits without a subprocess call; Intel macOS runs `sw_vers` under a
+/// hard timeout. Called at most once per process; the result is cached by
+/// the caller.
+fn probe_mps_available() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // Check if we're on Apple Silicon (ARM64)
+        if cfg!(target_arch = "aarch64") {
+            // MPS is available on Apple Silicon Macs (M1, M2, M3, etc.)
+            tracing::debug!("MPS available on Apple Silicon");
+            return true;
+        }
+
+        // Check for macOS version that supports MPS on Intel Macs
+        let mut command = std::process::Command::new("sw_vers");
+        command.args(["-productVersion"]);
+        match crate::process_probe::run_with_timeout(
+            &mut command,
+            crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+        ) {
+            Ok(Some(output)) => {
+                if let Ok(version_str) = String::from_utf8(output.stdout) {
+                    let version = version_str.trim();
+                    // Parse version (e.g., "12.3.1" -> [12, 3, 1])
+                    let parts: Vec<u32> =
+                        version.split('.').filter_map(|s| s.parse().ok()).collect();
+
+                    // MPS requires macOS 12.3+ for Intel Macs with discrete GPUs
+                    if parts.len() >= 2 {
+                        let major = parts[0];
+                        let minor = parts[1];
+                        if major > 12 || (major == 12 && minor >= 3) {
+                            tracing::debug!("MPS potentially available on macOS {}", version);
+                            return true;
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    "sw_vers did not respond within the probe timeout; assuming MPS unavailable"
+                );
+            }
+            Err(_) => {}
+        }
+    }
+
+    tracing::debug!("MPS not available");
+    false
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1093,5 +1142,37 @@ mod tests {
         assert!(builder.is_valid_device_format("mps:0"));
         assert!(!builder.is_valid_device_format("invalid"));
         assert!(!builder.is_valid_device_format(""));
+    }
+
+    /// Regression test: `is_cuda_available`/`is_mps_available` are called
+    /// synchronously from `VoirsPipelineBuilder::build()` (via `validate()`
+    /// -> `validate_device()` / `validate_resource_requirements()`) and used
+    /// to shell out to `nvidia-smi` / `sw_vers` with no timeout, so a
+    /// slow/wedged subprocess could hang `build()` indefinitely. Call the
+    /// underlying probe functions directly (bypassing the
+    /// test-mode/validation-disabled short circuits, so the real subprocess
+    /// path actually runs) on background threads and require each to report
+    /// back within a generous bound.
+    #[test]
+    fn device_probe_functions_return_within_bounded_time() {
+        assert_probe_returns_within_bound("cuda", super::probe_cuda_available);
+        assert_probe_returns_within_bound("mps", super::probe_mps_available);
+    }
+
+    /// Run `probe` on a background thread and panic unless it reports back
+    /// within 10 seconds.
+    fn assert_probe_returns_within_bound(name: &str, probe: fn() -> bool) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(probe());
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(_available) => {}
+            Err(_) => panic!(
+                "{name} availability probe did not return within the 10s bound; \
+                 the subprocess timeout guard has regressed"
+            ),
+        }
     }
 }

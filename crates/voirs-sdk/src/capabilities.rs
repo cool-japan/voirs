@@ -96,8 +96,12 @@ impl CapabilityManager {
 
         #[cfg(target_os = "macos")]
         {
-            use std::process::Command;
-            if let Ok(output) = Command::new("sysctl").arg("-n").arg("hw.memsize").output() {
+            let mut command = std::process::Command::new("sysctl");
+            command.arg("-n").arg("hw.memsize");
+            if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+                &mut command,
+                crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+            ) {
                 if let Ok(size_str) = String::from_utf8(output.stdout) {
                     if let Ok(bytes) = size_str.trim().parse::<u64>() {
                         return Ok(bytes / (1024 * 1024)); // Convert bytes to MB
@@ -164,10 +168,12 @@ impl CapabilityManager {
         // Platform-specific GPU memory detection
         #[cfg(target_os = "linux")]
         {
-            if let Ok(output) = std::process::Command::new("nvidia-smi")
-                .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
-                .output()
-            {
+            let mut command = std::process::Command::new("nvidia-smi");
+            command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
+            if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+                &mut command,
+                crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+            ) {
                 if let Ok(memory_str) = String::from_utf8(output.stdout) {
                     if let Ok(memory_mb) = memory_str.trim().parse::<u64>() {
                         return Some(memory_mb);
@@ -185,10 +191,12 @@ impl CapabilityManager {
         // Simple heuristic: assume SSD if system is modern enough
         #[cfg(target_os = "linux")]
         {
-            if let Ok(output) = std::process::Command::new("lsblk")
-                .args(["-d", "-o", "ROTA"])
-                .output()
-            {
+            let mut command = std::process::Command::new("lsblk");
+            command.args(["-d", "-o", "ROTA"]);
+            if let Ok(Some(output)) = crate::process_probe::run_with_timeout(
+                &mut command,
+                crate::process_probe::DEFAULT_PROBE_TIMEOUT,
+            ) {
                 if let Ok(rota_str) = String::from_utf8(output.stdout) {
                     // If any drive shows '0' (non-rotating), assume SSD
                     return rota_str.contains('0');

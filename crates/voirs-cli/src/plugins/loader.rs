@@ -1,13 +1,13 @@
 //! Plugin loading and dynamic library management.
 
 use super::{Plugin, PluginError, PluginManifest, PluginResult, PluginType};
-use libloading::{Library, Symbol};
+use libloading::Library;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use wasmtime::{Engine, Instance, Module, Store, TypedFunc};
+use wasmtime::{Engine, Instance, Module, Store};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoaderConfig {
@@ -350,54 +350,36 @@ impl PluginLoader {
         Ok((plugin as Arc<dyn Plugin>, plugin_type))
     }
 
+    /// Native (`.dll`/`.so`/`.dylib`) plugin loading is intentionally not
+    /// implemented -- it fails closed with a typed error rather than
+    /// resurrecting the previous unsound approach or substituting a mock.
+    ///
+    /// The earlier implementation here loaded a `create_plugin` symbol
+    /// returning a raw `*mut dyn Plugin` and reconstructed an
+    /// `Arc<dyn Plugin>` from it via `Arc::from_raw`. That is unsound:
+    /// `dyn Trait` representation (the vtable layout in particular) is not
+    /// part of Rust's stable ABI, so a trait object manufactured by a
+    /// *different* compilation (a separately built plugin `cdylib`,
+    /// potentially with a different rustc version, crate version, or
+    /// codegen flags) crossing the FFI boundary this way is undefined
+    /// behavior even when it happens to work in practice.
+    ///
+    /// A sound design needs a real, versioned, `#[repr(C)]` ABI: the plugin
+    /// exports a single symbol (e.g. `extern "C" fn voirs_plugin_entry() ->
+    /// *const VTable`) where `VTable` is a plain-data struct of
+    /// C-compatible function pointers (no `dyn Trait` ever crosses the
+    /// boundary) plus an ABI version field this loader validates before
+    /// calling anything through it. That contract does not exist yet.
     async fn load_native_plugin(
         &self,
         path: &Path,
         manifest: &PluginManifest,
     ) -> PluginResult<(Arc<dyn Plugin>, LoadedPluginType)> {
-        let library = unsafe {
-            Library::new(path).map_err(|e| {
-                PluginError::LoadingFailed(format!("Failed to load native library: {}", e))
-            })?
-        };
-
-        let library = Arc::new(library);
-
-        // Look for the plugin factory function
-        let create_plugin: Symbol<unsafe extern "C" fn() -> *mut dyn Plugin> = unsafe {
-            library.get(b"create_plugin").map_err(|e| {
-                PluginError::LoadingFailed(format!(
-                    "Plugin factory function 'create_plugin' not found: {}",
-                    e
-                ))
-            })?
-        };
-
-        let plugin_ptr = unsafe { create_plugin() };
-        if plugin_ptr.is_null() {
-            return Err(PluginError::LoadingFailed(
-                "Plugin factory returned null".to_string(),
-            ));
-        }
-
-        let plugin = unsafe { Arc::from_raw(plugin_ptr) };
-
-        let plugin_type = LoadedPluginType::Native {
-            library: library.clone(),
-        };
-
-        Ok((plugin, plugin_type))
+        Err(native_plugin_unsupported(path, &manifest.name))
     }
 
     fn create_builtin_plugin(&self, manifest: &PluginManifest) -> PluginResult<Arc<dyn Plugin>> {
-        match manifest.plugin_type {
-            PluginType::Effect => Ok(Arc::new(super::effects::ReverbEffectPlugin::new())),
-            PluginType::Voice => Ok(Arc::new(super::voices::DefaultVoicePlugin::new(
-                &manifest.name,
-            ))),
-            PluginType::Processor => Ok(Arc::new(TextProcessorPlugin::new(&manifest.name))),
-            PluginType::Extension => Ok(Arc::new(UtilityExtensionPlugin::new(&manifest.name))),
-        }
+        Ok(Arc::from(build_builtin_plugin(manifest)))
     }
 
     pub async fn unload_plugin(&mut self, name: &str) -> PluginResult<()> {
@@ -446,6 +428,66 @@ pub struct LoaderStats {
     pub search_paths: usize,
 }
 
+/// The typed, honest error for the not-yet-implemented native plugin ABI.
+/// See `PluginLoader::load_native_plugin`'s doc comment for the full
+/// rationale (in short: the previous raw-`dyn Trait`-over-FFI approach is
+/// unsound, and no mock is substituted in its place).
+pub(crate) fn native_plugin_unsupported(path: &Path, plugin_name: &str) -> PluginError {
+    PluginError::NotSupported(format!(
+        "native plugin loading for '{}' (entry point '{}') is not implemented: it requires a \
+         versioned `voirs_plugin_entry` C ABI that does not exist yet; no mock or unsound \
+         fallback is used in its place",
+        plugin_name,
+        path.display()
+    ))
+}
+
+/// Construct a "builtin" plugin instance for `manifest.plugin_type`. This is
+/// the fallback for any plugin manifest whose entry point isn't a
+/// recognized dynamic-library/WebAssembly extension, and it backs both
+/// `PluginLoader` (above) and `PluginManager` (`plugins/mod.rs`), which
+/// shares this dispatch instead of re-implementing it.
+pub(crate) fn build_builtin_plugin(manifest: &PluginManifest) -> Box<dyn Plugin> {
+    match manifest.plugin_type {
+        PluginType::Effect => Box::new(super::effects::ReverbEffectPlugin::new()),
+        PluginType::Voice => Box::new(super::voices::DefaultVoicePlugin::new(&manifest.name)),
+        PluginType::Processor => Box::new(TextProcessorPlugin::new(&manifest.name)),
+        PluginType::Extension => Box::new(UtilityExtensionPlugin::new(&manifest.name)),
+    }
+}
+
+/// Compile `path` as a WebAssembly module and wrap it as a `Plugin`. Shared
+/// by `PluginLoader` (which additionally tracks the `Engine`/`Module` handles
+/// for its own cache bookkeeping via `LoadedPluginType::WebAssembly`) and
+/// `PluginManager` (`plugins/mod.rs`), which only needs the boxed plugin.
+pub(crate) async fn build_wasm_plugin(
+    path: &Path,
+    manifest: &PluginManifest,
+    engine: &Arc<Engine>,
+) -> PluginResult<Box<dyn Plugin>> {
+    let wasm_bytes = tokio::fs::read(path).await.map_err(|e| {
+        PluginError::LoadingFailed(format!(
+            "Failed to read WASM file '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    let module = Module::new(engine, &wasm_bytes).map_err(|e| {
+        PluginError::LoadingFailed(format!(
+            "Failed to compile WASM module '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    Ok(Box::new(WasmPlugin::new(
+        manifest.clone(),
+        engine.clone(),
+        Arc::new(module),
+    )))
+}
+
 // WebAssembly plugin wrapper
 pub struct WasmPlugin {
     manifest: PluginManifest,
@@ -466,30 +508,45 @@ impl WasmPlugin {
         Store::new(&self.engine, ())
     }
 
-    fn call_wasm_function(
-        &self,
-        function_name: &str,
-        args: &[wasmtime::Val],
-    ) -> PluginResult<Vec<wasmtime::Val>> {
+    /// Call a zero-argument, `i32`-returning function exported by the
+    /// loaded WASM module by name, and return the real value it computed.
+    ///
+    /// This is the plugin ABI convention `WasmPlugin` implements throughout:
+    /// `initialize`, `cleanup`, and (via `execute`) any command name are all
+    /// resolved this way, each instantiated fresh so plugins can't leak
+    /// state between unrelated calls. Richer argument/return marshalling
+    /// would require a linear-memory calling convention the guest module
+    /// must also implement (e.g. exchanging JSON through `alloc`/`dealloc`
+    /// exports); until that ABI exists, commands are zero-argument exports
+    /// that communicate through their own return value and side effects.
+    fn call_wasm_function(&self, function_name: &str) -> PluginResult<i32> {
         let mut store = self.create_store();
         let instance = Instance::new(&mut store, &self.module, &[]).map_err(|e| {
-            PluginError::ExecutionFailed(format!("Failed to instantiate WASM module: {}", e))
+            PluginError::ExecutionFailed(format!(
+                "Failed to instantiate WASM module '{}': {}",
+                self.manifest.name, e
+            ))
         })?;
 
+        // Distinguished from `ExecutionFailed` (below) so `initialize`/
+        // `cleanup` can tell "this optional export isn't defined" (fine)
+        // apart from "the module failed to instantiate" or "the export
+        // trapped" (both real failures that must surface, not be swallowed).
         let func = instance
             .get_typed_func::<(), i32>(&mut store, function_name)
             .map_err(|e| {
-                PluginError::ExecutionFailed(format!(
-                    "Function '{}' not found: {}",
-                    function_name, e
+                PluginError::NotFound(format!(
+                    "function '{}' in WASM module '{}': {}",
+                    function_name, self.manifest.name, e
                 ))
             })?;
 
-        let result = func.call(&mut store, ()).map_err(|e| {
-            PluginError::ExecutionFailed(format!("WASM function call failed: {}", e))
-        })?;
-
-        Ok(vec![wasmtime::Val::I32(result)])
+        func.call(&mut store, ()).map_err(|e| {
+            PluginError::ExecutionFailed(format!(
+                "WASM function '{}' call failed: {}",
+                function_name, e
+            ))
+        })
     }
 }
 
@@ -511,40 +568,48 @@ impl Plugin for WasmPlugin {
     }
 
     fn initialize(&mut self, _config: &serde_json::Value) -> PluginResult<()> {
-        // Call WASM initialization function if available
-        match self.call_wasm_function("initialize", &[]) {
+        // The "initialize" export is optional: a module that doesn't define
+        // it is not an error, but if it *is* defined and genuinely traps or
+        // the module fails to instantiate, that failure is real and must
+        // surface -- only "function not found" is swallowed here.
+        match self.call_wasm_function("initialize") {
             Ok(_) => Ok(()),
-            Err(_) => {
-                // Initialize function is optional
-                Ok(())
-            }
+            Err(PluginError::NotFound(_)) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 
     fn cleanup(&mut self) -> PluginResult<()> {
-        // Call WASM cleanup function if available
-        match self.call_wasm_function("cleanup", &[]) {
+        // "cleanup" is likewise optional; see `initialize` above.
+        match self.call_wasm_function("cleanup") {
             Ok(_) => Ok(()),
-            Err(_) => {
-                // Cleanup function is optional
-                Ok(())
-            }
+            Err(PluginError::NotFound(_)) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 
     fn get_capabilities(&self) -> Vec<String> {
-        // For now, return basic capabilities
-        // In a real implementation, this would query the WASM module
-        vec!["execute".to_string()]
+        // Real capabilities: the module's actual exported function names,
+        // read from the compiled module rather than a hardcoded list.
+        self.module
+            .exports()
+            .filter(|export| matches!(export.ty(), wasmtime::ExternType::Func(_)))
+            .map(|export| export.name().to_string())
+            .collect()
     }
 
-    fn execute(&self, command: &str, args: &serde_json::Value) -> PluginResult<serde_json::Value> {
-        // For now, return a basic response
-        // In a real implementation, this would call the appropriate WASM function
+    fn execute(&self, command: &str, _args: &serde_json::Value) -> PluginResult<serde_json::Value> {
+        // Look up and call the export named after `command`, returning the
+        // value the guest module actually computed. `_args` cannot be
+        // threaded through this ABI (see `call_wasm_function`'s doc
+        // comment); commands that need input are expected to encode it in
+        // the export name/design rather than receive it here, so this never
+        // echoes `_args` back as if it had been consumed.
+        let result = self.call_wasm_function(command)?;
         Ok(serde_json::json!({
             "status": "ok",
             "command": command,
-            "args": args,
+            "result": result,
             "plugin": self.name(),
             "type": "wasm"
         }))

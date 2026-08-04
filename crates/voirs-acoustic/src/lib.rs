@@ -57,7 +57,7 @@ pub enum AcousticError {
     FileError { message: String },
 
     /// Backend-specific error from Candle framework
-    #[cfg(feature = "candle")]
+    /// (candle-core is a hard dependency; see voirs-acoustic/Cargo.toml)
     #[error("Candle error: {0}")]
     CandleError(#[from] candle_core::Error),
 
@@ -87,7 +87,6 @@ impl Clone for AcousticError {
             AcousticError::FileError { message } => AcousticError::FileError {
                 message: message.clone(),
             },
-            #[cfg(feature = "candle")]
             AcousticError::CandleError(err) => AcousticError::InferenceError {
                 message: format!("Candle error: {err}"),
             },

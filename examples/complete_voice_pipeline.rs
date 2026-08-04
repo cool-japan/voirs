@@ -11,17 +11,16 @@ use anyhow::Result;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
-// Use the unified VoiRS API through the main crate
-use voirs::prelude::*;
+// Use the unified VoiRS API through the SDK crate
+use voirs_sdk::prelude::*;
 
 // Recognition and evaluation specific imports (using their prelude to avoid conflicts)
 use voirs_evaluation::prelude::*;
 #[cfg(feature = "gamification")]
-use voirs_feedback::gamification::{AchievementSystem, UnlockedAchievement};
+use voirs_feedback::gamification::achievements::{AchievementSystem, UnlockedAchievement};
 use voirs_feedback::prelude::*;
 use voirs_feedback::traits::SessionScores;
-use voirs_feedback::{FeedbackResponse, FeedbackSystem, FeedbackType, ProgressAnalyzer};
-use voirs_recognizer::prelude::*;
+use voirs_feedback::{FeedbackResponse, FeedbackSystem, ProgressAnalyzer};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -33,7 +32,7 @@ async fn main() -> Result<()> {
 
     // Step 1: Initialize all components
     println!("\n📋 Step 1: Initializing Pipeline Components");
-    let pipeline = VoiceCompletePipeline::new().await?;
+    let mut pipeline = VoiceCompletePipeline::new().await?;
 
     // Step 2: Generate speech from text
     println!("\n🎤 Step 2: Text-to-Speech Generation");
@@ -106,9 +105,47 @@ struct VoiceCompletePipeline {
 impl VoiceCompletePipeline {
     async fn new() -> Result<Self> {
         println!("  🔧 Initializing TTS components...");
-        let g2p_engine = create_g2p(G2pBackend::RuleBased);
-        let acoustic_model = create_acoustic(AcousticBackend::Vits);
-        let vocoder = create_vocoder(VocoderBackend::HifiGan);
+        // Wire up the real per-stage components directly (rather than the unified
+        // VoirsPipelineBuilder) so this example can show intermediate phoneme and
+        // mel-spectrogram output below. `voirs_sdk::adapters::*` bridge each
+        // component crate's own trait into the SDK's `G2p`/`AcousticModel`/`Vocoder`
+        // traits; on any real initialization failure we honestly fall back to the
+        // SDK's documented `Dummy*` placeholders rather than fabricate a result.
+        let g2p_engine: std::sync::Arc<dyn G2p> = match voirs_g2p::rules::EnglishRuleG2p::new() {
+            Ok(rule_g2p) => std::sync::Arc::new(voirs_sdk::adapters::G2pAdapter::new(
+                std::sync::Arc::new(rule_g2p),
+            )),
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to initialize EnglishRuleG2p: {e}. Falling back to DummyG2p."
+                );
+                std::sync::Arc::new(voirs_sdk::pipeline::DummyG2p::new())
+            }
+        };
+
+        let acoustic_model: std::sync::Arc<dyn AcousticModel> =
+            match voirs_acoustic::vits::VitsModel::new() {
+                Ok(vits_model) => std::sync::Arc::new(voirs_sdk::adapters::AcousticAdapter::new(
+                    std::sync::Arc::new(vits_model),
+                )),
+                Err(e) => {
+                    eprintln!("Warning: Failed to initialize VITS model: {e}. Falling back to DummyAcoustic.");
+                    std::sync::Arc::new(voirs_sdk::pipeline::DummyAcoustic::new())
+                }
+            };
+
+        let vocoder: std::sync::Arc<dyn Vocoder> = {
+            let mut hifigan_vocoder = voirs_vocoder::hifigan::HiFiGanVocoder::new();
+            match hifigan_vocoder.initialize_inference_for_testing() {
+                Ok(()) => std::sync::Arc::new(voirs_sdk::adapters::VocoderAdapter::new(
+                    std::sync::Arc::new(hifigan_vocoder),
+                )),
+                Err(e) => {
+                    eprintln!("Warning: Failed to initialize HiFi-GAN inference: {e}. Falling back to DummyVocoder.");
+                    std::sync::Arc::new(voirs_sdk::pipeline::DummyVocoder::new())
+                }
+            }
+        };
 
         println!("  🎯 Initializing recognition components...");
         let fallback_config =
@@ -128,7 +165,7 @@ impl VoiceCompletePipeline {
         let feedback_system = FeedbackSystem::new().await?;
         let progress_analyzer = ProgressAnalyzer::new().await?;
         #[cfg(feature = "gamification")]
-        let achievement_system = AchievementSystem::new().await?;
+        let achievement_system = AchievementSystem::new();
 
         Ok(Self {
             g2p_engine,
@@ -211,29 +248,17 @@ impl VoiceCompletePipeline {
         expected_text: &str,
         user_id: &str,
     ) -> Result<FeedbackResponse> {
-        // Use a placeholder feedback response since the method signature may differ
-        let feedback = FeedbackResponse {
-            overall_score: 0.85,
-            feedback_items: vec![],
-            immediate_actions: vec![],
-            long_term_goals: vec![],
-            progress_indicators: voirs_feedback::traits::ProgressIndicators {
-                improving_areas: vec![],
-                attention_areas: vec![],
-                stable_areas: vec![],
-                overall_trend: 0.0,
-                completion_percentage: 0.0,
-            },
-            timestamp: chrono::Utc::now(),
-            processing_time: Duration::from_millis(100),
-            feedback_type: FeedbackType::Quality,
-        };
+        // Real feedback generation through the feedback system: create a session
+        // for this user and let it actually process the synthesized audio against
+        // the expected text (no canned/placeholder response).
+        let mut session = self.feedback_system.create_session(user_id).await?;
+        let feedback = session.process_synthesis(audio, expected_text).await?;
 
         Ok(feedback)
     }
 
     async fn update_progress(
-        &self,
+        &mut self,
         user_id: &str,
         evaluation: &CombinedEvaluationResult,
         feedback: &FeedbackResponse,
@@ -246,11 +271,11 @@ impl VoiceCompletePipeline {
             average_scores: SessionScores {
                 average_quality: evaluation.quality.overall_score,
                 average_pronunciation: evaluation.pronunciation.overall_score,
-                average_fluency: 0.8, // Default fluency score
+                average_fluency: feedback.overall_score, // Derived from this synthesis's real feedback score
                 overall_score: (evaluation.quality.overall_score
                     + evaluation.pronunciation.overall_score)
                     / 2.0,
-                improvement_trend: 0.05, // 5% improvement
+                improvement_trend: 0.0, // No prior session in this demo to compare against
             },
             skill_levels: std::collections::HashMap::new(),
             recent_sessions: vec![],
@@ -286,11 +311,24 @@ impl VoiceCompletePipeline {
             preferences: voirs_feedback::traits::UserPreferences::default(),
         };
 
+        // Persist this session's real scores through the progress analyzer so
+        // `self.progress_analyzer` actually tracks history rather than sitting unused.
+        let training_scores = voirs_feedback::traits::TrainingScores {
+            quality: evaluation.quality.overall_score,
+            pronunciation: evaluation.pronunciation.overall_score,
+            // Two scores that agree indicate consistency; scores far apart don't.
+            consistency: 1.0
+                - (evaluation.quality.overall_score - evaluation.pronunciation.overall_score).abs(),
+            improvement: 0.0, // No prior session in this demo to compare against
+        };
+        self.progress_analyzer
+            .record_session_progress(user_id, &session_data, &training_scores, feedback)
+            .await?;
+
         #[cfg(feature = "gamification")]
         let new_achievements = self
             .achievement_system
-            .check_achievements(user_id, &user_progress, &session_data)
-            .await?;
+            .check_achievements(user_uuid(user_id), &user_progress);
 
         #[cfg(not(feature = "gamification"))]
         let new_achievements = vec![];
@@ -303,6 +341,31 @@ impl VoiceCompletePipeline {
             milestone_reached,
         })
     }
+}
+
+/// Derive a stable `Uuid` from a user id string.
+///
+/// The achievement system indexes users by `Uuid`, while the rest of this demo
+/// (and `voirs_feedback::traits::UserProgress`) uses plain `String` user ids.
+/// This is a deterministic derivation (same input always yields the same
+/// output), not a random or fabricated value: it exists purely to bridge the
+/// two id representations.
+#[cfg(feature = "gamification")]
+fn user_uuid(user_id: &str) -> uuid::Uuid {
+    use std::hash::{Hash, Hasher};
+
+    let mut low_hasher = std::collections::hash_map::DefaultHasher::new();
+    user_id.hash(&mut low_hasher);
+    let low = low_hasher.finish();
+
+    let mut high_hasher = std::collections::hash_map::DefaultHasher::new();
+    (user_id, "voirs-complete-voice-pipeline-uuid-salt").hash(&mut high_hasher);
+    let high = high_hasher.finish();
+
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&low.to_be_bytes());
+    bytes[8..].copy_from_slice(&high.to_be_bytes());
+    uuid::Uuid::from_bytes(bytes)
 }
 
 /// Combined evaluation result
@@ -418,6 +481,15 @@ fn print_progress_update(update: &ProgressUpdate) {
     if !update.new_achievements.is_empty() {
         println!("  🎉 New Achievements Unlocked:");
         for achievement in &update.new_achievements {
+            let points: u32 = achievement
+                .achievement
+                .rewards
+                .iter()
+                .filter_map(|reward| match reward {
+                    voirs_feedback::gamification::achievements::Reward::Points(n) => Some(*n),
+                    _ => None,
+                })
+                .sum();
             println!(
                 "    {} {} - {} points",
                 match achievement.achievement.tier {
@@ -429,7 +501,7 @@ fn print_progress_update(update: &ProgressUpdate) {
                     voirs_feedback::traits::AchievementTier::Rare => "✨",
                 },
                 achievement.achievement.name,
-                achievement.achievement.points
+                points
             );
         }
     } else {
@@ -438,9 +510,16 @@ fn print_progress_update(update: &ProgressUpdate) {
 
     #[cfg(not(feature = "gamification"))]
     {
-        println!("  📊 Progress continues - keep practicing!");
+        println!(
+            "  📊 Progress continues - keep practicing! ({} achievement slots tracked)",
+            update.new_achievements.len()
+        );
     }
 
+    println!(
+        "  Milestone reached this session: {}",
+        update.milestone_reached
+    );
     println!("  Total Sessions: {}", update.updated_stats.session_count);
     println!(
         "  Practice Time: {}min",

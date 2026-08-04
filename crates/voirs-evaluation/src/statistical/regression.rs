@@ -90,13 +90,12 @@ pub fn multivariate_linear_regression(
         xty[i] = sum;
     }
 
-    let coefficients = solve_linear_system(&xtx, &xty, num_params).map_err(|_| {
-        EvaluationError::InvalidInput {
+    let coefficients =
+        solve_linear_system(&xtx, &xty, num_params).map_err(|_| EvaluationError::InvalidInput {
             message: "design matrix is singular (e.g. perfectly collinear predictors); \
                       cannot fit a unique regression"
                 .to_string(),
-        }
-    })?;
+        })?;
 
     // Fitted values and residuals.
     let fitted: Vec<f64> = (0..n)
@@ -106,13 +105,21 @@ pub fn multivariate_linear_regression(
                 .sum::<f64>()
         })
         .collect();
-    let residuals: Vec<f64> = y.iter().zip(fitted.iter()).map(|(&yi, &fi)| yi - fi).collect();
+    let residuals: Vec<f64> = y
+        .iter()
+        .zip(fitted.iter())
+        .map(|(&yi, &fi)| yi - fi)
+        .collect();
 
     let y_mean = mean(y);
     let ss_res: f64 = residuals.iter().map(|r| r * r).sum();
     let ss_tot: f64 = y.iter().map(|&yi| (yi - y_mean).powi(2)).sum();
 
-    let r_squared = if ss_tot > 1e-12 { 1.0 - ss_res / ss_tot } else { 1.0 };
+    let r_squared = if ss_tot > 1e-12 {
+        1.0 - ss_res / ss_tot
+    } else {
+        1.0
+    };
     let df_resid = (n - num_params) as f64;
     let adjusted_r_squared = if df_resid > 0.0 && ss_tot > 1e-12 {
         1.0 - (1.0 - r_squared) * (n - 1) as f64 / df_resid
@@ -209,8 +216,16 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|&xi| 2.0 + 3.0 * xi).collect();
         let result = multivariate_linear_regression(&[x], &y).unwrap();
 
-        assert!((result.intercept - 2.0).abs() < 1e-6, "intercept = {}", result.intercept);
-        assert!((result.slope - 3.0).abs() < 1e-6, "slope = {}", result.slope);
+        assert!(
+            (result.intercept - 2.0).abs() < 1e-6,
+            "intercept = {}",
+            result.intercept
+        );
+        assert!(
+            (result.slope - 3.0).abs() < 1e-6,
+            "slope = {}",
+            result.slope
+        );
         assert!(
             (result.r_squared - 1.0).abs() < 1e-6,
             "perfect fit should have R^2 ~= 1, got {}",

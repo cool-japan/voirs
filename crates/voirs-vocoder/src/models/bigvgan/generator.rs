@@ -3,8 +3,14 @@
 //! Implements the generator network with anti-aliased periodic activations
 //! and multi-periodicity composition for high-quality audio generation.
 
+// Every type below (`AMPBlock`, `ResBlock`, `MRF`, `BigVGANGenerator`, ...) is
+// only defined when the `candle` feature is enabled, so these imports are
+// only used in that configuration.
+#[cfg(feature = "candle")]
 use super::activation::{ActivationConfig, AntiAliasedSnakeActivation};
+#[cfg(feature = "candle")]
 use super::config::BigVGANConfig;
+#[cfg(feature = "candle")]
 use crate::Result;
 
 #[cfg(feature = "candle")]

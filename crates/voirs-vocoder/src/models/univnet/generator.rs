@@ -1,7 +1,13 @@
 //! UnivNet generator network architecture.
 
+// `ConditionalNorm`/`UnivNetGenerator` (below) are only defined when the
+// `candle` feature is enabled, and they are the only users of these imports
+// in this file.
+#[cfg(feature = "candle")]
 use super::config::UnivNetConfig;
+#[cfg(feature = "candle")]
 use super::lvc::ResLVCBlock;
+#[cfg(feature = "candle")]
 use crate::Result;
 
 #[cfg(feature = "candle")]

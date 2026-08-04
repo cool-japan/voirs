@@ -71,10 +71,10 @@
 //! ```bash
 //! # macOS with Neural Engine acceleration
 //! cargo run --example emotion_control_example --features="emotion,neural-engine"
-//! 
+//!
 //! # Linux with CUDA emotion processing
 //! cargo run --example emotion_control_example --features="emotion,cuda"
-//! 
+//!
 //! # Windows with DirectML emotions
 //! cargo run --example emotion_control_example --features="emotion,directml"
 //! ```
@@ -149,9 +149,9 @@
 //! - **Surprised**: Interactive responses, dynamic content
 
 use anyhow::{Context, Result};
-use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
-use voirs::*;
+use std::time::Instant;
+use tracing::info;
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -173,15 +173,9 @@ async fn main() -> Result<()> {
     let setup_start = Instant::now();
     info!("Creating emotional TTS components...");
 
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
     println!("🔧 Building emotional synthesis pipeline...");
+    // The unified builder wires the default G2P/acoustic model/vocoder automatically.
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .build()
         .await
         .context("Failed to build emotional speech synthesis pipeline")?;

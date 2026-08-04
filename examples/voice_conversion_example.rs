@@ -4,8 +4,7 @@
 //! using the actual available API.
 
 use anyhow::Result;
-use std::time::Duration;
-use voirs::*;
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,18 +14,9 @@ async fn main() -> Result<()> {
     // Ensure output directories exist
     ensure_output_dirs()?;
 
-    // Create components using bridge pattern
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
-    // Create pipeline with conversion capabilities
-    let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
-        .build()
-        .await?;
+    // Create pipeline with conversion capabilities (unified builder wires the
+    // default G2P/acoustic model/vocoder automatically)
+    let pipeline = VoirsPipelineBuilder::new().build().await?;
 
     // Example 1: Basic voice synthesis variations
     println!("\n1. Voice Synthesis Variations");

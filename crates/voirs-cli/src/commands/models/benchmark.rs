@@ -5,10 +5,13 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use voirs_g2p::{
     accuracy::{AccuracyBenchmark, TestCase},
+    backends::rule_based::RuleBasedG2p,
     LanguageCode,
 };
+use voirs_sdk::audio::dsp;
 use voirs_sdk::config::AppConfig;
 use voirs_sdk::types::SynthesisConfig;
+use voirs_sdk::AudioBuffer;
 use voirs_sdk::VoirsPipeline;
 use voirs_sdk::{QualityLevel, Result};
 
@@ -20,6 +23,10 @@ pub struct BenchmarkResult {
     pub avg_audio_duration: Duration,
     pub real_time_factor: f64,
     pub memory_usage_mb: f64,
+    /// Composite performance + reliability + measured audio signal-health
+    /// score in `[0.0, 5.0]` (see [`calculate_quality_score`]). This is a
+    /// technical proxy derived from real measurements, NOT a perceptual
+    /// quality or MOS prediction.
     pub quality_score: f64,
     pub success_rate: f64,
     pub phoneme_accuracy: Option<f64>,
@@ -117,9 +124,10 @@ async fn benchmark_model(
     };
 
     let mut total_synthesis_time = Duration::from_secs(0);
-    let mut total_audio_duration = 0.0;
-    let mut successful_runs = 0;
+    let mut total_audio_duration = 0.0f32;
+    let mut successful_runs = 0usize;
     let mut memory_samples = Vec::new();
+    let mut audio_health_samples: Vec<AudioHealthSample> = Vec::new();
 
     // Run benchmark iterations
     for i in 0..iterations {
@@ -147,6 +155,10 @@ async fn benchmark_model(
                     // Measure memory after synthesis
                     let memory_after = get_memory_usage();
                     memory_samples.push(memory_after - memory_before);
+
+                    // Real, measured DSP signal-health stats from the actual
+                    // synthesized audio (see `calculate_quality_score`).
+                    audio_health_samples.push(measure_audio_health(&audio));
                 }
                 Err(e) => {
                     tracing::warn!("Synthesis failed for '{}': {}", sentence, e);
@@ -155,17 +167,48 @@ async fn benchmark_model(
         }
     }
 
-    // Calculate metrics
+    // Calculate metrics. A model with no real/loadable weights can produce
+    // zero successful syntheses -- guard every division so that case reports
+    // an honest all-zero/worst-case result instead of panicking (dividing a
+    // Duration by zero, or calling `Duration::from_secs_f64` with NaN, both
+    // panic) or silently propagating NaN into the displayed report.
     let total_runs = iterations as usize * test_sentences.len();
-    let avg_synthesis_time = total_synthesis_time / total_runs as u32;
-    let avg_audio_duration =
-        Duration::from_secs_f64(total_audio_duration as f64 / successful_runs as f64);
-    let real_time_factor = avg_synthesis_time.as_secs_f64() / avg_audio_duration.as_secs_f64();
-    let success_rate = successful_runs as f64 / total_runs as f64;
-    let avg_memory_usage = memory_samples.iter().sum::<f64>() / memory_samples.len() as f64;
+    let avg_synthesis_time = if total_runs > 0 {
+        total_synthesis_time / total_runs as u32
+    } else {
+        Duration::from_secs(0)
+    };
+    let avg_audio_duration = if successful_runs > 0 {
+        Duration::from_secs_f64(total_audio_duration as f64 / successful_runs as f64)
+    } else {
+        Duration::from_secs(0)
+    };
+    let real_time_factor = if avg_audio_duration.as_secs_f64() > 0.0 {
+        avg_synthesis_time.as_secs_f64() / avg_audio_duration.as_secs_f64()
+    } else {
+        // No audio was ever produced: worst-case RTF, not a fabricated "ok"
+        // number. `calculate_quality_score`'s performance ladder maps this
+        // to its lowest score.
+        f64::INFINITY
+    };
+    let success_rate = if total_runs > 0 {
+        successful_runs as f64 / total_runs as f64
+    } else {
+        0.0
+    };
+    let avg_memory_usage = if !memory_samples.is_empty() {
+        memory_samples.iter().sum::<f64>() / memory_samples.len() as f64
+    } else {
+        0.0
+    };
 
-    // Calculate quality score (placeholder - would need actual quality metrics)
-    let quality_score = calculate_quality_score(model_id, &real_time_factor, &success_rate);
+    // Quality score: a real weighted combination of measured performance
+    // (RTF), measured reliability (success rate), and -- when at least one
+    // synthesis succeeded -- a real DSP signal-health proxy computed from
+    // the actual synthesized audio. No per-architecture guessing by
+    // substring-matching `model_id`.
+    let audio_health = aggregate_audio_health(&audio_health_samples);
+    let quality_score = calculate_quality_score(&real_time_factor, &success_rate, audio_health);
 
     // Check performance targets
     let latency_target_met = check_latency_target(&avg_synthesis_time);
@@ -193,45 +236,65 @@ async fn benchmark_model(
         );
     }
 
-    // Run accuracy benchmark if provided
+    // Run accuracy benchmark if requested (`accuracy_benchmark.is_some()`
+    // just gates whether the user asked for `--accuracy`; the actual test
+    // cases used are resolved fresh inside `run_accuracy_test` against
+    // whatever language THIS pipeline was really built for -- see its doc
+    // comment for why the multi-language `benchmark` value isn't used
+    // directly here).
     let (
         phoneme_accuracy,
         word_accuracy,
         accuracy_target_met,
         english_accuracy_target_met,
         japanese_accuracy_target_met,
-    ) = if let Some(benchmark) = accuracy_benchmark {
+    ) = if accuracy_benchmark.is_some() {
         if !global.quiet {
             println!("    Running accuracy tests...");
         }
 
-        // For TTS, we would need to extract phonemes from the synthesized audio
-        // This is a placeholder implementation that would need integration with
-        // a speech recognizer or forced alignment system
-        match run_accuracy_test(&pipeline, benchmark, global).await {
-            Ok((phoneme_acc, word_acc, target_met, en_target_met, ja_target_met)) => {
+        match run_accuracy_test(&pipeline, global).await {
+            Ok(outcome) => {
                 if !global.quiet {
-                    println!("    Phoneme Accuracy: {:.2}%", phoneme_acc * 100.0);
-                    println!("    Word Accuracy: {:.2}%", word_acc * 100.0);
+                    println!(
+                        "    Phoneme Accuracy: {:.2}% (language: {})",
+                        outcome.phoneme_accuracy * 100.0,
+                        outcome.language.as_str()
+                    );
+                    println!("    Word Accuracy: {:.2}%", outcome.word_accuracy * 100.0);
                     println!(
                         "    Overall Target Met: {}",
-                        if target_met { "✅" } else { "❌" }
+                        if outcome.overall_target_met {
+                            "✅"
+                        } else {
+                            "❌"
+                        }
                     );
+                    match outcome.english_target_met {
+                        Some(en) => println!(
+                            "    English Target (>95%): {}",
+                            if en { "✅" } else { "❌" }
+                        ),
+                        None => println!("    English Target: not evaluated (pipeline is not configured for English)"),
+                    }
+                    match outcome.japanese_target_met {
+                        Some(ja) => println!(
+                            "    Japanese Target (>90%): {}",
+                            if ja { "✅" } else { "❌" }
+                        ),
+                        None => println!("    Japanese Target: not evaluated (pipeline is not configured for Japanese)"),
+                    }
                     println!(
-                        "    English Target (>95%): {}",
-                        if en_target_met { "✅" } else { "❌" }
-                    );
-                    println!(
-                        "    Japanese Target (>90%): {}",
-                        if ja_target_met { "✅" } else { "❌" }
+                        "    Synthesis probe: {}/{} probe word(s) synthesized successfully",
+                        outcome.synth_successes, outcome.synth_probe_count
                     );
                 }
                 (
-                    Some(phoneme_acc),
-                    Some(word_acc),
-                    Some(target_met),
-                    Some(en_target_met),
-                    Some(ja_target_met),
+                    Some(outcome.phoneme_accuracy),
+                    Some(outcome.word_accuracy),
+                    Some(outcome.overall_target_met),
+                    outcome.english_target_met,
+                    outcome.japanese_target_met,
                 )
             }
             Err(e) => {
@@ -340,8 +403,104 @@ fn get_memory_usage() -> f64 {
     50.0 // Default 50MB estimate
 }
 
-/// Calculate quality score based on various metrics
-fn calculate_quality_score(model_id: &str, real_time_factor: &f64, success_rate: &f64) -> f64 {
+/// Real, measured DSP signal-health signals for one synthesized audio
+/// buffer. Never fabricated: every field is computed directly from the
+/// actual samples produced by the pipeline under test.
+#[derive(Debug, Clone, Copy)]
+struct AudioHealthSample {
+    /// Whether the signal clips (any sample at or above the clip threshold).
+    clipped: bool,
+    /// Whether the signal is effectively silent (RMS below an audible
+    /// threshold), which for a non-empty synthesis request indicates broken
+    /// output rather than genuine silence.
+    near_silent: bool,
+    /// Spectral flatness (0 = tonal/structured, 1 = white-noise-like),
+    /// `None` when the buffer is too short for the FFT window used.
+    spectral_flatness: Option<f32>,
+}
+
+/// FFT window used for the spectral-flatness signal-health component. Short
+/// synthesized clips (e.g. very short probe words) may fall below this,
+/// which is handled by omitting the spectral component rather than
+/// substituting a value (see `aggregate_audio_health`).
+const AUDIO_HEALTH_FFT_SIZE: usize = 1024;
+
+/// Measure real, objective DSP signal-health stats from actual synthesized
+/// audio. This is a technical signal proxy (clipping / silence / spectral
+/// flatness), NOT a perceptual quality or MOS prediction.
+fn measure_audio_health(audio: &AudioBuffer) -> AudioHealthSample {
+    let clipped = audio.is_clipped(0.999);
+    let rms = audio.rms();
+    // Roughly -60 dBFS: for a non-empty synthesis request this indicates
+    // dropped/empty output rather than intentional quiet audio.
+    let near_silent = rms < 0.001;
+
+    let spectral_flatness = if audio.len() >= AUDIO_HEALTH_FFT_SIZE {
+        dsp::spectral_statistics(audio, AUDIO_HEALTH_FFT_SIZE)
+            .ok()
+            .map(|stats| stats.flatness)
+    } else {
+        None
+    };
+
+    AudioHealthSample {
+        clipped,
+        near_silent,
+        spectral_flatness,
+    }
+}
+
+/// Aggregate per-run audio-health samples into a single `[0.0, 1.0]` signal
+/// (higher = healthier), or `None` if there is nothing to measure (zero
+/// successful syntheses). When the spectral-flatness component could not be
+/// computed for ANY sample (e.g. every synthesized clip was shorter than the
+/// FFT window), that component is excluded from the average entirely rather
+/// than substituted with a constant -- a missing measurement must not be
+/// disguised as a measured one.
+fn aggregate_audio_health(samples: &[AudioHealthSample]) -> Option<f64> {
+    if samples.is_empty() {
+        return None;
+    }
+
+    let clip_rate = samples.iter().filter(|s| s.clipped).count() as f64 / samples.len() as f64;
+    let silence_rate =
+        samples.iter().filter(|s| s.near_silent).count() as f64 / samples.len() as f64;
+
+    let mut components = vec![1.0 - clip_rate, 1.0 - silence_rate];
+
+    let flatness_values: Vec<f64> = samples
+        .iter()
+        .filter_map(|s| s.spectral_flatness)
+        .map(f64::from)
+        .collect();
+    if !flatness_values.is_empty() {
+        let avg_flatness = flatness_values.iter().sum::<f64>() / flatness_values.len() as f64;
+        // Lower flatness (more tonal/structured, as real speech is) scores
+        // higher; flatness near 1.0 (white-noise-like) scores near zero.
+        components.push((1.0 - avg_flatness).clamp(0.0, 1.0));
+    }
+
+    Some(components.iter().sum::<f64>() / components.len() as f64)
+}
+
+/// Calculate quality score based on real, measured metrics.
+///
+/// `real_time_factor` and `success_rate` are real measurements from actually
+/// running the model under test. `audio_health` (see
+/// [`aggregate_audio_health`]) is a real, measured DSP signal-health proxy
+/// derived from the model's ACTUAL synthesized audio -- never a
+/// per-architecture guess keyed off the model's name string. When no audio
+/// was ever successfully synthesized, the health component is dropped
+/// entirely (not substituted with a constant) and the score reduces to the
+/// average of the performance and reliability components.
+///
+/// This is a composite performance/signal-health indicator, not a
+/// perceptual quality or MOS prediction.
+fn calculate_quality_score(
+    real_time_factor: &f64,
+    success_rate: &f64,
+    audio_health: Option<f64>,
+) -> f64 {
     // Performance score: Logarithmic scale for better granularity
     // RTF < 0.05 is exceptional, 0.05-0.1 is excellent, 0.1-0.5 is good, 0.5-1.0 is acceptable
     let performance_score = if *real_time_factor < 0.05 {
@@ -373,42 +532,17 @@ fn calculate_quality_score(model_id: &str, real_time_factor: &f64, success_rate:
         success_rate * 2.0 // 0.0-1.5
     };
 
-    // Model-specific adjustments based on architecture characteristics
-    // Vocoder models: HiFi-GAN (fast, high quality), WaveGlow (slower, very high quality)
-    // Acoustic models: Tacotron2 (stable, good quality), FastSpeech2 (fast, good quality)
-    let (model_quality_baseline, model_speed_expectation) = if model_id.contains("hifigan") {
-        (0.6, 0.15) // High quality vocoder, expect RTF ~0.15
-    } else if model_id.contains("waveglow") || model_id.contains("wavernn") {
-        (0.8, 0.5) // Very high quality but slower
-    } else if model_id.contains("melgan") || model_id.contains("parallel-wavegan") {
-        (0.5, 0.1) // Fast but lower quality
-    } else if model_id.contains("tacotron") {
-        (0.5, 0.3) // Stable acoustic model
-    } else if model_id.contains("fastspeech") {
-        (0.6, 0.2) // Fast acoustic model
-    } else if model_id.contains("vits") {
-        (0.7, 0.25) // End-to-end high quality
-    } else if model_id.contains("diffwave") || model_id.contains("diffusion") {
-        (0.9, 1.0) // Highest quality but slowest
-    } else {
-        (0.3, 0.5) // Unknown model, neutral expectations
-    };
-
-    // Bonus for meeting speed expectations
-    let speed_bonus = if *real_time_factor <= model_speed_expectation {
-        model_quality_baseline
-    } else if *real_time_factor <= model_speed_expectation * 2.0 {
-        // Linear decay for slightly slower than expected
-        model_quality_baseline
-            * (1.0 - (real_time_factor - model_speed_expectation) / model_speed_expectation)
-    } else {
-        0.0 // No bonus if significantly slower than expected
-    };
-
-    // Weighted average: 40% performance, 40% reliability, 20% model-specific
-    let total_score = performance_score * 0.4 + reliability_score * 0.4 + speed_bonus * 0.2;
-
-    total_score.clamp(0.0, 5.0)
+    match audio_health {
+        Some(health) => {
+            let health_score = (health * 5.0).clamp(0.0, 5.0);
+            // Weighted average: 40% performance, 40% reliability, 20% real
+            // measured audio signal-health.
+            (performance_score * 0.4 + reliability_score * 0.4 + health_score * 0.2).clamp(0.0, 5.0)
+        }
+        // No successful synthesis to measure audio health from: do not
+        // substitute a fabricated value, just drop that component.
+        None => ((performance_score + reliability_score) / 2.0).clamp(0.0, 5.0),
+    }
 }
 
 /// Display benchmark results
@@ -432,7 +566,10 @@ fn display_benchmark_results(results: &[BenchmarkResult], global: &GlobalOptions
         );
         println!("  Real-time Factor: {:.2}x", result.real_time_factor);
         println!("  Memory Usage: {:.1} MB", result.memory_usage_mb);
-        println!("  Quality Score: {:.1}/5.0", result.quality_score);
+        println!(
+            "  Quality Score: {:.1}/5.0 (performance + reliability + measured audio signal-health; NOT a perceptual/MOS quality prediction)",
+            result.quality_score
+        );
         println!("  Success Rate: {:.1}%", result.success_rate * 100.0);
 
         // Display accuracy metrics if available
@@ -542,7 +679,7 @@ fn generate_comparison_report(results: &[BenchmarkResult], global: &GlobalOption
 
     if let Some(model) = highest_quality {
         println!(
-            "⭐ Highest Quality: {} ({:.1}/5.0)",
+            "⭐ Highest Quality Score: {} ({:.1}/5.0, performance+reliability+signal-health)",
             model.model_id, model.quality_score
         );
     }
@@ -729,12 +866,14 @@ async fn load_model_pipeline(
     Ok(pipeline)
 }
 
-/// Load CMU accuracy benchmark test data
-fn load_cmu_accuracy_benchmark() -> Result<AccuracyBenchmark> {
-    let mut benchmark = AccuracyBenchmark::new();
-
-    // Add comprehensive CMU test set data for English
-    let cmu_test_cases = vec![
+/// Canonical CMU-style G2P test set: `(word, expected IPA phonemes,
+/// language)`. This is the single source of truth for accuracy test data --
+/// shared by [`load_cmu_accuracy_benchmark`] (used for an upfront sanity
+/// check that the test corpus loads) and [`run_accuracy_test`] (which builds
+/// its own language-filtered subset from it, see that function's doc
+/// comment for why).
+fn cmu_test_words() -> Vec<(&'static str, Vec<&'static str>, LanguageCode)> {
+    vec![
         // Basic phoneme coverage
         ("hello", vec!["h", "ə", "ˈl", "oʊ"], LanguageCode::EnUs),
         ("world", vec!["w", "ɜːr", "l", "d"], LanguageCode::EnUs),
@@ -880,76 +1019,198 @@ fn load_cmu_accuracy_benchmark() -> Result<AccuracyBenchmark> {
             vec!["n", "i", "h", "o", "n", "g", "o"],
             LanguageCode::Ja,
         ),
-    ];
+    ]
+}
 
-    for (word, phonemes, lang) in cmu_test_cases {
+/// Load the full (all-languages) CMU accuracy benchmark, used only as an
+/// upfront sanity check that the test corpus is well-formed before running
+/// potentially slow model benchmarks. [`run_accuracy_test`] does NOT
+/// evaluate against this multi-language set directly -- it builds its own
+/// language-filtered subset from [`cmu_test_words`].
+fn load_cmu_accuracy_benchmark() -> Result<AccuracyBenchmark> {
+    let mut benchmark = AccuracyBenchmark::new();
+    for (word, phonemes, lang) in cmu_test_words() {
         benchmark.add_test_case(TestCase {
             word: word.to_string(),
             expected_phonemes: phonemes.into_iter().map(|p| p.to_string()).collect(),
             language: lang,
         });
     }
-
     Ok(benchmark)
 }
 
-/// Run accuracy test using the TTS pipeline and G2P system
+/// Map an SDK language code onto the `voirs-g2p` language code used by the
+/// real G2P backends.
+///
+/// This mirrors `voirs_sdk::pipeline::init::PipelineInitializer::g2p_language`,
+/// which is `pub(crate)` inside voirs-sdk and therefore not reachable from
+/// this crate. Keep in sync if that mapping changes.
+fn sdk_language_to_g2p_language(language: voirs_sdk::types::LanguageCode) -> Option<LanguageCode> {
+    use voirs_sdk::types::LanguageCode as Sdk;
+
+    Some(match language {
+        Sdk::EnUs => LanguageCode::EnUs,
+        Sdk::EnGb => LanguageCode::EnGb,
+        Sdk::JaJp | Sdk::Ja => LanguageCode::Ja,
+        Sdk::DeDe | Sdk::De => LanguageCode::De,
+        Sdk::FrFr | Sdk::Fr => LanguageCode::Fr,
+        Sdk::EsEs | Sdk::EsMx | Sdk::Es => LanguageCode::Es,
+        Sdk::ItIt | Sdk::It => LanguageCode::It,
+        Sdk::PtBr | Sdk::Pt => LanguageCode::Pt,
+        Sdk::ZhCn => LanguageCode::ZhCn,
+        Sdk::KoKr | Sdk::Ko => LanguageCode::Ko,
+        Sdk::RuRu | Sdk::Ru => LanguageCode::Ru,
+        Sdk::Ar => LanguageCode::Ar,
+        _ => return None,
+    })
+}
+
+/// Outcome of a real accuracy test run against one model's pipeline.
+struct AccuracyTestOutcome {
+    /// Resolved G2P language the pipeline was actually evaluated against.
+    language: LanguageCode,
+    phoneme_accuracy: f64,
+    word_accuracy: f64,
+    overall_target_met: bool,
+    /// `None` when the pipeline was not configured for English (the target
+    /// was simply not evaluated -- distinct from evaluated-and-failed).
+    english_target_met: Option<bool>,
+    /// `None` when the pipeline was not configured for Japanese.
+    japanese_target_met: Option<bool>,
+    synth_successes: usize,
+    synth_probe_count: usize,
+}
+
+/// Maximum number of CMU words actually synthesized through the real
+/// pipeline as a robustness probe (see doc comment on [`run_accuracy_test`]).
+/// Kept small: this exercises real synthesis, which is not free.
+const ACCURACY_SYNTH_PROBE_LIMIT: usize = 8;
+
+/// Run a real accuracy test against the model's pipeline.
+///
+/// Two things are measured, both grounded in real behavior for the specific
+/// model under test:
+///
+/// 1. **Phoneme/word accuracy**, evaluated against the REAL production
+///    rule-based G2P backend (`voirs_g2p::backends::rule_based::RuleBasedG2p`)
+///    for whichever language `pipeline` was actually built with (queried via
+///    the public `pipeline.get_config()`, then mapped the same way
+///    `voirs-sdk`'s own `PipelineInitializer::load_g2p` resolves it --
+///    `rule_based` is currently the only implemented G2P backend, and the
+///    SDK itself refuses to build a pipeline naming any other backend). We
+///    cannot literally borrow the pipeline's own `Arc<dyn G2p>`
+///    (`VoirsPipeline::g2p()` is `pub(crate)` in voirs-sdk), so this
+///    constructs an equivalent instance through the public `voirs_g2p` API --
+///    this is the real production phoneme-rule engine, not a placeholder.
+///    Only the test cases for the RESOLVED language are evaluated: mixing in
+///    another language's words would silently run e.g. Japanese text through
+///    English phonological rules and report the resulting near-zero accuracy
+///    as if it reflected the model, which is exactly the kind of
+///    model-independent, misleading number this rewrite exists to remove.
+/// 2. **Pipeline synthesis health**: a bounded probe (see
+///    [`ACCURACY_SYNTH_PROBE_LIMIT`]) of real words in the resolved language
+///    are actually run through `pipeline.synthesize()`. A model that cannot
+///    even produce audio for these simple inputs fails the overall target
+///    regardless of its G2P accuracy.
+///
+/// Returns `Err` if the pipeline's resolved language has no G2P ruleset or
+/// no matching test cases, rather than fabricating a pass/fail verdict for a
+/// language nothing here actually covers.
 async fn run_accuracy_test(
-    _pipeline: &VoirsPipeline,
-    benchmark: &AccuracyBenchmark,
-    _global: &GlobalOptions,
-) -> Result<(f64, f64, bool, bool, bool)> {
-    // This is a simplified implementation. In a real TTS accuracy test, we would:
-    // 1. Synthesize audio for each test word
-    // 2. Use a speech recognizer to extract phonemes from the audio
-    // 3. Compare extracted phonemes with expected phonemes
-    //
-    // For now, we'll simulate this by using the G2P system directly
-    // which tests the phoneme prediction accuracy component of TTS
+    pipeline: &VoirsPipeline,
+    global: &GlobalOptions,
+) -> Result<AccuracyTestOutcome> {
+    // 1. Resolve the language this SPECIFIC pipeline's G2P was actually built
+    //    for (mirrors voirs-sdk's own internal resolution).
+    let pipeline_config = pipeline.get_config().await;
+    let sdk_language = pipeline_config
+        .language_code
+        .unwrap_or(pipeline_config.default_synthesis.language);
+    let g2p_language = sdk_language_to_g2p_language(sdk_language).ok_or_else(|| {
+        voirs_sdk::VoirsError::config_error(format!(
+            "Accuracy benchmarking is not available: pipeline is configured for language \
+             {sdk_language:?}, which has no voirs-g2p ruleset."
+        ))
+    })?;
 
-    // Create a dummy G2P system for testing
-    // In a real implementation, this would be the G2P component of the TTS pipeline
-    let g2p = create_test_g2p_system();
+    // 2. Build the real production G2P backend for that language and
+    //    evaluate ONLY the test cases that apply to it.
+    let g2p = RuleBasedG2p::new(g2p_language);
 
-    let metrics = benchmark
+    let mut filtered_benchmark = AccuracyBenchmark::new();
+    let mut probe_words: Vec<String> = Vec::new();
+    for (word, phonemes, lang) in cmu_test_words() {
+        if lang == g2p_language {
+            if probe_words.len() < ACCURACY_SYNTH_PROBE_LIMIT {
+                probe_words.push(word.to_string());
+            }
+            filtered_benchmark.add_test_case(TestCase {
+                word: word.to_string(),
+                expected_phonemes: phonemes.into_iter().map(|p| p.to_string()).collect(),
+                language: lang,
+            });
+        }
+    }
+
+    if filtered_benchmark.test_case_count() == 0 {
+        return Err(voirs_sdk::VoirsError::config_error(format!(
+            "No accuracy test cases available for resolved language {g2p_language:?}"
+        )));
+    }
+
+    let metrics = filtered_benchmark
         .evaluate(&g2p)
         .await
         .map_err(|e| voirs_sdk::VoirsError::config_error(format!("Accuracy test failed: {}", e)))?;
 
-    // Check if accuracy targets are met:
-    // English: >95%, Japanese: >90%
-    let english_target_met =
-        if let Some(en_metrics) = metrics.language_metrics.get(&LanguageCode::EnUs) {
-            en_metrics.accuracy >= 0.95
-        } else {
-            false
-        };
+    // 3. Exercise the REAL pipeline: actually synthesize the probe words.
+    if !global.quiet {
+        println!(
+            "    Probing real synthesis for {} word(s) in {}...",
+            probe_words.len(),
+            g2p_language.as_str()
+        );
+    }
+    let mut synth_successes = 0usize;
+    for word in &probe_words {
+        if pipeline.synthesize(word).await.is_ok() {
+            synth_successes += 1;
+        }
+    }
+    let synth_success_rate = if probe_words.is_empty() {
+        0.0
+    } else {
+        synth_successes as f64 / probe_words.len() as f64
+    };
 
-    let japanese_target_met =
-        if let Some(ja_metrics) = metrics.language_metrics.get(&LanguageCode::Ja) {
-            ja_metrics.accuracy >= 0.90
-        } else {
-            false
-        };
+    // Accuracy targets: English >95%, Japanese >90% (project requirements),
+    // combined with a real synthesis-health gate -- a model whose G2P scores
+    // well on paper but cannot actually synthesize the same words has not
+    // met the target.
+    let accuracy_threshold = match g2p_language {
+        LanguageCode::EnUs | LanguageCode::EnGb => 0.95,
+        LanguageCode::Ja => 0.90,
+        _ => 0.80,
+    };
+    let language_target_met =
+        metrics.phoneme_accuracy >= accuracy_threshold && synth_success_rate >= 0.8;
 
-    // Overall target is met if at least one language meets its target
-    // (or we could require all languages to meet targets - depending on requirements)
-    let target_met = english_target_met || japanese_target_met;
+    let (english_target_met, japanese_target_met) = match g2p_language {
+        LanguageCode::EnUs | LanguageCode::EnGb => (Some(language_target_met), None),
+        LanguageCode::Ja => (None, Some(language_target_met)),
+        _ => (None, None),
+    };
 
-    Ok((
-        metrics.phoneme_accuracy,
-        metrics.word_accuracy,
-        target_met,
+    Ok(AccuracyTestOutcome {
+        language: g2p_language,
+        phoneme_accuracy: metrics.phoneme_accuracy,
+        word_accuracy: metrics.word_accuracy,
+        overall_target_met: language_target_met,
         english_target_met,
         japanese_target_met,
-    ))
-}
-
-/// Create a test G2P system for accuracy evaluation
-fn create_test_g2p_system() -> impl voirs_g2p::G2p {
-    // This is a placeholder. In a real implementation, this would be
-    // the actual G2P system used by the TTS pipeline
-    voirs_g2p::DummyG2p::new()
+        synth_successes,
+        synth_probe_count: probe_words.len(),
+    })
 }
 
 /// Check if latency target is met (<1ms for typical sentences)
@@ -981,6 +1242,18 @@ struct ModelMetadata {
 mod tests {
     use super::*;
 
+    fn default_global() -> GlobalOptions {
+        GlobalOptions {
+            config: None,
+            verbose: 0,
+            quiet: true,
+            format: None,
+            voice: None,
+            gpu: false,
+            threads: None,
+        }
+    }
+
     #[test]
     fn test_get_test_sentences() {
         let sentences = get_test_sentences();
@@ -989,9 +1262,156 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_quality_score() {
-        let score = calculate_quality_score("hifigan-v1", &0.5, &1.0);
-        assert!(score >= 0.0 && score <= 5.0);
+    fn test_calculate_quality_score_in_range() {
+        let score = calculate_quality_score(&0.5, &1.0, Some(0.9));
+        assert!((0.0..=5.0).contains(&score));
+
+        let score_no_health = calculate_quality_score(&0.5, &1.0, None);
+        assert!((0.0..=5.0).contains(&score_no_health));
+    }
+
+    /// Regression test: the quality score must be driven by REAL measured
+    /// inputs, not a per-architecture guess keyed off a model name string
+    /// (there is no `model_id` parameter any more). Verify the score
+    /// actually varies when the real inputs vary.
+    #[test]
+    fn test_calculate_quality_score_varies_with_real_inputs() {
+        let fast_reliable_healthy = calculate_quality_score(&0.02, &1.0, Some(1.0));
+        let slow_unreliable_unhealthy = calculate_quality_score(&5.0, &0.1, Some(0.0));
+        assert!(
+            fast_reliable_healthy > slow_unreliable_unhealthy,
+            "a fast, reliable, healthy result must score higher than a slow, unreliable, \
+             unhealthy one: {fast_reliable_healthy} vs {slow_unreliable_unhealthy}"
+        );
+
+        // Audio health specifically must move the score for otherwise
+        // identical performance/reliability inputs.
+        let healthy = calculate_quality_score(&0.2, &0.98, Some(1.0));
+        let unhealthy = calculate_quality_score(&0.2, &0.98, Some(0.0));
+        assert!(
+            healthy > unhealthy,
+            "healthier real audio signal must score higher: {healthy} vs {unhealthy}"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_audio_health_no_samples_is_none() {
+        assert!(aggregate_audio_health(&[]).is_none());
+    }
+
+    #[test]
+    fn test_aggregate_audio_health_clean_signal_scores_high() {
+        let samples = vec![
+            AudioHealthSample {
+                clipped: false,
+                near_silent: false,
+                spectral_flatness: Some(0.1),
+            };
+            5
+        ];
+        let health = aggregate_audio_health(&samples).expect("must have a value");
+        assert!(
+            health > 0.8,
+            "clean, non-clipping, non-silent audio should score high: {health}"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_audio_health_clipping_and_silence_score_low() {
+        let samples = vec![
+            AudioHealthSample {
+                clipped: true,
+                near_silent: true,
+                spectral_flatness: Some(0.9),
+            };
+            5
+        ];
+        let health = aggregate_audio_health(&samples).expect("must have a value");
+        assert!(
+            health < 0.3,
+            "clipping, silent, noisy audio should score low: {health}"
+        );
+    }
+
+    /// Regression test: when NO sample has a spectral-flatness measurement
+    /// (e.g. every synthesized clip was too short for the FFT window), that
+    /// component must be excluded from the average, not silently replaced
+    /// with a constant. Compare against an otherwise-identical set of
+    /// samples that DO have flatness data to make sure the two are computed
+    /// via genuinely different code paths (different component counts).
+    #[test]
+    fn test_aggregate_audio_health_excludes_missing_spectral_component() {
+        let without_flatness = vec![
+            AudioHealthSample {
+                clipped: false,
+                near_silent: false,
+                spectral_flatness: None,
+            };
+            3
+        ];
+        let with_perfect_flatness = vec![
+            AudioHealthSample {
+                clipped: false,
+                near_silent: false,
+                spectral_flatness: Some(0.0),
+            };
+            3
+        ];
+
+        let health_without = aggregate_audio_health(&without_flatness).unwrap();
+        let health_with = aggregate_audio_health(&with_perfect_flatness).unwrap();
+
+        // Both must be valid real [0,1] numbers, but they must not be
+        // silently forced to the exact same value by a hardcoded fallback:
+        // omitting the spectral component (2-way average of clip/silence,
+        // both perfect => 1.0) differs from including a perfect (flatness=0
+        // => component=1.0) spectral component (3-way average, also 1.0 in
+        // this specific case) -- so instead we check a case where they
+        // WOULD differ if a wrong constant were substituted.
+        assert!((health_without - 1.0).abs() < 1e-9);
+        assert!((health_with - 1.0).abs() < 1e-9);
+
+        // Now use a non-trivial flatness value to prove the component is
+        // really being averaged in, not ignored or replaced by a constant.
+        let with_bad_flatness = vec![
+            AudioHealthSample {
+                clipped: false,
+                near_silent: false,
+                spectral_flatness: Some(1.0), // worst-case: white-noise-like
+            };
+            3
+        ];
+        let health_bad_flatness = aggregate_audio_health(&with_bad_flatness).unwrap();
+        assert!(
+            health_bad_flatness < health_without,
+            "a real bad spectral-flatness measurement must pull the score down when present \
+             ({health_bad_flatness}), unlike when it's absent entirely ({health_without})"
+        );
+    }
+
+    #[test]
+    fn test_measure_audio_health_detects_clipping() {
+        let clipped_audio =
+            AudioBuffer::mono(vec![1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0], 16000);
+        let sample = measure_audio_health(&clipped_audio);
+        assert!(sample.clipped);
+    }
+
+    #[test]
+    fn test_measure_audio_health_detects_silence() {
+        let silent_audio = AudioBuffer::mono(vec![0.0; 4000], 16000);
+        let sample = measure_audio_health(&silent_audio);
+        assert!(sample.near_silent);
+        assert!(!sample.clipped);
+    }
+
+    #[test]
+    fn test_measure_audio_health_short_buffer_has_no_flatness() {
+        // Shorter than AUDIO_HEALTH_FFT_SIZE: the spectral component must be
+        // genuinely omitted (`None`), not defaulted.
+        let short_audio = AudioBuffer::mono(vec![0.5; 16], 16000);
+        let sample = measure_audio_health(&short_audio);
+        assert!(sample.spectral_flatness.is_none());
     }
 
     #[test]
@@ -1025,5 +1445,122 @@ mod tests {
 
         // Test edge case (exactly 100MB)
         assert!(!check_memory_target(100.0));
+    }
+
+    #[test]
+    fn test_sdk_language_to_g2p_language_mapping() {
+        assert_eq!(
+            sdk_language_to_g2p_language(voirs_sdk::types::LanguageCode::EnUs),
+            Some(LanguageCode::EnUs)
+        );
+        assert_eq!(
+            sdk_language_to_g2p_language(voirs_sdk::types::LanguageCode::JaJp),
+            Some(LanguageCode::Ja)
+        );
+        assert_eq!(
+            sdk_language_to_g2p_language(voirs_sdk::types::LanguageCode::Ja),
+            Some(LanguageCode::Ja)
+        );
+        // A language voirs-g2p genuinely has no ruleset for must map to
+        // `None` (fail-closed upstream), not silently alias to English.
+        assert_eq!(
+            sdk_language_to_g2p_language(voirs_sdk::types::LanguageCode::Th),
+            None
+        );
+    }
+
+    #[test]
+    fn test_cmu_test_words_language_filtering() {
+        let words = cmu_test_words();
+        let english_count = words
+            .iter()
+            .filter(|(_, _, l)| *l == LanguageCode::EnUs)
+            .count();
+        let japanese_count = words
+            .iter()
+            .filter(|(_, _, l)| *l == LanguageCode::Ja)
+            .count();
+        let german_count = words
+            .iter()
+            .filter(|(_, _, l)| *l == LanguageCode::De)
+            .count();
+
+        assert!(english_count > 0, "must have real English test cases");
+        assert!(japanese_count > 0, "must have real Japanese test cases");
+        // No German test cases exist today -- a pipeline resolved to German
+        // must hit `run_accuracy_test`'s "no test cases for this language"
+        // fail-closed path rather than silently evaluating 0 cases as 100%.
+        assert_eq!(german_count, 0);
+    }
+
+    #[test]
+    fn test_load_cmu_accuracy_benchmark_loads_all_cases() {
+        let benchmark = load_cmu_accuracy_benchmark().expect("must load");
+        assert_eq!(benchmark.test_case_count(), cmu_test_words().len());
+    }
+
+    /// Regression test for the core finding: accuracy evaluation must use a
+    /// REAL G2P backend (RuleBasedG2p), not `DummyG2p`'s naive
+    /// one-phoneme-per-character mapping. `DummyG2p` would score close to 0%
+    /// phoneme accuracy against real IPA transcriptions; the real rule-based
+    /// engine should score substantially above that. Also verifies the
+    /// per-language filtering: an English-only pipeline must report `None`
+    /// (not `Some(false)`) for the Japanese target.
+    #[tokio::test]
+    async fn test_run_accuracy_test_uses_real_g2p_for_english_pipeline() {
+        let pipeline = VoirsPipeline::builder()
+            .with_language(voirs_sdk::types::LanguageCode::EnUs)
+            .with_validation(false)
+            .with_test_mode(true)
+            .build()
+            .await
+            .expect("stub pipeline must build in test mode without network access");
+
+        let global = default_global();
+        let outcome = run_accuracy_test(&pipeline, &global)
+            .await
+            .expect("accuracy test against a real EnUs pipeline must succeed");
+
+        assert_eq!(outcome.language, LanguageCode::EnUs);
+        assert!(
+            outcome.phoneme_accuracy > 0.1,
+            "a real rule-based G2P engine must score well above what a naive \
+             one-phoneme-per-character DummyG2p could achieve on real IPA transcriptions, \
+             got {}",
+            outcome.phoneme_accuracy
+        );
+        assert!(
+            outcome.english_target_met.is_some(),
+            "English target must be evaluated for an English-configured pipeline"
+        );
+        assert!(
+            outcome.japanese_target_met.is_none(),
+            "Japanese target must NOT be evaluated for an English-configured pipeline \
+             (mixing languages would silently run Japanese text through English rules)"
+        );
+        assert!(outcome.synth_probe_count > 0);
+    }
+
+    #[tokio::test]
+    async fn test_run_accuracy_test_uses_real_g2p_for_japanese_pipeline() {
+        let pipeline = VoirsPipeline::builder()
+            .with_language(voirs_sdk::types::LanguageCode::Ja)
+            .with_validation(false)
+            .with_test_mode(true)
+            .build()
+            .await
+            .expect("stub pipeline must build in test mode without network access");
+
+        let global = default_global();
+        let outcome = run_accuracy_test(&pipeline, &global)
+            .await
+            .expect("accuracy test against a real Ja pipeline must succeed");
+
+        assert_eq!(outcome.language, LanguageCode::Ja);
+        assert!(outcome.japanese_target_met.is_some());
+        assert!(
+            outcome.english_target_met.is_none(),
+            "English target must NOT be evaluated for a Japanese-configured pipeline"
+        );
     }
 }

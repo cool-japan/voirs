@@ -1,907 +1,220 @@
 # Linux Integration Guide
 
-VoiRS provides comprehensive Linux integration through PulseAudio, ALSA, D-Bus, SystemD, and Linux-specific performance optimizations including real-time scheduling and NUMA awareness.
-
-## Table of Contents
-
-- [PulseAudio Integration](#pulseaudio-integration)
-- [ALSA Support](#alsa-support)
-- [D-Bus Integration](#d-bus-integration)
-- [SystemD Integration](#systemd-integration)
-- [Real-time Scheduling](#real-time-scheduling)
-- [NUMA Optimization](#numa-optimization)
-- [Build Configuration](#build-configuration)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-
-## PulseAudio Integration
-
-PulseAudio is the standard audio server on most modern Linux distributions, providing high-level audio management.
-
-### Basic PulseAudio Setup
-
-```c
-#include "voirs/platform/linux.h"
-
-// Initialize PulseAudio connection
-VoirsLinuxPulseAudio* pulse = voirs_linux_init_pulseaudio();
-if (!pulse) {
-    fprintf(stderr, "Failed to initialize PulseAudio\n");
-    return -1;
-}
-
-// Check if PulseAudio is running
-if (!voirs_linux_pulseaudio_is_running(pulse)) {
-    printf("PulseAudio is not running, falling back to ALSA\n");
-    voirs_linux_destroy_pulseaudio(pulse);
-    return -1;
-}
-
-// Cleanup when done
-voirs_linux_destroy_pulseaudio(pulse);
-```
-
-### Audio Device Management
-
-```c
-VoirsLinuxPulseAudio* pulse = voirs_linux_init_pulseaudio();
-
-// Get PulseAudio server information
-VoirsPulseServerInfo* server_info = voirs_linux_get_pulse_server_info(pulse);
-if (server_info) {
-    printf("PulseAudio Server: %s\n", server_info->server_name);
-    printf("Version: %s\n", server_info->version);
-    printf("Sample Rate: %u Hz\n", server_info->sample_rate);
-    printf("Channels: %u\n", server_info->channels);
-}
-
-// Enumerate audio devices
-VoirsLinuxAudioDevice* devices;
-int device_count = voirs_linux_get_audio_devices(pulse, &devices);
-
-for (int i = 0; i < device_count; i++) {
-    printf("Device %d: %s\n", devices[i].id, devices[i].name);
-    printf("  Driver: %s\n", devices[i].driver);
-    printf("  Card: %s\n", devices[i].card_name);
-    printf("  Sample Rate: %u Hz\n", devices[i].sample_rate);
-    printf("  Channels: %u\n", devices[i].channels);
-    printf("  Type: %s\n", devices[i].is_input ? "Input" : "Output");
-    printf("  Default: %s\n", devices[i].is_default ? "Yes" : "No");
-}
-
-voirs_linux_free_device_list(devices, device_count);
-```
-
-### Volume Control
-
-```c
-// Get current volume for a device
-float volume = voirs_linux_get_device_volume(pulse, 0);  // Device ID 0
-printf("Current volume: %.0f%%\n", volume * 100);
-
-// Set volume (0.0 to 1.0)
-voirs_linux_set_volume(pulse, 0, 0.75f);  // 75% volume
-
-// Mute/unmute device
-voirs_linux_set_device_mute(pulse, 0, true);   // Mute
-voirs_linux_set_device_mute(pulse, 0, false);  // Unmute
-
-// Get mute status
-bool is_muted = voirs_linux_get_device_mute(pulse, 0);
-printf("Device is %s\n", is_muted ? "muted" : "unmuted");
-```
-
-### Stream Management
-
-```c
-// Create PulseAudio stream for synthesis
-VoirsPulseAudioStream* stream = voirs_linux_create_pulse_stream(pulse);
-
-// Configure stream
-VoirsPulseStreamConfig config = {
-    .sample_rate = 44100,
-    .channels = 2,
-    .sample_format = VOIRS_PULSE_FORMAT_FLOAT32LE,
-    .buffer_target_length = 4096,
-    .stream_name = "VoiRS Synthesis",
-    .application_name = "VoiRS"
-};
-
-voirs_linux_configure_pulse_stream(stream, &config);
-
-// Set stream callbacks
-voirs_linux_set_stream_write_callback(stream, stream_write_callback, user_data);
-voirs_linux_set_stream_state_callback(stream, stream_state_callback, user_data);
-
-// Start streaming
-voirs_linux_start_pulse_stream(stream);
-```
-
-## ALSA Support
-
-Advanced Linux Sound Architecture (ALSA) provides low-level audio hardware access.
-
-### ALSA Initialization
-
-```c
-// Initialize ALSA system
-VoirsLinuxALSA* alsa = voirs_linux_init_alsa();
-if (!alsa) {
-    fprintf(stderr, "Failed to initialize ALSA\n");
-    return -1;
-}
-
-// Check ALSA availability
-if (!voirs_linux_alsa_is_available()) {
-    printf("ALSA not available on this system\n");
-    return -1;
-}
-```
-
-### Sound Card Enumeration
-
-```c
-// Get ALSA sound cards
-VoirsALSACard* cards;
-int card_count = voirs_linux_get_alsa_cards(alsa, &cards);
-
-for (int i = 0; i < card_count; i++) {
-    printf("Card %d: %s\n", cards[i].id, cards[i].name);
-    printf("  Driver: %s\n", cards[i].driver);
-    
-    // List devices on this card
-    for (int j = 0; j < cards[i].device_count; j++) {
-        VoirsALSADevice* device = &cards[i].devices[j];
-        printf("  Device %d: %s (%s)\n", 
-               device->id, device->name, device->device_type);
-    }
-}
-
-voirs_linux_free_alsa_cards(cards, card_count);
-```
-
-### Device Capability Testing
-
-```c
-// Test device capabilities
-uint32_t card_id = 0, device_id = 0;
-VoirsALSADeviceCapability* caps = voirs_linux_test_alsa_device(alsa, card_id, device_id);
-
-if (caps) {
-    printf("Device %u:%u capabilities:\n", card_id, device_id);
-    
-    // Sample rates
-    printf("Supported sample rates: ");
-    for (int i = 0; i < caps->sample_rate_count; i++) {
-        printf("%u ", caps->sample_rates[i]);
-    }
-    printf("\n");
-    
-    // Formats
-    printf("Supported formats: ");
-    for (int i = 0; i < caps->format_count; i++) {
-        printf("%s ", caps->formats[i]);
-    }
-    printf("\n");
-    
-    // Channels
-    printf("Supported channels: ");
-    for (int i = 0; i < caps->channel_count; i++) {
-        printf("%u ", caps->channels[i]);
-    }
-    printf("\n");
-    
-    // Buffer sizes
-    printf("Supported buffer sizes: ");
-    for (int i = 0; i < caps->buffer_size_count; i++) {
-        printf("%u ", caps->buffer_sizes[i]);
-    }
-    printf("\n");
-    
-    voirs_linux_free_alsa_capabilities(caps);
-}
-```
-
-### Direct ALSA PCM Access
-
-```c
-// Open ALSA PCM device for playback
-VoirsALSAPCM* pcm = voirs_linux_open_alsa_pcm("default", VOIRS_ALSA_STREAM_PLAYBACK);
-
-// Configure PCM parameters
-VoirsALSAPCMConfig pcm_config = {
-    .sample_rate = 44100,
-    .channels = 2,
-    .format = VOIRS_ALSA_FORMAT_S16_LE,
-    .period_size = 1024,
-    .buffer_size = 4096
-};
-
-voirs_linux_configure_alsa_pcm(pcm, &pcm_config);
-
-// Write audio data
-float* audio_data = /* your audio data */;
-int frames_written = voirs_linux_write_alsa_pcm(pcm, audio_data, frame_count);
-
-// Close PCM device
-voirs_linux_close_alsa_pcm(pcm);
-```
-
-## D-Bus Integration
-
-D-Bus provides inter-process communication and system service integration.
-
-### Basic D-Bus Setup
-
-```c
-// Initialize D-Bus connection
-VoirsLinuxDBus* dbus = voirs_linux_init_dbus();
-if (!dbus) {
-    fprintf(stderr, "Failed to initialize D-Bus\n");
-    return -1;
-}
-
-// Check D-Bus availability
-if (!voirs_linux_dbus_is_available()) {
-    printf("D-Bus not available\n");
-    return -1;
-}
-```
-
-### Desktop Notifications
-
-```c
-// Send desktop notification
-voirs_linux_send_notification(
-    dbus,
-    "VoiRS",                           // app_name
-    "Synthesis Complete",              // title
-    "Your audio file has been generated successfully."  // message
-);
-
-// Send notification with custom options
-VoirsLinuxNotificationOptions options = {
-    .app_name = "VoiRS",
-    .title = "Processing Status",
-    .body = "Speech synthesis in progress...",
-    .icon = "audio-volume-high",
-    .timeout = 5000,  // 5 seconds
-    .urgency = VOIRS_NOTIFICATION_URGENCY_NORMAL,
-    .category = "transfer.complete"
-};
-
-uint32_t notification_id = voirs_linux_send_notification_extended(dbus, &options);
-
-// Update existing notification
-options.body = "Speech synthesis completed!";
-voirs_linux_update_notification(dbus, notification_id, &options);
-```
-
-### System Service Registration
-
-```c
-// Register VoiRS as a D-Bus service
-const char* service_name = "com.voirs.SpeechSynthesis";
-if (voirs_linux_register_service(dbus, service_name)) {
-    printf("VoiRS service registered on D-Bus\n");
-    
-    // Export methods
-    voirs_linux_export_method(dbus, "/com/voirs/SpeechSynthesis", 
-                              "Synthesize", synthesize_method, NULL);
-    voirs_linux_export_method(dbus, "/com/voirs/SpeechSynthesis", 
-                              "GetVoices", get_voices_method, NULL);
-}
-
-// D-Bus method implementations
-int synthesize_method(VoirsDBusMessage* message, void* user_data) {
-    const char* text = voirs_dbus_get_string_arg(message, 0);
-    const char* voice = voirs_dbus_get_string_arg(message, 1);
-    
-    // Perform synthesis
-    VoirsAudioBuffer* audio = voirs_synthesize_with_voice(pipeline, text, voice);
-    
-    // Return result
-    VoirsDBusMessage* reply = voirs_dbus_create_reply(message);
-    voirs_dbus_append_string(reply, "synthesis_id_123");
-    voirs_dbus_send_reply(dbus, reply);
-    
-    return 0;
-}
-```
-
-### System Integration
-
-```c
-// Monitor system events
-void dbus_signal_callback(VoirsDBusMessage* message, void* user_data) {
-    const char* interface = voirs_dbus_get_interface(message);
-    const char* member = voirs_dbus_get_member(message);
-    
-    if (strcmp(interface, "org.freedesktop.login1.Manager") == 0) {
-        if (strcmp(member, "PrepareForSleep") == 0) {
-            bool sleeping = voirs_dbus_get_boolean_arg(message, 0);
-            if (sleeping) {
-                printf("System going to sleep, pausing synthesis\n");
-                voirs_pipeline_pause(pipeline);
-            } else {
-                printf("System waking up, resuming synthesis\n");
-                voirs_pipeline_resume(pipeline);
-            }
-        }
-    }
-}
-
-// Subscribe to system signals
-voirs_linux_subscribe_signal(dbus, "org.freedesktop.login1", 
-                             "org.freedesktop.login1.Manager", 
-                             "PrepareForSleep", dbus_signal_callback, NULL);
-```
-
-## SystemD Integration
-
-SystemD provides service management and system integration capabilities.
-
-### Service Management
-
-```c
-// Check if SystemD is available
-if (voirs_linux_is_systemd_available()) {
-    printf("SystemD available\n");
-    
-    // Create VoiRS service
-    VoirsSystemDServiceConfig service_config = {
-        .service_name = "voirs-synthesis",
-        .description = "VoiRS Speech Synthesis Service",
-        .exec_start = "/usr/bin/voirs-daemon",
-        .user = "voirs",
-        .group = "audio",
-        .restart = "always",
-        .restart_sec = 5,
-        .wanted_by = "multi-user.target"
-    };
-    
-    voirs_linux_create_systemd_service(&service_config);
-}
-
-// Service control
-voirs_linux_start_service("voirs-synthesis");
-voirs_linux_stop_service("voirs-synthesis");
-voirs_linux_restart_service("voirs-synthesis");
-
-// Check service status
-VoirsSystemDServiceStatus status;
-if (voirs_linux_get_service_status("voirs-synthesis", &status)) {
-    printf("Service status: %s\n", status.active_state);
-    printf("Main PID: %d\n", status.main_pid);
-    printf("Memory usage: %zu KB\n", status.memory_current / 1024);
-}
-```
-
-### Journal Logging
-
-```c
-// Log to SystemD journal
-voirs_linux_journal_log(VOIRS_LOG_INFO, "VoiRS synthesis started");
-voirs_linux_journal_log(VOIRS_LOG_ERROR, "Failed to load voice model: %s", error_msg);
-
-// Structured logging
-VoirsJournalField fields[] = {
-    {"MESSAGE", "Synthesis completed"},
-    {"VOICE_MODEL", "neural_voice_v2"},
-    {"DURATION_MS", "1234"},
-    {"OUTPUT_FORMAT", "wav"},
-    {NULL, NULL}
-};
-
-voirs_linux_journal_log_structured(VOIRS_LOG_INFO, fields);
-```
-
-## Real-time Scheduling
-
-Linux real-time scheduling capabilities for low-latency audio processing.
-
-### RT Scheduling Setup
-
-```c
-// Enable real-time scheduling
-if (voirs_linux_enable_rt_scheduling()) {
-    printf("Real-time scheduling enabled\n");
-    
-    // Set RT priority for audio threads
-    voirs_linux_set_thread_priority(VOIRS_SCHED_FIFO, 80);
-    
-    // Set RT scheduling policy
-    voirs_linux_set_scheduling_policy(VOIRS_SCHED_RR);  // Round-robin
-} else {
-    printf("Real-time scheduling not available\n");
-    // Check if user has RT privileges
-    if (!voirs_linux_check_rt_privileges()) {
-        printf("Add user to 'audio' group for RT scheduling\n");
-    }
-}
-
-// Configure RT limits
-VoirsRTLimits rt_limits = {
-    .rtprio = 95,           // RT priority limit
-    .nice = -20,            // Nice level
-    .memlock = 256 * 1024,  // Memory lock limit (KB)
-    .rttime = -1            // Unlimited RT CPU time
-};
-
-voirs_linux_set_rt_limits(&rt_limits);
-```
-
-### Thread Affinity
-
-```c
-// Set CPU affinity for audio threads
-cpu_set_t cpuset;
-CPU_ZERO(&cpuset);
-CPU_SET(2, &cpuset);  // Bind to CPU 2
-CPU_SET(3, &cpuset);  // Bind to CPU 3
-
-voirs_linux_set_thread_affinity(&cpuset);
-
-// Isolate audio threads from system interrupts
-voirs_linux_isolate_audio_cpus(2, 3);  // Isolate CPUs 2 and 3
-
-// Set CPU governor for performance
-voirs_linux_set_cpu_governor("performance");
-```
-
-### IRQ Optimization
-
-```c
-// Optimize interrupt handling for audio
-voirs_linux_optimize_audio_irqs();
-
-// Move IRQs away from audio processing CPUs
-voirs_linux_move_irqs_away_from_cpus(2, 3);
-
-// Set audio device IRQ affinity
-voirs_linux_set_audio_irq_affinity(audio_device_irq, 1);  // CPU 1
-```
-
-## NUMA Optimization
-
-Non-Uniform Memory Access optimization for multi-socket systems.
-
-### NUMA Awareness
-
-```c
-// Check NUMA topology
-int numa_nodes = voirs_linux_get_numa_node_count();
-printf("NUMA nodes: %d\n", numa_nodes);
-
-if (numa_nodes > 1) {
-    // Get current NUMA node
-    int current_node = voirs_linux_get_current_numa_node();
-    printf("Current NUMA node: %d\n", current_node);
-    
-    // Allocate memory on specific NUMA node
-    void* memory = voirs_linux_numa_alloc(1024 * 1024, current_node);
-    
-    // Bind threads to NUMA node
-    voirs_linux_bind_to_numa_node(current_node);
-    
-    // Free NUMA memory
-    voirs_linux_numa_free(memory, 1024 * 1024);
-}
-```
-
-### NUMA-aware Memory Allocation
-
-```c
-// Create NUMA-aware memory pool
-VoirsLinuxNumaPool* numa_pool = voirs_linux_create_numa_pool();
-
-// Allocate on preferred node
-void* buffer = voirs_linux_numa_pool_allocate(numa_pool, 4096);
-
-// Allocate on specific node
-void* buffer2 = voirs_linux_numa_pool_allocate_on_node(numa_pool, 4096, 1);
-
-// Free allocations
-voirs_linux_numa_pool_free(numa_pool, buffer, 4096);
-voirs_linux_numa_pool_free(numa_pool, buffer2, 4096);
-
-voirs_linux_destroy_numa_pool(numa_pool);
-```
-
-## Build Configuration
-
-### Package Dependencies
+This page documents the real, currently-exported C API of the `voirs-ffi` crate (library name
+`voirs`) as built for Linux, and how to build/link against it. It replaces an earlier revision
+that documented roughly 90 functions, of which only about a dozen actually existed; every symbol
+listed below was verified against `crates/voirs-ffi/src/**/*.rs` directly.
+
+No C header ships with this crate (there is no `cbindgen` build step), so every prototype below is
+what a caller must declare itself.
+
+## Building
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get install \
-    libpulse-dev \
-    libasound2-dev \
-    libdbus-1-dev \
-    libsystemd-dev \
-    libnuma-dev
-
-# Fedora/RHEL
-sudo dnf install \
-    pulseaudio-libs-devel \
-    alsa-lib-devel \
-    dbus-devel \
-    systemd-devel \
-    numactl-devel
-
-# Arch Linux
-sudo pacman -S \
-    libpulse \
-    alsa-lib \
-    dbus \
-    systemd \
-    numactl
+# From the workspace root
+cargo build --release -p voirs-ffi
 ```
 
-### CMake Configuration
+This produces `target/release/libvoirs.so` (crate `[lib] name = "voirs"`,
+`crate-type = ["cdylib", "rlib"]` — dynamic library only, no static `.a`).
 
-```cmake
-# Linux-specific configuration
-if(UNIX AND NOT APPLE)
-    find_package(PkgConfig REQUIRED)
-    
-    # PulseAudio
-    pkg_check_modules(PULSEAUDIO libpulse)
-    if(PULSEAUDIO_FOUND)
-        target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_PULSEAUDIO=1)
-        target_link_libraries(your_app ${PULSEAUDIO_LIBRARIES})
-        target_include_directories(your_app PRIVATE ${PULSEAUDIO_INCLUDE_DIRS})
-    endif()
-    
-    # ALSA
-    pkg_check_modules(ALSA alsa)
-    if(ALSA_FOUND)
-        target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_ALSA=1)
-        target_link_libraries(your_app ${ALSA_LIBRARIES})
-    endif()
-    
-    # D-Bus
-    pkg_check_modules(DBUS dbus-1)
-    if(DBUS_FOUND)
-        target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_DBUS=1)
-        target_link_libraries(your_app ${DBUS_LIBRARIES})
-    endif()
-    
-    # SystemD
-    pkg_check_modules(SYSTEMD libsystemd)
-    if(SYSTEMD_FOUND)
-        target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_SYSTEMD=1)
-        target_link_libraries(your_app ${SYSTEMD_LIBRARIES})
-    endif()
-    
-    # NUMA
-    find_library(NUMA_LIBRARY numa)
-    if(NUMA_LIBRARY)
-        target_compile_definitions(your_app PRIVATE VOIRS_ENABLE_NUMA=1)
-        target_link_libraries(your_app ${NUMA_LIBRARY})
-    endif()
-    
-    # Threading
-    find_package(Threads REQUIRED)
-    target_link_libraries(your_app Threads::Threads)
-    
-    target_link_libraries(your_app voirs_ffi)
-endif()
-```
-
-### Compiler Flags
+To get real PulseAudio/ALSA/D-Bus behavior out of the nine `voirs_linux_*` functions below
+(instead of the degraded/`Err` behavior they fall back to without it), build with:
 
 ```bash
-# Compile with Linux features
-gcc -o example example.c \
-    -lvoirs_ffi \
-    -lpulse \
-    -lasound \
-    -ldbus-1 \
-    -lsystemd \
-    -lnuma \
-    -lpthread \
-    -lrt
+cargo build --release -p voirs-ffi --features linux-platform
 ```
 
-## Examples
+`linux-platform` pulls in the optional `alsa`, `pulse`, and `dbus` crates
+(`crates/voirs-ffi/Cargo.toml`). It is off by default to keep the default build dependency-light.
 
-### Complete Linux Integration Example
+## Linking
+
+```bash
+gcc myapp.c -I. -Ltarget/release -lvoirs -o myapp
+```
+
+At runtime the loader needs to find `libvoirs.so`. Either:
+
+```bash
+# 1. Environment variable (simplest for local development/testing)
+LD_LIBRARY_PATH=target/release ./myapp
+
+# 2. Bake an rpath into the binary at link time (no env var needed afterwards)
+gcc myapp.c -I. -Ltarget/release -Wl,-rpath,'$ORIGIN' -lvoirs -o myapp   # if libvoirs.so sits next to myapp
+gcc myapp.c -I. -Ltarget/release -Wl,-rpath,/absolute/install/path -lvoirs -o myapp
+
+# 3. Install the library where the dynamic linker already looks
+sudo install -m644 target/release/libvoirs.so /usr/local/lib/
+sudo ldconfig
+```
+
+Verify resolution with `ldd myapp` — `libvoirs.so` should resolve to a real path, not
+`not found`.
+
+## Minimal example
+
+See the [crate README's Quick Start](../../README.md#quick-start) for a complete, compilable
+`voirs_synthesize_advanced` example (it declares the small subset of the real ABI it uses, since
+no header ships). Nothing in it is Linux-specific; it builds and links the same way as shown above.
+
+## Linux-specific functions (`src/platform/linux.rs`)
+
+These 9 functions only compile when `target_os = "linux"` (`crates/voirs-ffi/src/platform/mod.rs`
+gates `pub mod linux;` on it). Notes below reflect what the code actually does today, not what the
+names might suggest:
 
 ```c
-#include "voirs/voirs_ffi.h"
-#include "voirs/platform/linux.h"
+/* Opaque handles -- only ever used through the functions below. */
+typedef struct LinuxPulseAudio LinuxPulseAudio;
+typedef struct LinuxALSA LinuxALSA;
+typedef struct LinuxDBus LinuxDBus;
 
-int main() {
-    // Initialize Linux-specific features
-    if (!voirs_linux_initialize()) {
-        fprintf(stderr, "Failed to initialize Linux features\n");
-        return 1;
-    }
-    
-    // Initialize PulseAudio
-    VoirsLinuxPulseAudio* pulse = voirs_linux_init_pulseaudio();
-    VoirsLinuxALSA* alsa = NULL;
-    
-    if (!pulse) {
-        printf("PulseAudio not available, falling back to ALSA\n");
-        alsa = voirs_linux_init_alsa();
-        if (!alsa) {
-            fprintf(stderr, "Neither PulseAudio nor ALSA available\n");
-            return 1;
-        }
-    }
-    
-    // Initialize D-Bus for system integration
-    VoirsLinuxDBus* dbus = voirs_linux_init_dbus();
-    
-    // Configure for optimal Linux performance
-    VoirsAudioConfig config = {
-        .backend = pulse ? "pulseaudio" : "alsa",
-        .sample_rate = 44100,
-        .buffer_size = 1024,
-        .channels = 2
-    };
-    
-    // Enable real-time scheduling if available
-    if (voirs_linux_enable_rt_scheduling()) {
-        printf("Real-time scheduling enabled\n");
-        config.buffer_size = 256;  // Smaller buffer for lower latency
-    }
-    
-    // Create pipeline with Linux optimizations
-    VoirsPipeline* pipeline = voirs_create_pipeline_with_config(&config);
-    
-    // Enable NUMA optimization if available
-    if (voirs_linux_get_numa_node_count() > 1) {
-        voirs_linux_enable_numa_optimization(pipeline);
-    }
-    
-    // Synthesize speech
-    const char* text = "Hello from VoiRS on Linux!";
-    VoirsAudioBuffer* audio = voirs_synthesize(pipeline, text);
-    
-    if (audio) {
-        // Save audio file
-        voirs_save_audio(audio, "output.wav", VOIRS_FORMAT_WAV);
-        
-        // Send desktop notification
-        if (dbus) {
-            voirs_linux_send_notification(dbus, "VoiRS", 
-                                         "Synthesis Complete", 
-                                         "Audio saved to output.wav");
-        }
-        
-        voirs_destroy_audio_buffer(audio);
-    }
-    
-    // Clean up
-    voirs_destroy_pipeline(pipeline);
-    if (pulse) voirs_linux_destroy_pulseaudio(pulse);
-    if (alsa) voirs_linux_destroy_alsa(alsa);
-    if (dbus) voirs_linux_destroy_dbus(dbus);
-    voirs_linux_cleanup();
-    
-    return 0;
-}
+LinuxPulseAudio *voirs_linux_init_pulseaudio(void);
+void voirs_linux_destroy_pulseaudio(LinuxPulseAudio *pulse);
+
+LinuxALSA *voirs_linux_init_alsa(void);
+void voirs_linux_destroy_alsa(LinuxALSA *alsa);
+
+LinuxDBus *voirs_linux_init_dbus(void);
+void voirs_linux_destroy_dbus(LinuxDBus *dbus);
+
+bool voirs_linux_send_notification(LinuxDBus *dbus,
+                                    const char *app_name,
+                                    const char *title,
+                                    const char *message);
+
+bool voirs_linux_is_systemd_available(void);
+bool voirs_linux_enable_rt_scheduling(void);
 ```
 
-### Real-time Audio Processing with RT Scheduling
+Caveats verified against source (`crates/voirs-ffi/src/platform/linux.rs`):
 
-```c
-#include <sched.h>
-#include <sys/mman.h>
+- `voirs_linux_init_pulseaudio`/`voirs_linux_init_alsa` check whether the respective
+  daemon/subsystem is reachable (e.g. running `pulseaudio --check`) but do not yet open a real
+  audio stream — they return a handle that later calls can be extended to use.
+- `voirs_linux_send_notification` shells out to the `notify-send` CLI (from `libnotify-bin` or
+  equivalent), **not** a direct D-Bus API call — it requires that binary to be on `PATH`.
+- `voirs_linux_is_systemd_available` is real: it checks for `/run/systemd/system`.
+- `voirs_linux_enable_rt_scheduling` is currently a **placeholder that always returns `true`
+  without calling `sched_setscheduler`** — its own source comment says so verbatim
+  ("Implementation would use sched_setscheduler. For now, return success as placeholder."). Do not
+  rely on it for actual real-time scheduling today.
 
-void setup_realtime_linux() {
-    // Lock memory to prevent page faults
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-        perror("mlockall failed");
-    }
-    
-    // Set real-time scheduling
-    struct sched_param param;
-    param.sched_priority = 80;
-    
-    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-        perror("sched_setscheduler failed");
-        // Continue without RT scheduling
-    }
-    
-    // Set CPU affinity
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(2, &cpuset);  // Use CPU 2 for audio processing
-    
-    if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) != 0) {
-        perror("pthread_setaffinity_np failed");
-    }
-    
-    // Create real-time audio thread
-    pthread_t audio_thread;
-    pthread_attr_t attr;
-    struct sched_param thread_param;
-    
-    pthread_attr_init(&attr);
-    pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
-    thread_param.sched_priority = 85;  // Higher than main thread
-    pthread_attr_setschedparam(&attr, &thread_param);
-    
-    pthread_create(&audio_thread, &attr, audio_thread_func, NULL);
-    pthread_attr_destroy(&attr);
-}
+## Cross-platform functions (identical on Linux/macOS/Windows)
 
-void* audio_thread_func(void* arg) {
-    // Set thread name for debugging
-    pthread_setname_np(pthread_self(), "voirs-audio");
-    
-    // Initialize audio processing
-    VoirsLinuxALSA* alsa = voirs_linux_init_alsa();
-    VoirsALSAPCM* pcm = voirs_linux_open_alsa_pcm("hw:0,0", VOIRS_ALSA_STREAM_PLAYBACK);
-    
-    // Configure for low latency
-    VoirsALSAPCMConfig config = {
-        .sample_rate = 48000,
-        .channels = 2,
-        .format = VOIRS_ALSA_FORMAT_S32_LE,
-        .period_size = 64,   // Very small for low latency
-        .buffer_size = 256,
-        .periods = 4
-    };
-    
-    voirs_linux_configure_alsa_pcm(pcm, &config);
-    
-    // Real-time audio processing loop
-    float* buffer = malloc(config.period_size * config.channels * sizeof(float));
-    
-    while (running) {
-        // Generate audio
-        voirs_process_audio_realtime(pipeline, buffer, config.period_size);
-        
-        // Write to ALSA
-        int frames_written = voirs_linux_write_alsa_pcm(pcm, buffer, config.period_size);
-        if (frames_written != config.period_size) {
-            // Handle underrun
-            voirs_linux_recover_alsa_pcm(pcm);
-        }
-    }
-    
-    free(buffer);
-    voirs_linux_close_alsa_pcm(pcm);
-    voirs_linux_destroy_alsa(alsa);
-    
-    return NULL;
-}
-```
+Everything below compiles regardless of target OS. Full signatures live in the source files named;
+this is a complete, machine-checked name index grouped by module (not padded, not invented):
+
+**Pipeline lifecycle** (`src/c_api/core.rs`, 6 functions)
+
+`voirs_create_pipeline`, `voirs_create_pipeline_with_config`, `voirs_destroy_pipeline`, `voirs_get_pipeline_count`, `voirs_is_pipeline_benchmark_placeholder`, `voirs_is_pipeline_valid`
+
+**Synthesis** (`src/c_api/synthesis.rs`, 10 functions)
+
+`voirs_free_batch_synthesis_result`, `voirs_free_synthesis_result`, `voirs_get_synthesis_stats`, `voirs_reset_synthesis_stats`, `voirs_synthesize_advanced`, `voirs_synthesize_batch`, `voirs_synthesize_batch_advanced`, `voirs_synthesize_streaming`, `voirs_synthesize_streaming_advanced`, `voirs_synthesize_streaming_realtime`
+
+**Voice management** (`src/c_api/voice.rs`, 6 functions)
+
+`voirs_free_voice_info`, `voirs_free_voice_list`, `voirs_get_voice`, `voirs_get_voice_info`, `voirs_list_voices`, `voirs_set_voice`
+
+**Audio post-processing / effects (extended)** (`src/c_api/audio.rs`, 8 functions)
+
+`voirs_audio_apply_effects`, `voirs_audio_crossfade`, `voirs_audio_duplicate`, `voirs_audio_get_statistics`, `voirs_audio_get_supported_formats`, `voirs_audio_mix`, `voirs_audio_save_flac`, `voirs_audio_save_mp3`
+
+**Audio analysis & DSP utilities** (`src/utils/audio.rs`, 27 functions)
+
+`voirs_audio_analyze`, `voirs_audio_apply_compression`, `voirs_audio_apply_multiband_eq`, `voirs_audio_calculate_brightness`, `voirs_audio_calculate_hnr`, `voirs_audio_calculate_spectral_flux`, `voirs_audio_calculate_spectral_rolloff`, `voirs_audio_enhance_quality`, `voirs_audio_fade_in`, `voirs_audio_fade_out`, `voirs_audio_get_peak`, `voirs_audio_get_rms`, `voirs_audio_low_pass_filter`, `voirs_audio_normalize`, `voirs_audio_remove_dc`, `voirs_audio_soft_limiter`, `voirs_performance_monitor_create`, `voirs_performance_monitor_free`, `voirs_performance_monitor_get_summary`, `voirs_performance_monitor_record_audio_time`, `voirs_performance_monitor_record_cpu`, `voirs_performance_monitor_record_memory`, `voirs_regression_detector_add_measurement`, `voirs_regression_detector_check`, `voirs_regression_detector_create`, `voirs_regression_detector_free`, `voirs_regression_detector_set_baseline`
+
+**Sample format / rate conversion** (`src/c_api/convert.rs`, 17 functions)
+
+`voirs_audio_convert_format`, `voirs_convert_double_to_float`, `voirs_convert_float_to_double`, `voirs_convert_float_to_int16`, `voirs_convert_float_to_int24`, `voirs_convert_float_to_int32`, `voirs_convert_float_to_uint16`, `voirs_convert_float_to_uint32`, `voirs_convert_float_to_uint8`, `voirs_convert_int16_to_float`, `voirs_convert_int24_to_float`, `voirs_convert_mono_to_stereo`, `voirs_convert_sample_rate`, `voirs_convert_stereo_to_mono`, `voirs_convert_uint16_to_float`, `voirs_convert_uint32_to_float`, `voirs_convert_uint8_to_float`
+
+**Configuration builders & validation** (`src/c_api/config.rs`, 8 functions)
+
+`voirs_config_apply_synthesis_preset`, `voirs_config_create_model_default`, `voirs_config_create_performance_default`, `voirs_config_create_synthesis_default`, `voirs_config_get_synthesis_info`, `voirs_config_validate_model`, `voirs_config_validate_performance`, `voirs_config_validate_synthesis`
+
+**Threading & async/callback synthesis** (`src/c_api/threading.rs`, 13 functions)
+
+`voirs_cancel_synthesis`, `voirs_get_active_operations`, `voirs_get_global_thread_count`, `voirs_get_max_concurrent`, `voirs_get_thread_stats`, `voirs_is_thread_pool_enabled`, `voirs_register_callbacks`, `voirs_set_global_thread_count`, `voirs_set_max_concurrent`, `voirs_set_thread_pool_enabled`, `voirs_synthesize_async`, `voirs_synthesize_parallel`, `voirs_unregister_callbacks`
+
+**Custom allocator control** (`src/c_api/allocator.rs`, 6 functions)
+
+`voirs_get_allocator_name`, `voirs_get_allocator_stats`, `voirs_get_memory_fragmentation`, `voirs_has_custom_allocator`, `voirs_reset_allocator_stats`, `voirs_set_allocator`
+
+**Zero-copy buffers, ring buffers, memory-mapped files** (`src/c_api/zero_copy.rs`, 32 functions)
+
+`voirs_memory_map_advise_random`, `voirs_memory_map_advise_sequential`, `voirs_memory_map_data`, `voirs_memory_map_data_mut`, `voirs_memory_map_destroy`, `voirs_memory_map_open_read`, `voirs_memory_map_open_write`, `voirs_memory_map_size`, `voirs_memory_map_sync`, `voirs_zero_copy_batch_copy`, `voirs_zero_copy_buffer_capacity`, `voirs_zero_copy_buffer_clone`, `voirs_zero_copy_buffer_create`, `voirs_zero_copy_buffer_data`, `voirs_zero_copy_buffer_data_mut`, `voirs_zero_copy_buffer_destroy`, `voirs_zero_copy_buffer_len`, `voirs_zero_copy_buffer_ref_count`, `voirs_zero_copy_buffer_set_len`, `voirs_zero_copy_buffer_slice`, `voirs_zero_copy_deinterleave`, `voirs_zero_copy_interleave`, `voirs_zero_copy_ring_available_read`, `voirs_zero_copy_ring_available_write`, `voirs_zero_copy_ring_capacity`, `voirs_zero_copy_ring_create`, `voirs_zero_copy_ring_destroy`, `voirs_zero_copy_ring_read`, `voirs_zero_copy_ring_write`, `voirs_zero_copy_view_data`, `voirs_zero_copy_view_destroy`, `voirs_zero_copy_view_len`
+
+**Misc utilities (version, logging, validation)** (`src/c_api/utils.rs`, 16 functions)
+
+`voirs_calculate_aligned_size`, `voirs_get_build_info`, `voirs_get_error_description`, `voirs_get_memory_stats`, `voirs_get_process_memory_usage`, `voirs_get_recommended_buffer_size`, `voirs_get_system_info`, `voirs_get_version_string`, `voirs_is_log_level_enabled`, `voirs_log_message`, `voirs_reset_memory_stats`, `voirs_set_log_callback`, `voirs_validate_audio_format`, `voirs_validate_buffer`, `voirs_validate_range_float`, `voirs_validate_range_uint`
+
+**Memory statistics (buffer tracking)** (`src/memory.rs`, 4 functions)
+
+`voirs_memory_check_leaks`, `voirs_memory_clear_pools`, `voirs_memory_get_stats`, `voirs_memory_reset_stats`
+
+**Performance / SIMD / batch helpers** (`src/performance.rs`, 6 functions)
+
+`voirs_batch_convert_format`, `voirs_batch_process_audio`, `voirs_convert_f32_to_i16_optimized`, `voirs_detect_cpu_features`, `voirs_get_optimal_performance_config`, `voirs_interleave_audio_optimized`
+
+**Batch-config helpers** (`src/utils/batch_ops.rs`, 6 functions)
+
+`voirs_batch_config_create`, `voirs_batch_config_free`, `voirs_batch_config_set_cache`, `voirs_batch_config_set_sample_rate`, `voirs_batch_config_set_voice`, `voirs_batch_config_set_workers`
+
+**Error message localization** (`src/error/i18n.rs`, 3 functions)
+
+`voirs_get_locale`, `voirs_get_localized_message`, `voirs_set_locale`
+
+**Structured error aggregation** (`src/error/structured.rs`, 3 functions)
+
+`voirs_clear_error_aggregator`, `voirs_get_error_stats`, `voirs_get_recent_errors`
+
+**Error recovery hints** (`src/error/recovery.rs`, 2 functions)
+
+`voirs_attempt_recovery`, `voirs_get_recovery_stats`
+
+**Generic platform info** (`src/platform/mod.rs`, 6 functions)
+
+`voirs_get_audio_config_low_latency`, `voirs_get_audio_config_optimal`, `voirs_get_optimal_buffer_size`, `voirs_get_optimal_threads`, `voirs_get_platform_info`, `voirs_supports_hardware_acceleration`
+
+**Linux package building (.deb) — compiled on every OS this crate builds for** (`src/platform/packages.rs`, 4 functions)
+
+`voirs_package_build_all`, `voirs_package_build_debian`, `voirs_package_create_manager`, `voirs_package_destroy_manager`
+
+**Visual Studio project integration — compiled on every OS this crate builds for** (`src/platform/vs.rs`, 5 functions)
+
+`voirs_vs_create_integration`, `voirs_vs_destroy_integration`, `voirs_vs_get_version`, `voirs_vs_install_integration`, `voirs_vs_verify_installation`
+
+**Xcode project integration — compiled on every OS this crate builds for** (`src/platform/xcode.rs`, 5 functions)
+
+`voirs_xcode_build_framework`, `voirs_xcode_create_integration`, `voirs_xcode_destroy_integration`, `voirs_xcode_install_integration`, `voirs_xcode_verify_installation`
+
+**Core error/string/buffer plumbing** (`src/lib.rs`, 6 functions)
+
+`voirs_clear_error`, `voirs_error_message`, `voirs_free_audio_buffer`, `voirs_free_string`, `voirs_get_last_error`, `voirs_has_error`
+
+*(cross-platform total: 199 functions, identical on Linux/macOS/Windows)*
+
+Full prototypes for the core subset used in the Quick Start example (pipeline lifecycle, synthesis,
+voice management, error handling) are in the [crate README](../../README.md).
+
+## Building a Debian package
+
+`voirs_package_create_manager`, `voirs_package_build_debian`, `voirs_package_build_all`, and
+`voirs_package_destroy_manager` (`src/platform/packages.rs`) provide `.deb`-building support and
+are real, but they are dev-tooling entry points (packaging the crate's own build output), not
+something a typical embedding application calls at synthesis time.
 
 ## Troubleshooting
 
-### Common Issues
-
-#### PulseAudio Connection Failed
-```c
-// Check PulseAudio status
-if (!voirs_linux_pulseaudio_is_running(NULL)) {
-    printf("PulseAudio not running\n");
-    system("pulseaudio --check || pulseaudio --start");
-}
-
-// Check user permissions
-if (!voirs_linux_check_audio_group()) {
-    printf("User not in audio group\n");
-    printf("Run: sudo usermod -a -G audio $USER\n");
-}
-```
-
-#### ALSA Permission Issues
-```c
-// Check ALSA device permissions
-if (!voirs_linux_check_alsa_permissions()) {
-    printf("ALSA device permission denied\n");
-    printf("Check /dev/snd/ permissions\n");
-}
-
-// List available ALSA devices
-voirs_linux_list_alsa_devices();
-```
-
-#### Real-time Scheduling Failed
-```c
-// Check RT limits
-VoirsRTLimits limits;
-if (voirs_linux_get_rt_limits(&limits)) {
-    printf("RT priority limit: %d\n", limits.rtprio);
-    printf("Memory lock limit: %zu KB\n", limits.memlock);
-} else {
-    printf("No RT limits configured\n");
-    printf("Configure /etc/security/limits.conf:\n");
-    printf("@audio - rtprio 95\n");
-    printf("@audio - memlock 256000\n");
-}
-```
-
-#### D-Bus Service Registration Failed
-```c
-// Check D-Bus daemon
-if (!voirs_linux_dbus_daemon_running()) {
-    printf("D-Bus daemon not running\n");
-    system("systemctl start dbus");
-}
-
-// Check service permissions
-if (!voirs_linux_check_dbus_policy("com.voirs.SpeechSynthesis")) {
-    printf("D-Bus policy not configured\n");
-    // Install D-Bus policy file
-}
-```
-
-### Debug Tools
-
-```c
-// Enable Linux-specific debugging
-voirs_linux_enable_debug_mode();
-voirs_linux_set_debug_level(VOIRS_DEBUG_VERBOSE);
-
-// Audio system debugging
-voirs_linux_debug_audio_system();
-voirs_linux_log_audio_devices();
-voirs_linux_check_audio_configuration();
-
-// Performance monitoring
-VoirsLinuxPerformanceMonitor* monitor = voirs_linux_create_performance_monitor();
-voirs_linux_start_monitoring(monitor);
-
-// ... perform operations ...
-
-VoirsLinuxPerformanceReport report;
-voirs_linux_get_performance_report(monitor, &report);
-printf("CPU usage: %.2f%%\n", report.cpu_usage);
-printf("Memory usage: %zu MB\n", report.memory_usage_mb);
-printf("Audio xruns: %u\n", report.audio_xruns);
-printf("RT violations: %u\n", report.rt_violations);
-
-voirs_linux_destroy_performance_monitor(monitor);
-```
-
-### Performance Tuning
-
-```c
-// System-wide audio optimizations
-voirs_linux_optimize_audio_system();
-
-// CPU governor settings
-voirs_linux_set_cpu_governor("performance");
-
-// IRQ optimization
-voirs_linux_optimize_audio_irqs();
-
-// Memory optimization
-voirs_linux_disable_swap_for_audio();
-voirs_linux_set_vm_swappiness(1);
-
-// Network optimization (if using network audio)
-voirs_linux_optimize_network_for_audio();
-```
-
-## Security Considerations
-
-- Real-time scheduling requires appropriate user permissions
-- D-Bus service registration may require policy configuration
-- SystemD service management requires appropriate privileges
-- ALSA direct access may bypass PulseAudio security policies
-
-## Version Compatibility
-
-VoiRS Linux integration supports:
-- Ubuntu 18.04 LTS and later
-- Fedora 30 and later
-- Debian 10 and later
-- Arch Linux (rolling release)
-- CentOS 8 and later
-- Most distributions with PulseAudio 12.0+ or ALSA 1.1.8+
-
-## Related Documentation
-
-- [C API Reference](api_reference.md)
-- [Memory Management](memory_management.md)
-- [Threading Guide](threading.md)
-- [Performance Optimization](performance.md)
+- **`error while loading shared libraries: libvoirs.so: cannot open shared object file`** — the
+  dynamic linker can't find the library; see [Linking](#linking) above.
+- **`undefined symbol: voirs_synthesize`** — that function does not exist. The one-shot
+  self-contained entry point is `voirs_synthesize_advanced`; the streaming entry points are
+  `voirs_synthesize_streaming`, `voirs_synthesize_streaming_advanced`, and
+  `voirs_synthesize_streaming_realtime`. See [C API overview](../../README.md#c-api-overview) in
+  the crate README.
+- **Synthesis returns `VOIRS_ERROR_SYNTHESIS_FAILED`/`VOIRS_ERROR_INITIALIZATION_FAILED`** — real
+  model weights could not be loaded (e.g. no network access on first run). Call
+  `voirs_get_last_error()` for the underlying `voirs_sdk` error message.

@@ -170,6 +170,17 @@ pub async fn run_voice_info(voice_id: &str, config: &AppConfig) -> Result<()> {
     Ok(())
 }
 
+/// Whether `voice_dir` holds a fully, successfully downloaded voice.
+///
+/// `voice.json` is written by [`run_download_voice`] only after every
+/// required model file has genuinely downloaded, so its presence (not just
+/// the directory's) is the real completion marker. Checking directory
+/// existence alone would also be true after a partial failure, which used to
+/// make the CLI falsely report "already downloaded" on every retry.
+fn is_voice_download_complete(voice_dir: &std::path::Path) -> bool {
+    voice_dir.join("voice.json").exists()
+}
+
 /// Run download voice command
 pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig) -> Result<()> {
     println!("Downloading voice: {}", voice_id);
@@ -182,11 +193,16 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
         voirs_sdk::VoirsError::audio_error(format!("Voice '{}' not found", voice_id))
     })?;
 
-    // Check if already downloaded
+    // Check if already downloaded. `voice.json` is written ONLY after every
+    // model file has genuinely downloaded (see below), so its presence is a
+    // real completion marker -- unlike merely checking that `voice_dir`
+    // exists, which would also be true after a PARTIAL failure and would
+    // then falsely report "already downloaded" on every retry.
     let cache_dir = config.pipeline.effective_cache_dir();
     let voice_dir = cache_dir.join("voices").join(voice_id);
+    let voice_config_path = voice_dir.join("voice.json");
 
-    if voice_dir.exists() && !force {
+    if is_voice_download_complete(&voice_dir) && !force {
         println!(
             "Voice '{}' is already downloaded. Use --force to re-download.",
             voice_id
@@ -214,9 +230,16 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
         println!("  {}: {}", model_type, model_path);
     }
 
-    // Download models from configured repositories
+    // Download models from configured repositories. If ANY required model
+    // fails to download from every configured repository, the whole
+    // operation fails closed: no placeholder files are ever written (a
+    // placeholder text file would fail to load as a real model later while
+    // the CLI reports success), and the incomplete `voice_dir` is removed so
+    // a subsequent run does not need `--force` to retry from a clean slate.
     let models_count = models_to_download.len();
-    for (model_type, model_path) in models_to_download {
+    let mut failed_models: Vec<String> = Vec::new();
+
+    for (model_type, model_path) in &models_to_download {
         let local_path = voice_dir.join(model_path);
 
         // Create parent directories if needed
@@ -228,6 +251,7 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
 
         // Try downloading from each repository until one succeeds
         let mut download_success = false;
+        let mut last_error: Option<String> = None;
         for (repo_index, repository) in config
             .pipeline
             .model_loading
@@ -251,26 +275,46 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
                 }
                 Err(e) => {
                     println!("    ✗ Failed to download from {}: {}", repository, e);
+                    last_error = Some(e.to_string());
                     continue;
                 }
             }
         }
 
-        // If all repositories failed, create a placeholder file as fallback
         if !download_success {
-            println!("    Creating placeholder file as fallback...");
-            std::fs::write(
-                &local_path,
-                format!("Placeholder for {} model: {}", model_type, model_path),
-            )
-            .map_err(voirs_sdk::VoirsError::from)?;
-
-            println!("    ⚠ Placeholder created: {}", local_path.display());
+            failed_models.push(format!(
+                "{} ({}): {}",
+                model_type,
+                model_path,
+                last_error.unwrap_or_else(|| "no repositories configured".to_string())
+            ));
         }
     }
 
-    // Save voice configuration
-    let voice_config_path = voice_dir.join("voice.json");
+    if !failed_models.is_empty() {
+        // Clean up the incomplete directory (best-effort) so a retry starts
+        // fresh instead of being short-circuited by the "already downloaded"
+        // check above.
+        let _ = std::fs::remove_dir_all(&voice_dir);
+
+        return Err(voirs_sdk::VoirsError::config_error(format!(
+            "Failed to download voice '{}': {} of {} model file(s) could not be downloaded from \
+             any configured repository:\n{}\nTried repositories: {}",
+            voice_id,
+            failed_models.len(),
+            models_count,
+            failed_models
+                .iter()
+                .map(|f| format!("  - {f}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            config.pipeline.model_loading.repositories.join(", ")
+        )));
+    }
+
+    // Save voice configuration. This is the completion marker consulted
+    // above, so it must only be written once every model has genuinely
+    // downloaded.
     let voice_json = serde_json::to_string_pretty(voice).map_err(|e| {
         voirs_sdk::VoirsError::config_error(format!("Failed to serialize voice config: {}", e))
     })?;
@@ -283,32 +327,25 @@ pub async fn run_download_voice(voice_id: &str, force: bool, config: &AppConfig)
     println!("  Models: {} files", models_count);
     println!();
     println!("Download completed successfully.");
-    if models_count > 0 {
-        println!("Model repositories used for download:");
-    } else {
-        println!("Note: No models were available for download.");
-        println!("Available repositories:");
-    }
+    println!("Model repositories used for download:");
     for repo in &config.pipeline.model_loading.repositories {
         println!("  - {}", repo);
     }
 
-    if models_count > 0 {
-        println!();
-        println!("Configuration:");
-        println!(
-            "  Timeout: {} seconds",
-            config.pipeline.model_loading.download_timeout_secs
-        );
-        println!(
-            "  Retries: {}",
-            config.pipeline.model_loading.download_retries
-        );
-        println!(
-            "  Verify checksums: {}",
-            config.pipeline.model_loading.verify_checksums
-        );
-    }
+    println!();
+    println!("Configuration:");
+    println!(
+        "  Timeout: {} seconds",
+        config.pipeline.model_loading.download_timeout_secs
+    );
+    println!(
+        "  Retries: {}",
+        config.pipeline.model_loading.download_retries
+    );
+    println!(
+        "  Verify checksums: {}",
+        config.pipeline.model_loading.verify_checksums
+    );
 
     Ok(())
 }
@@ -842,4 +879,84 @@ pub async fn run_preview_voice(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "voirs_voices_test_{}_{}_{}",
+            label,
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        std::fs::create_dir_all(&dir).expect("failed to create unique temp dir");
+        dir
+    }
+
+    /// Regression test: a directory that merely EXISTS (e.g. left behind by
+    /// a previously interrupted/failed download) must NOT be treated as a
+    /// complete download. Before the fix, `run_download_voice` checked
+    /// `voice_dir.exists()`, which is true even for a half-downloaded
+    /// directory containing nothing but leftover partial files.
+    #[test]
+    fn test_is_voice_download_complete_requires_voice_json() {
+        let voice_dir = unique_temp_dir("incomplete");
+
+        // Directory exists with SOME leftover content, but no voice.json.
+        std::fs::write(voice_dir.join("acoustic_model.safetensors"), b"partial").unwrap();
+        assert!(
+            !is_voice_download_complete(&voice_dir),
+            "a directory without voice.json must not be treated as fully downloaded"
+        );
+
+        // Once voice.json exists (written only after every model landed),
+        // it must be recognized as complete.
+        std::fs::write(voice_dir.join("voice.json"), b"{}").unwrap();
+        assert!(is_voice_download_complete(&voice_dir));
+
+        std::fs::remove_dir_all(&voice_dir).ok();
+    }
+
+    #[test]
+    fn test_is_voice_download_complete_missing_directory() {
+        let voice_dir = std::env::temp_dir().join(format!(
+            "voirs_voices_test_never_created_{}_{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        assert!(!is_voice_download_complete(&voice_dir));
+    }
+
+    /// Regression test for the core finding: a real download failure (every
+    /// repository unreachable) must surface as a real `Err` from
+    /// `download_model_file`, which is the exact primitive
+    /// `run_download_voice` now propagates instead of falling back to
+    /// writing a placeholder text file in place of the model.
+    #[tokio::test]
+    async fn test_download_model_file_fails_closed_on_unreachable_repository() {
+        let dest_dir = unique_temp_dir("download_fail");
+        let local_path = dest_dir.join("acoustic_model.safetensors");
+
+        // Loopback port with (almost certainly) nothing listening: a real
+        // connection attempt that fails fast and deterministically, without
+        // depending on external network availability.
+        let unreachable_url = "http://127.0.0.1:1/voices/does-not-exist/model.safetensors";
+
+        let config = AppConfig::default();
+        let result = download_model_file(unreachable_url, &local_path, &config).await;
+
+        assert!(
+            result.is_err(),
+            "downloading from an unreachable repository must return Err, not silently succeed"
+        );
+        assert!(
+            !local_path.exists(),
+            "no file (placeholder or otherwise) may be written when the real download fails"
+        );
+
+        std::fs::remove_dir_all(&dest_dir).ok();
+    }
 }

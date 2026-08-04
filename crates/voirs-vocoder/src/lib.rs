@@ -101,7 +101,7 @@ pub enum VocoderError {
     #[error("Other error: {0}")]
     Other(String),
 
-    #[cfg(feature = "candle")]
+    /// (candle-core is a hard dependency; see voirs-vocoder/Cargo.toml)
     #[error("Candle error: {0}")]
     CandleError(#[from] candle_core::Error),
 

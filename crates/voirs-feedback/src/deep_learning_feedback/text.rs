@@ -81,14 +81,54 @@ pub(super) fn mean_pool(token_embeddings: &[Vec<f32>]) -> Vec<f32> {
 /// state-of-the-art, but every entry genuinely contributes to the score
 /// based on the actual words present in the input -- never a constant.
 const POSITIVE_WORDS: &[&str] = &[
-    "good", "great", "excellent", "clear", "well", "nice", "improved", "improving", "strong",
-    "correct", "accurate", "natural", "confident", "fluent", "smooth", "steady", "consistent",
-    "success", "successful", "perfect", "better", "best", "helpful", "encouraging",
+    "good",
+    "great",
+    "excellent",
+    "clear",
+    "well",
+    "nice",
+    "improved",
+    "improving",
+    "strong",
+    "correct",
+    "accurate",
+    "natural",
+    "confident",
+    "fluent",
+    "smooth",
+    "steady",
+    "consistent",
+    "success",
+    "successful",
+    "perfect",
+    "better",
+    "best",
+    "helpful",
+    "encouraging",
 ];
 const NEGATIVE_WORDS: &[&str] = &[
-    "bad", "poor", "unclear", "wrong", "weak", "incorrect", "inaccurate", "awkward", "difficult",
-    "hard", "struggle", "struggling", "fail", "failed", "error", "mistake", "inconsistent",
-    "hesitant", "worse", "worst", "unnatural", "choppy",
+    "bad",
+    "poor",
+    "unclear",
+    "wrong",
+    "weak",
+    "incorrect",
+    "inaccurate",
+    "awkward",
+    "difficult",
+    "hard",
+    "struggle",
+    "struggling",
+    "fail",
+    "failed",
+    "error",
+    "mistake",
+    "inconsistent",
+    "hesitant",
+    "worse",
+    "worst",
+    "unnatural",
+    "choppy",
 ];
 
 /// Sentiment scores derived from real lexicon matching against `text`.
@@ -106,7 +146,10 @@ pub(super) struct LexiconSentiment {
 pub(super) fn lexicon_sentiment(text: &str) -> LexiconSentiment {
     let words: Vec<String> = text
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect();
 
@@ -119,8 +162,14 @@ pub(super) fn lexicon_sentiment(text: &str) -> LexiconSentiment {
         };
     }
 
-    let positive_hits = words.iter().filter(|w| POSITIVE_WORDS.contains(&w.as_str())).count();
-    let negative_hits = words.iter().filter(|w| NEGATIVE_WORDS.contains(&w.as_str())).count();
+    let positive_hits = words
+        .iter()
+        .filter(|w| POSITIVE_WORDS.contains(&w.as_str()))
+        .count();
+    let negative_hits = words
+        .iter()
+        .filter(|w| NEGATIVE_WORDS.contains(&w.as_str()))
+        .count();
     let total_hits = positive_hits + negative_hits;
 
     if total_hits == 0 {
@@ -171,8 +220,23 @@ pub(super) fn rule_based_pos_tag(word: &str, is_sentence_start: bool) -> &'stati
     }
     if matches!(
         lower.as_str(),
-        "is" | "are" | "was" | "were" | "be" | "been" | "am" | "do" | "does" | "did" | "have"
-            | "has" | "had" | "will" | "would" | "can" | "could" | "should"
+        "is" | "are"
+            | "was"
+            | "were"
+            | "be"
+            | "been"
+            | "am"
+            | "do"
+            | "does"
+            | "did"
+            | "have"
+            | "has"
+            | "had"
+            | "will"
+            | "would"
+            | "can"
+            | "could"
+            | "should"
     ) {
         return "VERB";
     }
@@ -186,7 +250,10 @@ pub(super) fn rule_based_pos_tag(word: &str, is_sentence_start: bool) -> &'stati
 /// per distinct word actually present) rather than always `None`.
 pub(super) fn identity_word_senses(text: &str) -> HashMap<String, String> {
     text.split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .map(|w| (w.clone(), w))
         .collect()
@@ -234,14 +301,23 @@ mod tests {
     #[test]
     fn test_lexicon_sentiment_detects_positive() {
         let sentiment = lexicon_sentiment("Your pronunciation is excellent and very clear");
-        assert!(sentiment.overall > 0.0, "expected positive sentiment: {}", sentiment.overall);
+        assert!(
+            sentiment.overall > 0.0,
+            "expected positive sentiment: {}",
+            sentiment.overall
+        );
         assert!(sentiment.positive > sentiment.negative);
     }
 
     #[test]
     fn test_lexicon_sentiment_detects_negative() {
-        let sentiment = lexicon_sentiment("Your pronunciation was unclear and awkward, a poor attempt");
-        assert!(sentiment.overall < 0.0, "expected negative sentiment: {}", sentiment.overall);
+        let sentiment =
+            lexicon_sentiment("Your pronunciation was unclear and awkward, a poor attempt");
+        assert!(
+            sentiment.overall < 0.0,
+            "expected negative sentiment: {}",
+            sentiment.overall
+        );
         assert!(sentiment.negative > sentiment.positive);
     }
 
@@ -269,11 +345,15 @@ mod tests {
         assert_eq!(rule_based_pos_tag("42", false), "NUM");
         assert_eq!(rule_based_pos_tag("Paris", false), "PROPN");
         // Not every word collapses to the same tag (the old behavior).
-        let tags: std::collections::HashSet<&str> = ["quickly", "running", "the", "42", "Paris", "cat"]
-            .iter()
-            .map(|w| rule_based_pos_tag(w, false))
-            .collect();
-        assert!(tags.len() > 1, "tags must genuinely vary with word shape: {tags:?}");
+        let tags: std::collections::HashSet<&str> =
+            ["quickly", "running", "the", "42", "Paris", "cat"]
+                .iter()
+                .map(|w| rule_based_pos_tag(w, false))
+                .collect();
+        assert!(
+            tags.len() > 1,
+            "tags must genuinely vary with word shape: {tags:?}"
+        );
     }
 
     #[test]

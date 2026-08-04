@@ -50,12 +50,21 @@ pub async fn run_download_model(
     Ok(())
 }
 
-/// Check if model is already installed
+/// Check if model is already installed.
+///
+/// Checks for `.voirs-model.json`, which [`create_model_config`] writes only
+/// after every file has downloaded and [`verify_downloaded_files`] has
+/// confirmed real sizes match -- i.e. a genuine completion marker. Checking
+/// only `model_path.exists()` would also be true after a previous run failed
+/// partway through `download_model_files` (which, per its own doc comment,
+/// deliberately leaves no placeholder files behind but does leave whatever
+/// files DID succeed before the failure), which would then falsely report
+/// "already installed" on a retry without `--force`.
 async fn is_model_installed(model_id: &str, config: &AppConfig) -> Result<bool> {
     let models_dir = get_models_directory(config)?;
     let model_path = models_dir.join(model_id);
 
-    Ok(model_path.exists() && model_path.is_dir())
+    Ok(model_path.join(".voirs-model.json").exists())
 }
 
 /// Get the models directory path
@@ -338,13 +347,25 @@ async fn verify_downloaded_files(
     Ok(())
 }
 
-/// Create model configuration file
+/// Create model configuration file.
+///
+/// `total_size_mb` is recomputed HERE from `metadata.files[*].size_bytes`
+/// rather than reusing `metadata.total_size_mb`: the latter is set once in
+/// `get_model_metadata` from pre-download size ESTIMATES
+/// (`estimate_file_size`), and by the time this function runs,
+/// `download_model_files` has already overwritten each file's `size_bytes`
+/// with its real, downloaded size -- but never touches the separate
+/// `total_size_mb` field, which would otherwise persist a stale estimate
+/// into `.voirs-model.json` right next to genuinely measured per-file sizes.
 fn create_model_config(model_dir: &Path, model_id: &str, metadata: &ModelMetadata) -> Result<()> {
+    let real_total_size_mb =
+        metadata.files.iter().map(|f| f.size_bytes).sum::<u64>() as f64 / (1024.0 * 1024.0);
+
     let config = serde_json::json!({
         "model_id": model_id,
         "name": metadata.name,
         "description": metadata.description,
-        "total_size_mb": metadata.total_size_mb,
+        "total_size_mb": real_total_size_mb,
         "files": metadata.files.iter().map(|f| {
             serde_json::json!({
                 "name": f.name,
@@ -705,5 +726,95 @@ mod tests {
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    /// Regression test: `create_model_config` must write the REAL total size
+    /// (summed from the files' actual, post-download `size_bytes`), not the
+    /// pre-download estimate that `ModelMetadata::total_size_mb` still holds
+    /// after `download_model_files` has updated individual file sizes.
+    #[test]
+    fn test_create_model_config_recomputes_real_total_size() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "voirs_test_real_total_size_{}_{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            name: "test-model".to_string(),
+            description: "test".to_string(),
+            // Stale pre-download estimate: deliberately wrong so the test
+            // fails if this value leaks into the written config instead of
+            // being recomputed.
+            total_size_mb: 9999.0,
+            files: vec![
+                ModelFile {
+                    name: "config.json".to_string(),
+                    size_bytes: 1024, // real, post-download size
+                    sha256: None,
+                },
+                ModelFile {
+                    name: "model.safetensors".to_string(),
+                    size_bytes: 2 * 1024 * 1024, // real, post-download size (2 MB)
+                    sha256: None,
+                },
+            ],
+        };
+
+        create_model_config(&temp_dir, "test-model", &metadata).unwrap();
+
+        let written: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp_dir.join(".voirs-model.json")).unwrap(),
+        )
+        .unwrap();
+
+        let written_total_mb = written["total_size_mb"].as_f64().unwrap();
+        let expected_total_mb = (1024 + 2 * 1024 * 1024) as f64 / (1024.0 * 1024.0);
+
+        assert!(
+            (written_total_mb - expected_total_mb).abs() < 1e-6,
+            "expected real recomputed total ({expected_total_mb:.6} MB), got {written_total_mb:.6} MB \
+             (stale estimate would have been 9999.0 MB)"
+        );
+        assert!(written_total_mb < 9999.0);
+
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    /// Regression test: a model directory that exists but was never fully
+    /// installed (no completion marker) must not be reported as installed --
+    /// otherwise a retry after a partial failure would be short-circuited by
+    /// the `!force && is_model_installed(...)` check in `run_download_model`
+    /// and silently do nothing.
+    #[tokio::test]
+    async fn test_is_model_installed_requires_completion_marker() {
+        let mut config = AppConfig::default();
+        let cache_dir = std::env::temp_dir().join(format!(
+            "voirs_test_cache_{}_{}",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
+        config.pipeline.cache_dir = Some(cache_dir.clone());
+
+        let model_id = "partial-model";
+        let model_dir = cache_dir.join("models").join(model_id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        // Simulate a partially-downloaded model: the directory exists and
+        // has SOME content, but download never completed successfully.
+        std::fs::write(model_dir.join("config.json"), b"{}").unwrap();
+
+        assert!(
+            !is_model_installed(model_id, &config).await.unwrap(),
+            "a directory without the .voirs-model.json completion marker must not count as installed"
+        );
+
+        // Once the real completion marker is written (as `create_model_config`
+        // does at the end of a genuinely successful download), it must be
+        // recognized as installed.
+        std::fs::write(model_dir.join(".voirs-model.json"), b"{}").unwrap();
+        assert!(is_model_installed(model_id, &config).await.unwrap());
+
+        std::fs::remove_dir_all(&cache_dir).ok();
     }
 }

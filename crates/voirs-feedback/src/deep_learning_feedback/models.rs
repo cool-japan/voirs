@@ -5,8 +5,8 @@
 use super::{
     AudioFeatures, AudioPreprocessingConfig, DeepLearningError, DeepLearningResult, FeatureBundle,
     FeatureExtractor, FeatureType, FeedbackContext, FeedbackModel, LinguisticFeatures, ModelConfig,
-    ModelInfo, ProsodicFeatures, SemanticFeatures, SentimentScores, SpectralFeatures,
-    TextFeatures, TextPreprocessingConfig,
+    ModelInfo, ProsodicFeatures, SemanticFeatures, SentimentScores, SpectralFeatures, TextFeatures,
+    TextPreprocessingConfig,
 };
 use crate::traits::{FeedbackResponse, FeedbackType, ProgressIndicators, UserFeedback};
 use async_trait::async_trait;
@@ -141,8 +141,10 @@ impl FeatureExtractor for RealFeatureExtractor {
             });
         }
 
-        let token_embeddings: Vec<Vec<f32>> =
-            words.iter().map(|w| text::hash_token_embedding(w)).collect();
+        let token_embeddings: Vec<Vec<f32>> = words
+            .iter()
+            .map(|w| text::hash_token_embedding(w))
+            .collect();
         let sentence_embeddings = text::mean_pool(&token_embeddings);
 
         let pos_tags: Vec<String> = words
@@ -199,7 +201,13 @@ fn build_canonical_feature_vector(features: &FeatureBundle) -> Vec<f32> {
         .as_ref()
         .and_then(|frames| mean_frames(frames))
         .unwrap_or_else(|| vec![0.0; MFCC_COEFFS]);
-    v.extend(mfcc_mean.into_iter().take(MFCC_COEFFS).chain(std::iter::repeat(0.0)).take(MFCC_COEFFS));
+    v.extend(
+        mfcc_mean
+            .into_iter()
+            .take(MFCC_COEFFS)
+            .chain(std::iter::repeat(0.0))
+            .take(MFCC_COEFFS),
+    );
 
     // Spectral centroid: mean across frames (1 value).
     let centroid_mean = features
@@ -318,11 +326,14 @@ pub(super) mod transformer {
         features: &FeatureBundle,
         context: &FeedbackContext,
     ) -> DeepLearningResult<FeedbackResponse> {
-        let weight = state.weights.values().next().ok_or_else(|| {
-            DeepLearningError::InferenceFailed {
-                details: "loaded checkpoint contains no weight tensors".to_string(),
-            }
-        })?;
+        let weight =
+            state
+                .weights
+                .values()
+                .next()
+                .ok_or_else(|| DeepLearningError::InferenceFailed {
+                    details: "loaded checkpoint contains no weight tensors".to_string(),
+                })?;
         let dims = weight.dims();
         if dims.len() != 2 {
             return Err(DeepLearningError::InferenceFailed {
@@ -336,21 +347,21 @@ pub(super) mod transformer {
         let canonical = build_canonical_feature_vector(features);
         let input_values = adapt_to_width(&canonical, in_features);
 
-        let input = Tensor::from_vec(input_values, (1, in_features), &state.device).map_err(|e| {
-            DeepLearningError::InferenceFailed {
-                details: format!("failed to build input tensor: {e}"),
-            }
+        let input =
+            Tensor::from_vec(input_values, (1, in_features), &state.device).map_err(|e| {
+                DeepLearningError::InferenceFailed {
+                    details: format!("failed to build input tensor: {e}"),
+                }
+            })?;
+        let weight_t = weight.t().map_err(|e| DeepLearningError::InferenceFailed {
+            details: format!("failed to transpose weight tensor: {e}"),
         })?;
-        let weight_t = weight
-            .t()
-            .map_err(|e| DeepLearningError::InferenceFailed {
-                details: format!("failed to transpose weight tensor: {e}"),
-            })?;
-        let projected = input
-            .matmul(&weight_t)
-            .map_err(|e| DeepLearningError::InferenceFailed {
-                details: format!("matmul failed: {e}"),
-            })?;
+        let projected =
+            input
+                .matmul(&weight_t)
+                .map_err(|e| DeepLearningError::InferenceFailed {
+                    details: format!("matmul failed: {e}"),
+                })?;
         let activated = projected
             .tanh()
             .map_err(|e| DeepLearningError::InferenceFailed {
@@ -400,7 +411,10 @@ pub(super) mod transformer {
                     "pronunciation_score".to_string(),
                     pronunciation_score.to_string(),
                 );
-                map.insert("inference_backend".to_string(), "candle-real-weights".to_string());
+                map.insert(
+                    "inference_backend".to_string(),
+                    "candle-real-weights".to_string(),
+                );
                 map
             },
         }];
@@ -489,8 +503,9 @@ impl FeedbackModel for RuleBasedFeedbackModel {
             .as_ref()
             .map_or(0.0, |s| s.overall * 0.1);
 
-        let overall_score =
-            (f32::midpoint(quality_score, pronunciation_score) + sentiment_adjustment).clamp(0.0, 1.0);
+        let overall_score = (f32::midpoint(quality_score, pronunciation_score)
+            + sentiment_adjustment)
+            .clamp(0.0, 1.0);
 
         let performance = if overall_score >= 0.8 {
             "Excellent"
@@ -524,7 +539,10 @@ impl FeedbackModel for RuleBasedFeedbackModel {
                     "pronunciation_score".to_string(),
                     pronunciation_score.to_string(),
                 );
-                map.insert("model_type".to_string(), format!("{:?}", self.config.model_type));
+                map.insert(
+                    "model_type".to_string(),
+                    format!("{:?}", self.config.model_type),
+                );
                 map.insert("inference_backend".to_string(), "rule-based".to_string());
                 map
             },
@@ -593,8 +611,14 @@ mod tests {
         let low = sine_audio(150.0, 1.0, 16000);
         let high = sine_audio(3000.0, 1.0, 16000);
 
-        let features_low = extractor.extract_audio_features(&low, &config).await.unwrap();
-        let features_high = extractor.extract_audio_features(&high, &config).await.unwrap();
+        let features_low = extractor
+            .extract_audio_features(&low, &config)
+            .await
+            .unwrap();
+        let features_high = extractor
+            .extract_audio_features(&high, &config)
+            .await
+            .unwrap();
 
         let centroid_low = features_low.spectral_features.centroid.unwrap();
         let centroid_high = features_high.spectral_features.centroid.unwrap();
@@ -738,7 +762,10 @@ mod tests {
     #[test]
     fn test_adapt_to_width_cycles_deterministically() {
         let canonical = vec![1.0, 2.0, 3.0];
-        assert_eq!(adapt_to_width(&canonical, 6), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        assert_eq!(
+            adapt_to_width(&canonical, 6),
+            vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]
+        );
         assert_eq!(adapt_to_width(&canonical, 2), vec![1.0, 2.0]);
         assert_eq!(adapt_to_width(&[], 4), vec![0.0; 4]);
     }
@@ -771,8 +798,14 @@ mod tests {
         high_bundle.audio_features.prosodic_features.pitch = Some(vec![240.0]);
 
         let context = test_context();
-        let low_feedback = model.generate_feedback(&low_bundle, &context).await.unwrap();
-        let high_feedback = model.generate_feedback(&high_bundle, &context).await.unwrap();
+        let low_feedback = model
+            .generate_feedback(&low_bundle, &context)
+            .await
+            .unwrap();
+        let high_feedback = model
+            .generate_feedback(&high_bundle, &context)
+            .await
+            .unwrap();
 
         assert_ne!(
             low_feedback.overall_score, high_feedback.overall_score,
@@ -807,6 +840,9 @@ mod tests {
 
         let a = model.generate_feedback(&bundle, &context).await.unwrap();
         let b = model.generate_feedback(&bundle, &context).await.unwrap();
-        assert_eq!(a.overall_score, b.overall_score, "must be a pure function of its input");
+        assert_eq!(
+            a.overall_score, b.overall_score,
+            "must be a pure function of its input"
+        );
     }
 }

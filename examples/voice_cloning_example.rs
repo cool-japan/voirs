@@ -71,10 +71,10 @@
 //! ```bash
 //! # macOS with Metal acceleration
 //! cargo run --example voice_cloning_example --features="metal,macos-optimized"
-//! 
+//!
 //! # Linux with CUDA (requires NVIDIA GPU)
 //! cargo run --example voice_cloning_example --features="cuda,linux-optimized"
-//! 
+//!
 //! # Windows with DirectML
 //! cargo run --example voice_cloning_example --features="directml,windows-optimized"
 //! ```
@@ -139,9 +139,9 @@
 //! - Compare multiple synthesis approaches
 
 use anyhow::{Context, Result};
-use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
-use voirs::*;
+use std::time::Instant;
+use tracing::info;
+use voirs_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -163,15 +163,9 @@ async fn main() -> Result<()> {
     let setup_start = Instant::now();
     info!("Creating TTS components for voice cloning...");
 
-    let g2p = create_g2p(G2pBackend::RuleBased);
-    let acoustic = create_acoustic(AcousticBackend::Vits);
-    let vocoder = create_vocoder(VocoderBackend::HifiGan);
-
     println!("🔧 Building voice cloning pipeline...");
+    // The unified builder wires the default G2P/acoustic model/vocoder automatically.
     let pipeline = VoirsPipelineBuilder::new()
-        .with_g2p(g2p)
-        .with_acoustic_model(acoustic)
-        .with_vocoder(vocoder)
         .build()
         .await
         .context("Failed to build voice synthesis pipeline")?;

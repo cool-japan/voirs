@@ -1604,11 +1604,24 @@ impl CliApp {
             }
 
             Commands::Train { command } => {
-                commands::train::execute_train_command(command.clone(), &self.global)
-                    .await
-                    .map_err(|e| {
-                        voirs_sdk::VoirsError::config_error(format!("Train command failed: {}", e))
-                    })
+                match commands::train::execute_train_command(command.clone(), &self.global).await {
+                    Ok(()) => Ok(()),
+                    Err(cli_err) => {
+                        // Preserve the specific `CliError` variant's own exit
+                        // code (see `CliError::exit_code`) instead of losing it
+                        // by re-wrapping into a generic `VoirsError::config_error`
+                        // and letting Rust's default `Termination` impl exit
+                        // every training failure with the same code (1).
+                        crate::error::formatting::print_error(&cli_err);
+                        // `process::exit` skips flushing stdout's buffered
+                        // writer; without this, banner/progress output already
+                        // printed this run can be lost when stdout isn't a TTY
+                        // (e.g. redirected to a file).
+                        use std::io::Write as _;
+                        let _ = std::io::stdout().flush();
+                        std::process::exit(cli_err.exit_code());
+                    }
+                }
             }
 
             Commands::ConvertModel {

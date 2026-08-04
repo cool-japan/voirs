@@ -1,7 +1,12 @@
 //! BigVGAN inference engine for mel-to-audio conversion.
 
+// `BigVGANInference` (below) is only defined when the `candle` feature is
+// enabled, so every one of these imports is only used in that configuration.
+#[cfg(feature = "candle")]
 use super::config::{BigVGANConfig, BigVGANVariant};
+#[cfg(feature = "candle")]
 use super::generator::BigVGANGenerator;
+#[cfg(feature = "candle")]
 use crate::Result;
 
 #[cfg(feature = "candle")]
@@ -9,6 +14,7 @@ use candle_core::{DType, Device, Tensor};
 #[cfg(feature = "candle")]
 use candle_nn::{VarBuilder, VarMap};
 
+#[cfg(feature = "candle")]
 use std::path::Path;
 
 /// BigVGAN inference engine

@@ -3,12 +3,25 @@
 //! This module provides commands for managing and executing declarative workflows
 //! for complex multi-step synthesis pipelines.
 
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::workflow::{
     ExecutionState, StateManager, Workflow, WorkflowEngine, WorkflowRegistry, WorkflowValidator,
 };
 use clap::Subcommand;
 use std::path::PathBuf;
+
+/// Resolve the default VoiRS working directory (`<cwd>/.voirs/<subdir>`)
+/// used for workflow state/registry storage when the user did not pass an
+/// explicit `--state-dir`/`--registry-dir`.
+///
+/// Propagates a typed `CliError` instead of panicking if the current
+/// directory cannot be determined (e.g. it was deleted out from under the
+/// running process, or the process lacks permission to stat it).
+fn default_voirs_dir(subdir: &str) -> Result<PathBuf> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| CliError::Workflow(format!("Failed to determine current directory: {}", e)))?;
+    Ok(cwd.join(".voirs").join(subdir))
+}
 
 /// Workflow automation commands
 #[derive(Subcommand)]
@@ -140,12 +153,10 @@ pub async fn run_workflow_execute(
     println!();
 
     // Determine state directory
-    let state_dir = state_dir.unwrap_or_else(|| {
-        std::env::current_dir()
-            .expect("current dir should be accessible")
-            .join(".voirs")
-            .join("workflow_state")
-    });
+    let state_dir = match state_dir {
+        Some(dir) => dir,
+        None => default_voirs_dir("workflow_state")?,
+    };
 
     // Check if we should resume
     if resume {
@@ -283,12 +294,10 @@ pub async fn run_workflow_validate(
 /// List all registered workflows
 pub async fn run_workflow_list(registry_dir: Option<PathBuf>, detailed: bool) -> Result<()> {
     // Determine registry directory
-    let registry_dir = registry_dir.unwrap_or_else(|| {
-        std::env::current_dir()
-            .expect("current dir should be accessible")
-            .join(".voirs")
-            .join("workflows")
-    });
+    let registry_dir = match registry_dir {
+        Some(dir) => dir,
+        None => default_voirs_dir("workflows")?,
+    };
 
     let registry = WorkflowRegistry::new(registry_dir.clone());
 
@@ -332,12 +341,10 @@ pub async fn run_workflow_status(
     format: String,
 ) -> Result<()> {
     // Determine state directory
-    let state_dir = state_dir.unwrap_or_else(|| {
-        std::env::current_dir()
-            .expect("current dir should be accessible")
-            .join(".voirs")
-            .join("workflow_state")
-    });
+    let state_dir = match state_dir {
+        Some(dir) => dir,
+        None => default_voirs_dir("workflow_state")?,
+    };
 
     let state_manager = StateManager::new(state_dir);
 
@@ -415,12 +422,10 @@ pub async fn run_workflow_resume(
     max_parallel: usize,
 ) -> Result<()> {
     // Determine state directory
-    let state_dir = state_dir.unwrap_or_else(|| {
-        std::env::current_dir()
-            .expect("current dir should be accessible")
-            .join(".voirs")
-            .join("workflow_state")
-    });
+    let state_dir = match state_dir {
+        Some(dir) => dir,
+        None => default_voirs_dir("workflow_state")?,
+    };
 
     let state_manager = StateManager::new(state_dir.clone());
 
@@ -463,12 +468,10 @@ pub async fn run_workflow_stop(
     force: bool,
 ) -> Result<()> {
     // Determine state directory
-    let state_dir = state_dir.unwrap_or_else(|| {
-        std::env::current_dir()
-            .expect("current dir should be accessible")
-            .join(".voirs")
-            .join("workflow_state")
-    });
+    let state_dir = match state_dir {
+        Some(dir) => dir,
+        None => default_voirs_dir("workflow_state")?,
+    };
 
     let state_manager = StateManager::new(state_dir);
 

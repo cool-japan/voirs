@@ -791,7 +791,12 @@ mod tests {
             // registered by a DIFFERENT function -- this is the crux of the
             // fix (previously the callback copy read here was always None).
             let at_threshold = std::ffi::CString::new("warning message").expect("no interior NUL");
-            voirs_log_message(VoirsLogLevel::Warning, at_threshold.as_ptr(), ptr::null(), 2);
+            voirs_log_message(
+                VoirsLogLevel::Warning,
+                at_threshold.as_ptr(),
+                ptr::null(),
+                2,
+            );
             assert_eq!(
                 CALL_COUNT.load(Ordering::SeqCst),
                 1,
@@ -886,7 +891,9 @@ mod tests {
             // is freed (it tracks the historical high-water mark).
             assert!(after_drop.peak_usage >= after_alloc.peak_usage);
 
-            assert!(after_alloc.fragmentation_ratio >= 0.0 && after_alloc.fragmentation_ratio <= 1.0);
+            assert!(
+                after_alloc.fragmentation_ratio >= 0.0 && after_alloc.fragmentation_ratio <= 1.0
+            );
         }
     }
 

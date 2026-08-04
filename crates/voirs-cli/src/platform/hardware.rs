@@ -32,10 +32,13 @@ pub struct CpuInfo {
     pub physical_cores: usize,
     /// Number of logical cores (with hyperthreading)
     pub logical_cores: usize,
-    /// Base frequency in MHz
-    pub base_frequency: u32,
-    /// Maximum frequency in MHz
-    pub max_frequency: u32,
+    /// Base (current) frequency in MHz, when the platform exposes a real
+    /// measurement. `None` rather than a guessed constant when it does not
+    /// (e.g. Apple Silicon does not expose `hw.cpufrequency` via `sysctl`).
+    pub base_frequency: Option<u32>,
+    /// Maximum frequency in MHz, when the platform exposes a real
+    /// measurement. `None` rather than a guessed constant when it does not.
+    pub max_frequency: Option<u32>,
     /// Cache sizes (L1, L2, L3) in bytes
     pub cache_sizes: HashMap<String, u64>,
     /// Supported instruction sets
@@ -49,8 +52,12 @@ pub struct MemoryInfo {
     pub total: u64,
     /// Available memory in bytes
     pub available: u64,
-    /// Memory speed in MHz
-    pub speed: u32,
+    /// Memory speed in MHz, when it can be determined from an unprivileged,
+    /// real measurement. `None` (never a guessed constant) when it cannot --
+    /// real memory speed generally requires SMBIOS/DMI access (`dmidecode`),
+    /// which is root-only on most Linux distributions and not exposed by
+    /// `system_profiler` on Apple Silicon Macs.
+    pub speed: Option<u32>,
     /// Memory type (DDR4, DDR5, etc.)
     pub memory_type: String,
 }
@@ -130,8 +137,8 @@ pub fn get_cpu_info() -> CpuInfo {
             vendor: "Unknown".to_string(),
             physical_cores: num_cpus::get_physical(),
             logical_cores: num_cpus::get(),
-            base_frequency: 2400,
-            max_frequency: 3600,
+            base_frequency: None,
+            max_frequency: None,
             cache_sizes: HashMap::new(),
             instruction_sets: Vec::new(),
         }
@@ -351,8 +358,8 @@ fn detect_windows_cpu() -> CpuInfo {
         vendor: "Unknown".to_string(),
         physical_cores: num_cpus::get_physical(),
         logical_cores: num_cpus::get(),
-        base_frequency: 2400,
-        max_frequency: 3600,
+        base_frequency: None,
+        max_frequency: None,
         cache_sizes: HashMap::new(),
         instruction_sets: Vec::new(),
     };
@@ -379,11 +386,11 @@ fn detect_windows_cpu() -> CpuInfo {
                 }
             } else if trimmed.contains("\"MaxClockSpeed\"") {
                 if let Some(value) = extract_json_number_value(trimmed) {
-                    cpu_info.max_frequency = value as u32;
+                    cpu_info.max_frequency = Some(value as u32);
                 }
             } else if trimmed.contains("\"CurrentClockSpeed\"") {
                 if let Some(value) = extract_json_number_value(trimmed) {
-                    cpu_info.base_frequency = value as u32;
+                    cpu_info.base_frequency = Some(value as u32);
                 }
             }
         }
@@ -579,8 +586,8 @@ fn detect_macos_cpu() -> CpuInfo {
         vendor: "Unknown".to_string(),
         physical_cores: num_cpus::get_physical(),
         logical_cores: num_cpus::get(),
-        base_frequency: 2400,
-        max_frequency: 3600,
+        base_frequency: None,
+        max_frequency: None,
         cache_sizes: HashMap::new(),
         instruction_sets: Vec::new(),
     };
@@ -591,7 +598,10 @@ fn detect_macos_cpu() -> CpuInfo {
         .arg("machdep.cpu.brand_string")
         .output()
     {
-        cpu_info.name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !name.is_empty() {
+            cpu_info.name = name;
+        }
     }
 
     // Get CPU vendor
@@ -600,10 +610,45 @@ fn detect_macos_cpu() -> CpuInfo {
         .arg("machdep.cpu.vendor")
         .output()
     {
-        cpu_info.vendor = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let vendor = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !vendor.is_empty() {
+            cpu_info.vendor = vendor;
+        }
     }
 
+    // `hw.cpufrequency` / `hw.cpufrequency_max` report the nominal frequency
+    // in Hz on Intel Macs. They were removed on Apple Silicon (the sysctl
+    // exists but returns an empty value / ENOENT) because Apple Silicon CPUs
+    // do not run at a single fixed clock the way this metric implies -- in
+    // that case we honestly report `None` rather than a guessed constant.
+    cpu_info.base_frequency = read_macos_sysctl_frequency_mhz("hw.cpufrequency");
+    cpu_info.max_frequency =
+        read_macos_sysctl_frequency_mhz("hw.cpufrequency_max").or(cpu_info.base_frequency);
+
     cpu_info
+}
+
+/// Read a macOS `sysctl` frequency value (reported in Hz) and convert it to
+/// whole MHz. Returns `None` if the sysctl is absent, empty, zero, or not
+/// parseable as an integer -- never a fabricated fallback value.
+#[cfg(target_os = "macos")]
+fn read_macos_sysctl_frequency_mhz(sysctl_name: &str) -> Option<u32> {
+    let output = std::process::Command::new("sysctl")
+        .arg("-n")
+        .arg(sysctl_name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let hz: u64 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .ok()?;
+    if hz == 0 {
+        return None;
+    }
+    Some((hz / 1_000_000) as u32)
 }
 
 #[cfg(target_os = "linux")]
@@ -657,8 +702,8 @@ fn detect_linux_cpu() -> CpuInfo {
         vendor: "Unknown".to_string(),
         physical_cores: num_cpus::get_physical(),
         logical_cores: num_cpus::get(),
-        base_frequency: 2400,
-        max_frequency: 3600,
+        base_frequency: None,
+        max_frequency: None,
         cache_sizes: HashMap::new(),
         instruction_sets: Vec::new(),
     };
@@ -679,11 +724,41 @@ fn detect_linux_cpu() -> CpuInfo {
                     cpu_info.instruction_sets =
                         flags.split_whitespace().map(|s| s.to_string()).collect();
                 }
+            } else if line.starts_with("cpu MHz") && cpu_info.base_frequency.is_none() {
+                // Take the first logical core's reading as representative;
+                // per-core turbo/throttle differences make averaging every
+                // core noisy for what is meant to be a coarse display value.
+                if let Some(value) = line.split(':').nth(1) {
+                    cpu_info.base_frequency = parse_mhz_value(value);
+                }
             }
         }
     }
 
+    // Real maximum frequency from sysfs cpufreq (in kHz), when the kernel
+    // exposes it. Absent in some containers/VMs -- honestly `None` there,
+    // never a fabricated fallback.
+    cpu_info.max_frequency =
+        fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+            .ok()
+            .and_then(|content| content.trim().parse::<u32>().ok())
+            .map(|khz| khz / 1000);
+
     cpu_info
+}
+
+/// Parse a `cpu MHz` field value from `/proc/cpuinfo` (the text after the
+/// colon, e.g. `" 2400.000"`) into whole MHz. Returns `None` for empty or
+/// unparseable input rather than a fabricated fallback. Kept independent of
+/// `#[cfg(target_os = "linux")]` so it is real-compiled and unit-tested on
+/// every platform, not just Linux.
+fn parse_mhz_value(value: &str) -> Option<u32> {
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|mhz| *mhz > 0.0)
+        .map(|mhz| mhz.round() as u32)
 }
 
 #[cfg(target_os = "linux")]
@@ -738,19 +813,129 @@ fn parse_nvidia_smi_line(line: &str) -> GpuInfo {
 
 // Helper functions
 
-fn detect_memory_speed() -> u32 {
-    // Platform-specific memory speed detection
+/// Detect real memory speed (MT/s, displayed as MHz) via a platform-specific
+/// real probe. `/proc/meminfo` does not contain speed information at all
+/// (there is no unprivileged pure-Rust syscall for this), so unlike the
+/// earlier version of this function, we never fabricate a constant here:
+/// every path either returns a genuinely parsed value or `None`.
+fn detect_memory_speed() -> Option<u32> {
     #[cfg(target_os = "linux")]
     {
-        use std::fs;
-        if let Ok(content) = fs::read_to_string("/proc/meminfo") {
-            // Try to parse memory speed from dmidecode or other sources
-            // This is a simplified implementation
-            return 3200; // DDR4-3200 as default
+        if let Some(speed) = detect_linux_memory_speed() {
+            return Some(speed);
         }
     }
 
-    2400 // Default fallback
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(speed) = detect_macos_memory_speed() {
+            return Some(speed);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(speed) = detect_windows_memory_speed() {
+            return Some(speed);
+        }
+    }
+
+    None
+}
+
+/// Query real configured/rated memory speed via `dmidecode -t memory`.
+/// `dmidecode` requires SMBIOS/DMI access, which is root-only on most Linux
+/// distributions -- when it is unavailable or permission is denied, this
+/// honestly returns `None` rather than a guessed constant.
+#[cfg(target_os = "linux")]
+fn detect_linux_memory_speed() -> Option<u32> {
+    let output = std::process::Command::new("dmidecode")
+        .arg("-t")
+        .arg("memory")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_dmidecode_memory_speed(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Query real memory speed via `system_profiler SPMemoryDataType`. Note this
+/// field is not populated by `system_profiler` on Apple Silicon Macs (only
+/// on Intel Macs), in which case this honestly returns `None`.
+#[cfg(target_os = "macos")]
+fn detect_macos_memory_speed() -> Option<u32> {
+    let output = std::process::Command::new("system_profiler")
+        .arg("SPMemoryDataType")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_macos_memory_speed(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Query real DIMM speed via WMI (`Win32_PhysicalMemory.Speed`).
+#[cfg(target_os = "windows")]
+fn detect_windows_memory_speed() -> Option<u32> {
+    let output = std::process::Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-Command")
+        .arg("Get-WmiObject Win32_PhysicalMemory | Select-Object Speed | ConvertTo-Json")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .filter(|line| line.contains("\"Speed\""))
+        .find_map(extract_json_number_value)
+        .filter(|&mhz| mhz > 0)
+        .map(|mhz| mhz as u32)
+}
+
+/// Parse the real speed out of `dmidecode -t memory` output. Prefers
+/// "Configured Memory Speed" (the speed actually in use, e.g. after XMP/EXPO
+/// or BIOS underclocking) over "Speed" (the DIMM's rated maximum) when both
+/// are present, since that best matches what the running system experiences.
+/// Kept independent of `#[cfg(target_os = "linux")]` so it is real-compiled
+/// and unit-tested on every platform, not just Linux.
+fn parse_dmidecode_memory_speed(text: &str) -> Option<u32> {
+    let mut configured = None;
+    let mut rated = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(value) = line.strip_prefix("Configured Memory Speed:") {
+            configured = configured.or_else(|| parse_leading_mhz_token(value));
+        } else if let Some(value) = line.strip_prefix("Speed:") {
+            rated = rated.or_else(|| parse_leading_mhz_token(value));
+        }
+    }
+    configured.or(rated)
+}
+
+/// Parse macOS `system_profiler SPMemoryDataType` output for a real "Speed:"
+/// line (e.g. `"      Speed: 2667 MHz"`). Kept independent of
+/// `#[cfg(target_os = "macos")]` so it is real-compiled and unit-tested on
+/// every platform.
+fn parse_macos_memory_speed(text: &str) -> Option<u32> {
+    text.lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("Speed:"))
+        .and_then(parse_leading_mhz_token)
+}
+
+/// Parse the leading whitespace-separated numeric token of a value string
+/// like `" 3200 MT/s"` or `" Unknown"` into whole MHz. Returns `None` for
+/// non-numeric or non-positive values (e.g. an unpopulated DIMM slot, which
+/// `dmidecode` reports as "Unknown").
+fn parse_leading_mhz_token(value: &str) -> Option<u32> {
+    value
+        .split_whitespace()
+        .next()
+        .and_then(|token| token.parse::<u32>().ok())
+        .filter(|&mhz| mhz > 0)
 }
 
 fn detect_memory_type() -> String {
@@ -840,7 +1025,11 @@ fn generate_optimization_flags(cpu_info: &CpuInfo, gpu_info: &[GpuInfo]) -> Vec<
     flags
 }
 
-fn get_cpu_usage() -> f32 {
+/// Real, instantaneous CPU usage percentage (0-100) for the whole system,
+/// queried per-platform (`/proc/stat` on Linux, `top -l 1` on macOS, WMI on
+/// Windows). `pub(crate)` so other commands (e.g. `commands::dashboard`) can
+/// report real system load instead of fabricating one.
+pub(crate) fn get_cpu_usage() -> f32 {
     // Platform-specific CPU usage monitoring
     #[cfg(target_os = "linux")]
     {
@@ -927,7 +1116,11 @@ fn get_cpu_usage() -> f32 {
     0.0 // Fallback if all methods fail
 }
 
-fn get_memory_usage() -> u64 {
+/// Real current system memory usage in bytes (`total - available`), sourced
+/// from `crate::platform::get_memory_info()`'s per-platform real query.
+/// `pub(crate)` so other commands (e.g. `commands::dashboard`) can report
+/// real memory usage instead of fabricating one.
+pub(crate) fn get_memory_usage() -> u64 {
     // Current memory usage
     let (total, available) = crate::platform::get_memory_info();
     total - available
@@ -1251,5 +1444,128 @@ mod tests {
         let usage = monitor_hardware_usage();
         assert!(usage.cpu_usage >= 0.0);
         assert!(usage.gpu_usage >= 0.0);
+    }
+
+    #[test]
+    fn test_cpu_frequency_never_fabricated_constant() {
+        // Regression test for the hardcoded-2400/3600 finding: whichever
+        // platform this runs on, the reported frequency must either be a
+        // real, distinguishable measurement or an honest `None` -- never the
+        // literal old constants presented as if measured.
+        let cpu = get_cpu_info();
+        if let Some(base) = cpu.base_frequency {
+            assert_ne!(
+                base, 2400,
+                "base_frequency must not be the old fabricated constant"
+            );
+        }
+        if let Some(max) = cpu.max_frequency {
+            assert_ne!(
+                max, 3600,
+                "max_frequency must not be the old fabricated constant"
+            );
+        }
+    }
+
+    #[test]
+    fn test_memory_speed_never_fabricated_constant() {
+        // Regression test for the /proc/meminfo-read-then-discard finding:
+        // speed must be a genuinely parsed value or an honest `None` -- never
+        // the old 3200/2400 constants.
+        let memory = get_memory_info();
+        if let Some(speed) = memory.speed {
+            assert_ne!(
+                speed, 3200,
+                "speed must not be the old fabricated DDR4-3200 constant"
+            );
+            assert_ne!(
+                speed, 2400,
+                "speed must not be the old fabricated fallback constant"
+            );
+            assert!(speed > 0);
+        }
+    }
+
+    #[test]
+    fn test_parse_mhz_value_extracts_real_number() {
+        // Output actually varies with input -- proves this is real parsing,
+        // not a hardcoded return.
+        assert_eq!(parse_mhz_value(" 2400.000"), Some(2400));
+        assert_eq!(parse_mhz_value(" 3792.014"), Some(3792));
+        assert_eq!(parse_mhz_value(" 1000.500"), Some(1001)); // rounds
+        assert_eq!(parse_mhz_value(" not-a-number"), None);
+        assert_eq!(parse_mhz_value(" 0.0"), None);
+        assert_eq!(parse_mhz_value(""), None);
+    }
+
+    #[test]
+    fn test_parse_leading_mhz_token() {
+        assert_eq!(parse_leading_mhz_token(" 3200 MT/s"), Some(3200));
+        assert_eq!(parse_leading_mhz_token(" 2667 MHz"), Some(2667));
+        assert_eq!(parse_leading_mhz_token(" Unknown"), None);
+        assert_eq!(parse_leading_mhz_token(" 0 MT/s"), None);
+        assert_eq!(parse_leading_mhz_token(""), None);
+    }
+
+    #[test]
+    fn test_parse_dmidecode_memory_speed_prefers_configured_over_rated() {
+        let dmidecode_output = "\
+Memory Device
+\tArray Handle: 0x0000
+\tSpeed: 3200 MT/s
+\tConfigured Memory Speed: 2933 MT/s
+\tManufacturer: Samsung
+";
+        // Real, input-dependent parsing: "Configured Memory Speed" (the speed
+        // actually in use) wins over "Speed" (the DIMM's rated maximum).
+        assert_eq!(parse_dmidecode_memory_speed(dmidecode_output), Some(2933));
+    }
+
+    #[test]
+    fn test_parse_dmidecode_memory_speed_falls_back_to_rated() {
+        let dmidecode_output = "\
+Memory Device
+\tSpeed: 3200 MT/s
+\tManufacturer: Samsung
+";
+        assert_eq!(parse_dmidecode_memory_speed(dmidecode_output), Some(3200));
+    }
+
+    #[test]
+    fn test_parse_dmidecode_memory_speed_empty_slot_is_none() {
+        let dmidecode_output = "\
+Memory Device
+\tSize: No Module Installed
+\tSpeed: Unknown
+\tConfigured Memory Speed: Unknown
+";
+        assert_eq!(parse_dmidecode_memory_speed(dmidecode_output), None);
+    }
+
+    #[test]
+    fn test_parse_macos_memory_speed_extracts_real_value() {
+        let system_profiler_output = "\
+Memory:
+
+      Memory: 16 GB
+      Type: DDR4
+      Speed: 2667 MHz
+      Manufacturer: Samsung
+";
+        assert_eq!(parse_macos_memory_speed(system_profiler_output), Some(2667));
+    }
+
+    #[test]
+    fn test_parse_macos_memory_speed_missing_field_is_none() {
+        // Matches this machine's real `system_profiler SPMemoryDataType`
+        // output on Apple Silicon, which does not report a Speed field.
+        let system_profiler_output = "\
+Memory:
+
+      Memory: 24 GB
+      Type: LPDDR5
+      Manufacturer: Hynix
+";
+        assert_eq!(parse_macos_memory_speed(system_profiler_output), None);
     }
 }

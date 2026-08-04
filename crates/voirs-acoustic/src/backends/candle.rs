@@ -396,7 +396,7 @@ impl CandleAcousticModel {
         };
 
         #[cfg(not(feature = "candle"))]
-        let weights = None;
+        let weights: Option<HashMap<String, candle_core::Tensor>> = None;
 
         // Extract metadata from model file or use defaults
         let metadata = Self::extract_model_metadata(model_path, &format).await?;

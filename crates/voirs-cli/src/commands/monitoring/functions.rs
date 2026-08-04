@@ -7,11 +7,12 @@ use crate::commands::train::progress::ResourceUsage;
 use crate::error::CliError;
 use crate::output::OutputFormatter;
 use crate::performance::monitor::{MonitorConfig, PerformanceMonitor};
+use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use voirs_sdk::config::AppConfig;
+use voirs_sdk::config::{AppConfig, ConfigHierarchy};
 
 /// Configuration for pipeline debugging operation
 ///
@@ -1276,25 +1277,250 @@ fn validate_system_requirements(detailed: bool) -> SystemRequirements {
         recommendations,
     }
 }
+/// Validate the actual application configuration.
+///
+/// Every check below inspects a real field of `config` (or a real filesystem
+/// path derived from it); nothing here is a hardcoded pass. Structural
+/// validation is delegated to `voirs_sdk::config::ConfigHierarchy::validate`
+/// (the exact same validation `VoirsPipelineBuilder::build()` performs), so
+/// this reports precisely what would make pipeline construction fail.
 fn validate_configuration(config: &AppConfig, detailed: bool) -> ConfigurationValidation {
+    let mut required_settings = Vec::new();
+    let mut missing_settings = Vec::new();
+    let mut invalid_settings = Vec::new();
+    let mut warnings = Vec::new();
+
+    // Real structural validation of each configuration section.
+    if let Err(e) = config.pipeline.validate() {
+        invalid_settings.push(format!("pipeline.{}: {}", e.field, e.message));
+    }
+    if let Err(e) = config.cli.validate() {
+        invalid_settings.push(format!("cli.{}: {}", e.field, e.message));
+    }
+    if let Err(e) = config.server.validate() {
+        invalid_settings.push(format!("server.{}: {}", e.field, e.message));
+    }
+
+    // Default voice: recommended but not fatal on its own.
+    let default_voice_set = config.cli.default_voice.is_some();
+    required_settings.push(ConfigSetting {
+        name: "cli.default_voice".to_string(),
+        value: config
+            .cli
+            .default_voice
+            .clone()
+            .unwrap_or_else(|| "(none)".to_string()),
+        valid: true,
+        required: false,
+        default: None,
+    });
+    if !default_voice_set {
+        missing_settings.push("cli.default_voice".to_string());
+        warnings.push(
+            "No default voice configured; every synthesis command will need an explicit --voice."
+                .to_string(),
+        );
+    }
+
+    // Cache directory: real filesystem check (exists, or its parent exists so
+    // it can be created lazily on first use).
+    let cache_dir = config.pipeline.effective_cache_dir();
+    let cache_dir_usable =
+        cache_dir.exists() || cache_dir.parent().is_some_and(std::path::Path::exists);
+    required_settings.push(ConfigSetting {
+        name: "pipeline.cache_dir".to_string(),
+        value: cache_dir.display().to_string(),
+        valid: cache_dir_usable,
+        required: false,
+        default: Some(
+            std::env::temp_dir()
+                .join("voirs-cache")
+                .display()
+                .to_string(),
+        ),
+    });
+    if !cache_dir_usable {
+        invalid_settings.push(format!(
+            "pipeline.cache_dir: neither the directory nor its parent exists: {}",
+            cache_dir.display()
+        ));
+    }
+
+    if detailed {
+        // Model repositories: real scheme check on every configured URL.
+        for repo in &config.pipeline.model_loading.repositories {
+            if !(repo.starts_with("https://") || repo.starts_with("http://")) {
+                invalid_settings.push(format!(
+                    "pipeline.model_loading.repositories: not a valid http(s) URL: {repo}"
+                ));
+            }
+        }
+
+        // Output directory: real filesystem check, mirroring CliConfig::validate.
+        if let Some(output_dir) = &config.cli.output_dir {
+            if output_dir.exists() && !output_dir.is_dir() {
+                invalid_settings.push(format!(
+                    "cli.output_dir: path exists but is not a directory: {}",
+                    output_dir.display()
+                ));
+            }
+        }
+
+        // Environment name: flag anything other than the conventional presets,
+        // since PipelineConfig::for_profile() silently no-ops on unknown names.
+        if let Some(env) = &config.environment {
+            let known = ["development", "production", "testing"];
+            if !known.contains(&env.as_str()) {
+                warnings.push(format!(
+                    "environment '{env}' is not one of the recognized presets ({}); \
+                     profile-specific defaults will not be applied",
+                    known.join(", ")
+                ));
+            }
+        }
+    }
+
     ConfigurationValidation {
-        config_file_valid: true,
-        required_settings: Vec::new(),
-        missing_settings: Vec::new(),
-        invalid_settings: Vec::new(),
-        warnings: Vec::new(),
+        config_file_valid: invalid_settings.is_empty(),
+        required_settings,
+        missing_settings,
+        invalid_settings,
+        warnings,
     }
 }
+
+/// Probe whether a directory (or its nearest existing ancestor) is writable
+/// by real trial write, not by inspecting permission bits (which does not
+/// account for ACLs, read-only filesystems, or sandboxing).
+fn probe_dir_writable(dir: &std::path::Path) -> bool {
+    if !dir.exists() {
+        return dir
+            .parent()
+            .is_some_and(|parent| parent != dir && probe_dir_writable(parent));
+    }
+    let probe_path = dir.join(".voirs_write_probe");
+    match std::fs::write(&probe_path, b"probe") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe_path);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Validate real system dependencies VoiRS needs at runtime.
+///
+/// Each entry reflects a real probe (an actual audio host/device query, an
+/// actual filesystem write test, an actual `ffmpeg -version` invocation) --
+/// never a hardcoded "ok".
 fn validate_dependencies(detailed: bool) -> Vec<DependencyValidation> {
-    vec![DependencyValidation {
+    let mut dependencies = Vec::new();
+
+    // Real audio output backend probe via cpal -- the same audio stack
+    // `crate::audio::playback::AudioPlayer` uses for actual playback.
+    let host = cpal::default_host();
+    let default_output = host.default_output_device();
+    let device_name = default_output
+        .as_ref()
+        .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
+    dependencies.push(DependencyValidation {
         name: "audio_driver".to_string(),
         required: true,
-        available: true,
-        version: Some("1.0.0".to_string()),
-        minimum_version: Some("1.0.0".to_string()),
-        status: "ok".to_string(),
-        install_command: None,
-    }]
+        available: default_output.is_some(),
+        version: device_name.or_else(|| Some(format!("{:?} host, no default device", host.id()))),
+        minimum_version: None,
+        status: if default_output.is_some() {
+            "ok".to_string()
+        } else {
+            "missing".to_string()
+        },
+        install_command: if default_output.is_some() {
+            None
+        } else {
+            Some(
+                "Connect or enable an audio output device, or pass --no-audio to skip playback"
+                    .to_string(),
+            )
+        },
+    });
+
+    if detailed {
+        // Model cache directory: real writability probe.
+        let cache_dir = std::env::var("VOIRS_MODELS_DIR")
+            .map(PathBuf::from)
+            .ok()
+            .or_else(|| dirs::cache_dir().map(|d| d.join("voirs/models")));
+        let (available, status, install_command) = match &cache_dir {
+            Some(dir) => {
+                let writable = probe_dir_writable(dir);
+                (
+                    writable,
+                    if writable {
+                        "ok".to_string()
+                    } else {
+                        "not writable".to_string()
+                    },
+                    if writable {
+                        None
+                    } else {
+                        Some(format!("Ensure {} is writable", dir.display()))
+                    },
+                )
+            }
+            None => (
+                false,
+                "unknown".to_string(),
+                Some("Could not determine a model cache directory for this platform".to_string()),
+            ),
+        };
+        dependencies.push(DependencyValidation {
+            name: "model_cache_dir".to_string(),
+            required: false,
+            available,
+            version: cache_dir.as_ref().map(|d| d.display().to_string()),
+            minimum_version: None,
+            status,
+            install_command,
+        });
+
+        // Optional external codec tool used when the `ffi-codecs` feature is
+        // not compiled in (see commands/dataset.rs for its MP3/OGG/OPUS use).
+        let ffmpeg_probe = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output();
+        let (available, version, status, install_command) = match ffmpeg_probe {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                (
+                    true,
+                    stdout.lines().next().map(str::to_string),
+                    "ok".to_string(),
+                    None,
+                )
+            }
+            _ => (
+                false,
+                None,
+                "not found".to_string(),
+                Some(
+                    "Install ffmpeg (or build voirs-cli with the 'ffi-codecs' feature) for \
+                     MP3/OGG/OPUS dataset conversion"
+                        .to_string(),
+                ),
+            ),
+        };
+        dependencies.push(DependencyValidation {
+            name: "ffmpeg".to_string(),
+            required: false,
+            available,
+            version,
+            minimum_version: None,
+            status,
+            install_command,
+        });
+    }
+
+    dependencies
 }
 fn get_system_memory_gb() -> f64 {
     #[cfg(target_os = "macos")]
@@ -1501,4 +1727,102 @@ fn output_validation_results(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod real_validation_tests {
+    use super::*;
+    use voirs_sdk::config::AppConfig;
+
+    #[test]
+    fn validate_configuration_reflects_the_real_default_voice_setting() {
+        // Regression test: the old implementation ignored `config` entirely
+        // and always returned "everything valid, no warnings". Two
+        // different real configs must produce different real results.
+        let mut without_voice = AppConfig::default();
+        without_voice.cli.default_voice = None;
+        let result_without = validate_configuration(&without_voice, false);
+        assert!(result_without
+            .missing_settings
+            .contains(&"cli.default_voice".to_string()));
+
+        let mut with_voice = AppConfig::default();
+        with_voice.cli.default_voice = Some("test-voice".to_string());
+        let result_with = validate_configuration(&with_voice, false);
+        assert!(!result_with
+            .missing_settings
+            .contains(&"cli.default_voice".to_string()));
+    }
+
+    #[test]
+    fn validate_configuration_detects_a_real_invalid_device() {
+        let mut config = AppConfig::default();
+        config.pipeline.device = "not-a-real-device".to_string();
+        let result = validate_configuration(&config, false);
+        assert!(
+            !result.invalid_settings.is_empty(),
+            "an invalid pipeline.device must be reported, not silently accepted"
+        );
+        assert!(!result.config_file_valid);
+    }
+
+    #[test]
+    fn validate_configuration_honors_detailed_flag() {
+        let mut config = AppConfig::default();
+        // A non-http(s) repository URL is only checked when `detailed`.
+        config
+            .pipeline
+            .model_loading
+            .repositories
+            .push("not-a-url".to_string());
+
+        let quick = validate_configuration(&config, false);
+        let detailed = validate_configuration(&config, true);
+        assert!(
+            detailed.invalid_settings.len() >= quick.invalid_settings.len(),
+            "detailed=true must perform at least as many checks as detailed=false"
+        );
+        assert!(detailed
+            .invalid_settings
+            .iter()
+            .any(|s| s.contains("not-a-url")));
+    }
+
+    #[test]
+    fn validate_dependencies_honors_detailed_flag() {
+        let quick = validate_dependencies(false);
+        let detailed = validate_dependencies(true);
+        assert!(
+            detailed.len() > quick.len(),
+            "detailed=true must probe more real dependencies than detailed=false \
+             (quick={}, detailed={})",
+            quick.len(),
+            detailed.len()
+        );
+    }
+
+    #[test]
+    fn validate_dependencies_reports_a_real_audio_probe_not_a_hardcoded_version() {
+        let deps = validate_dependencies(false);
+        let audio = deps
+            .iter()
+            .find(|d| d.name == "audio_driver")
+            .expect("audio_driver dependency should be reported");
+        // The old implementation *always* reported `version: Some("1.0.0")`
+        // regardless of environment; a real cpal probe reports either a
+        // real device description or `None`, never that literal string.
+        assert_ne!(audio.version.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn probe_dir_writable_reflects_real_filesystem_state() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("voirs_probe_writable_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        assert!(
+            probe_dir_writable(&temp_dir),
+            "a freshly created temp dir should be writable"
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
