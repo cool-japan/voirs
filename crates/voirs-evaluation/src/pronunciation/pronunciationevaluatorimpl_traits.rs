@@ -72,8 +72,7 @@ impl PronunciationEvaluator for PronunciationEvaluatorImpl {
         let word_accuracy = if word_scores_full.is_empty() {
             0.0
         } else {
-            word_scores_full.iter().map(|s| s.accuracy).sum::<f32>()
-                / word_scores_full.len() as f32
+            word_scores_full.iter().map(|s| s.accuracy).sum::<f32>() / word_scores_full.len() as f32
         };
         let overall_score = (phoneme_accuracy + word_accuracy + fluency_score + rhythm_score) / 4.0;
         let phoneme_scores = if config.phoneme_level_scoring {

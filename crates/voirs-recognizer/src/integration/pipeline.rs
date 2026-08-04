@@ -133,19 +133,33 @@ pub struct PipelineMetrics {
     pub resource_utilization: ResourceUsage,
 }
 
-/// Simple stub phoneme recognizer for testing/fallback
+/// Placeholder installed when no real phoneme recognizer has been configured.
+///
+/// Every method fails closed. It used to return `Ok` with an empty alignment, which
+/// callers could not tell apart from "this audio genuinely contains no phonemes".
 #[derive(Debug)]
-struct StubPhonemeRecognizer;
+struct UnconfiguredPhonemeRecognizer;
+
+impl UnconfiguredPhonemeRecognizer {
+    fn error(operation: &str) -> RecognitionError {
+        RecognitionError::ConfigurationError {
+            message: format!(
+                "No phoneme recognizer is configured on this pipeline, so {operation} cannot be \
+                 performed. Build the pipeline with PipelineBuilder::with_phoneme_recognizer(..), \
+                 supplying ForcedAlignModel (feature `forced-align`) or MFAModel (feature `mfa`)."
+            ),
+        }
+    }
+}
 
 #[async_trait]
-impl PhonemeRecognizer for StubPhonemeRecognizer {
+impl PhonemeRecognizer for UnconfiguredPhonemeRecognizer {
     async fn recognize_phonemes(
         &self,
         _audio: &AudioBuffer,
         _config: Option<&PhonemeRecognitionConfig>,
     ) -> RecognitionResult<Vec<voirs_sdk::Phoneme>> {
-        // Return empty phoneme list as fallback
-        Ok(vec![])
+        Err(Self::error("phoneme recognition").into())
     }
 
     async fn align_phonemes(
@@ -154,12 +168,7 @@ impl PhonemeRecognizer for StubPhonemeRecognizer {
         _expected: &[voirs_sdk::Phoneme],
         _config: Option<&PhonemeRecognitionConfig>,
     ) -> RecognitionResult<PhonemeAlignment> {
-        Ok(PhonemeAlignment {
-            phonemes: vec![],
-            total_duration: 0.0,
-            alignment_confidence: 0.0,
-            word_alignments: vec![],
-        })
+        Err(Self::error("phoneme alignment").into())
     }
 
     async fn align_text(
@@ -168,23 +177,18 @@ impl PhonemeRecognizer for StubPhonemeRecognizer {
         _text: &str,
         _config: Option<&PhonemeRecognitionConfig>,
     ) -> RecognitionResult<PhonemeAlignment> {
-        Ok(PhonemeAlignment {
-            phonemes: vec![],
-            total_duration: 0.0,
-            alignment_confidence: 0.0,
-            word_alignments: vec![],
-        })
+        Err(Self::error("text alignment").into())
     }
 
     fn metadata(&self) -> PhonemeRecognizerMetadata {
         PhonemeRecognizerMetadata {
-            name: "StubPhonemeRecognizer".to_string(),
-            version: "0.1.0".to_string(),
-            description: "Simple stub phoneme recognizer for testing".to_string(),
-            supported_languages: vec![LanguageCode::EnUs],
-            alignment_methods: vec![AlignmentMethod::Forced],
+            name: "UnconfiguredPhonemeRecognizer".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            description: "No phoneme recognizer configured; every call fails closed".to_string(),
+            supported_languages: Vec::new(),
+            alignment_methods: Vec::new(),
             alignment_accuracy: 0.0,
-            supported_features: vec![],
+            supported_features: Vec::new(),
         }
     }
 
@@ -200,7 +204,7 @@ impl UnifiedVoirsPipeline {
         config: PipelineProcessingConfig,
     ) -> Result<Self, RecognitionError> {
         let phoneme_recognizer: Box<dyn PhonemeRecognizer + Send + Sync> =
-            Box::new(StubPhonemeRecognizer);
+            Box::new(UnconfiguredPhonemeRecognizer);
         let audio_analyzer = AudioAnalyzerImpl::new(AudioAnalysisConfig::default()).await?;
         let metrics = Arc::new(RwLock::new(PipelineMetrics::default()));
 
@@ -314,17 +318,35 @@ impl UnifiedVoirsPipeline {
             .recognize_phonemes(audio, Some(&PhonemeRecognitionConfig::default()))
             .await?;
 
-        // Convert phonemes to aligned phonemes with default timing
-        let aligned_phonemes: Vec<AlignedPhoneme> = phonemes
-            .into_iter()
-            .enumerate()
-            .map(|(i, phoneme)| AlignedPhoneme {
+        // Lay the phonemes out on a real timeline built from the durations the
+        // recognizer actually measured. Inventing a fixed 0.1 s per phoneme (and a
+        // fixed 0.8 confidence) would report timings that were never observed, so a
+        // recognizer that returns no duration is rejected instead.
+        let mut aligned_phonemes = Vec::with_capacity(phonemes.len());
+        let mut cursor = 0.0_f32;
+        for phoneme in phonemes {
+            let Some(duration_ms) = phoneme.duration_ms else {
+                return Err(RecognitionError::PhonemeRecognitionError {
+                    message: format!(
+                        "Phoneme recognizer '{}' returned phoneme '{}' without a duration, so no \
+                         timeline can be built for it",
+                        self.phoneme_recognizer.metadata().name,
+                        phoneme.symbol
+                    ),
+                    source: None,
+                });
+            };
+            let start_time = cursor;
+            let end_time = start_time + (duration_ms / 1000.0).max(0.0);
+            let confidence = phoneme.confidence;
+            aligned_phonemes.push(AlignedPhoneme {
                 phoneme,
-                start_time: i as f32 * 0.1, // Default timing
-                end_time: (i + 1) as f32 * 0.1,
-                confidence: 0.8, // Default confidence
-            })
-            .collect();
+                start_time,
+                end_time,
+                confidence,
+            });
+            cursor = end_time;
+        }
 
         result.phonemes = Some(aligned_phonemes);
         result.metadata.stages_executed.push(PipelineStage::Phoneme);
@@ -587,12 +609,57 @@ mod tests {
     #[cfg(feature = "whisper-pure")]
     use crate::asr::whisper_pure::PureRustWhisper;
 
+    /// Regression test for the old stub, which answered every request with an empty
+    /// `Ok` that callers could not distinguish from "this audio has no phonemes".
+    #[tokio::test]
+    async fn unconfigured_phoneme_recognizer_fails_closed() {
+        let recognizer = UnconfiguredPhonemeRecognizer;
+        let audio = AudioBuffer::new(vec![0.1; 16000], 16000, 1);
+
+        for rendered in [
+            recognizer
+                .recognize_phonemes(&audio, None)
+                .await
+                .err()
+                .map(|e| e.to_string()),
+            recognizer
+                .align_phonemes(&audio, &[], None)
+                .await
+                .err()
+                .map(|e| e.to_string()),
+            recognizer
+                .align_text(&audio, "hello", None)
+                .await
+                .err()
+                .map(|e| e.to_string()),
+        ] {
+            let rendered = rendered.expect("every method must fail closed");
+            assert!(
+                rendered.contains("No phoneme recognizer is configured"),
+                "unexpected error: {rendered}"
+            );
+        }
+
+        let metadata = recognizer.metadata();
+        assert_eq!(metadata.alignment_accuracy, 0.0);
+        assert!(metadata.supported_languages.is_empty());
+    }
+
     #[tokio::test]
     #[cfg(feature = "whisper-pure")]
     async fn test_pipeline_builder() {
-        let whisper = PureRustWhisper::new(WhisperConfig::default())
+        // Without real Whisper weights the model itself fails closed, so the pipeline
+        // can only be built when a real checkpoint is configured.
+        let Some(assets) = crate::asr::whisper::assets_from_env() else {
+            eprintln!(
+                "skipping: set {} to run against a real checkpoint",
+                crate::asr::whisper::ASSETS_ENV_VAR
+            );
+            return;
+        };
+        let whisper = PureRustWhisper::new(WhisperConfig::default().with_assets(assets))
             .await
-            .unwrap();
+            .expect("real assets must build a model");
         let pipeline = PipelineBuilder::new()
             .with_asr_model(Box::new(whisper))
             .with_mode(ProcessingMode::ASROnly)
@@ -601,6 +668,20 @@ mod tests {
             .await;
 
         assert!(pipeline.is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "whisper-pure")]
+    async fn pipeline_reports_whisper_weight_absence() {
+        // Regression guard: the pipeline must surface the model's fail-closed error
+        // rather than silently building a pipeline around an untrained network.
+        let Err(err) = PureRustWhisper::new(WhisperConfig::default()).await else {
+            panic!("PureRustWhisper must refuse to build without weights");
+        };
+        assert!(
+            err.to_string().contains("No pretrained weights configured"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]

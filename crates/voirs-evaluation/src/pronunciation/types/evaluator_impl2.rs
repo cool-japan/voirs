@@ -12,8 +12,8 @@ use super::evaluator_core::PronunciationEvaluatorImpl;
 use super::extended_types::{
     EmotionalDynamics, EmotionalProsodicFeatures, EmotionalState, EmotionalTransition,
     IntonationFunction, IntonationPattern, LanguageComparisonDetails, LanguageProsodicProfile,
-    MannerOfArticulation, PauseCharacteristics, PausePlacement, ProsodicFeature,
-    ProsodyAdaptation, RhythmNorms, TimingType,
+    MannerOfArticulation, PauseCharacteristics, PausePlacement, ProsodicFeature, ProsodyAdaptation,
+    RhythmNorms, TimingType,
 };
 use super::forced_alignment;
 
@@ -283,7 +283,8 @@ impl PronunciationEvaluatorImpl {
         // from `align_phonemes_to_audio`), not the whole utterance, so that each word
         // in a multi-word sentence gets its own stress evidence instead of all words
         // sharing one whole-sentence duration profile.
-        let word_phonemes = forced_alignment::word_phoneme_span(alignment, word_idx, word, total_words);
+        let word_phonemes =
+            forced_alignment::word_phoneme_span(alignment, word_idx, word, total_words);
         if !word_phonemes.is_empty() {
             let total_duration: f32 = word_phonemes
                 .iter()

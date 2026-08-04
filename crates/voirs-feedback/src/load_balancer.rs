@@ -318,7 +318,7 @@ impl LoadBalancer {
             .min_by(|a, b| {
                 a.avg_response_time_ms
                     .partial_cmp(&b.avg_response_time_ms)
-                    .expect("value should be present")
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .ok_or("No workers available")?;
 

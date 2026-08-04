@@ -261,7 +261,10 @@ pub struct QualityEvaluationConfig {
     pub detailed_analysis: bool,
     /// Confidence threshold for reliable scores
     pub confidence_threshold: f32,
-    /// Enable deep learning-based MOS prediction
+    /// Reserved for a future trained-weights MOS predictor path; not currently
+    /// read by any evaluator (the crate's DSP-heuristic MOS estimate, see
+    /// [`crate::quality::evaluator::QualityEvaluator::calculate_mos_dsp_heuristic`],
+    /// is always available and does not require this flag).
     pub use_deep_learning_mos: bool,
     /// Listener demographic adaptation settings
     pub demographic_adaptation: Option<DemographicProfile>,

@@ -1,4 +1,9 @@
 pub mod distributed;
+// Real, byte-oriented S3(-compatible) client + Pure-Rust AWS SigV4 signing
+// used by `storage::VoirsCloudStorage`. Private: `s3_client`/`sigv4` are
+// protocol plumbing, not part of the SDK's public cloud API.
+mod s3_client;
+mod sigv4;
 pub mod storage;
 pub mod telemetry;
 

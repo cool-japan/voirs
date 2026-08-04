@@ -581,7 +581,14 @@ impl ConformerModel {
             block.convolution.batch_norm_beta =
                 header.read_vector(&format!("{prefix}.conv.norm.bias"), dim)?;
 
-            load_feed_forward(&mut block.feed_forward_1, header, &prefix, "ff1", dim, hidden)?;
+            load_feed_forward(
+                &mut block.feed_forward_1,
+                header,
+                &prefix,
+                "ff1",
+                dim,
+                hidden,
+            )?;
             if let Some(ff2) = block.feed_forward_2.as_mut() {
                 load_feed_forward(ff2, header, &prefix, "ff2", dim, hidden)?;
             }
@@ -827,8 +834,7 @@ impl ConformerModel {
         #[allow(clippy::cast_precision_loss)]
         let window: Vec<f64> = (0..window_size)
             .map(|i| {
-                let phase =
-                    2.0 * std::f64::consts::PI * i as f64 / window_size as f64;
+                let phase = 2.0 * std::f64::consts::PI * i as f64 / window_size as f64;
                 0.5 * (1.0 - phase.cos())
             })
             .collect();
@@ -1036,8 +1042,7 @@ impl ConformerModel {
 
         tracing::debug!("Applying multi-head attention with {num_heads} heads");
 
-        if attention.query_weights.len() != inner_dim
-            || attention.output_weights.len() != model_dim
+        if attention.query_weights.len() != inner_dim || attention.output_weights.len() != model_dim
         {
             return Err(RecognitionError::ModelError {
                 message: format!(

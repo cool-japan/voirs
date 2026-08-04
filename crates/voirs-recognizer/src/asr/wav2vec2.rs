@@ -29,11 +29,8 @@ use voirs_sdk::{AudioBuffer, LanguageCode};
 ///
 /// Used to tell a genuine `Wav2Vec2` checkpoint apart from an unrelated `safetensors`
 /// file, so that the reported diagnostics are accurate.
-const WAV2VEC2_REQUIRED_PREFIXES: &[&str] = &[
-    "wav2vec2.feature_extractor",
-    "wav2vec2.encoder",
-    "lm_head",
-];
+const WAV2VEC2_REQUIRED_PREFIXES: &[&str] =
+    &["wav2vec2.feature_extractor", "wav2vec2.encoder", "lm_head"];
 
 /// Facebook Wav2Vec2 ASR model implementation
 pub struct Wav2Vec2Model {
@@ -581,8 +578,14 @@ mod tests {
             .expect_err("Wav2Vec2 inference must not fabricate a transcript");
         match err {
             RecognitionError::FeatureNotSupported { feature } => {
-                assert!(feature.contains("Wav2Vec2 inference"), "unexpected: {feature}");
-                assert!(feature.contains("OnnxWav2Vec2"), "must name the real backend: {feature}");
+                assert!(
+                    feature.contains("Wav2Vec2 inference"),
+                    "unexpected: {feature}"
+                );
+                assert!(
+                    feature.contains("OnnxWav2Vec2"),
+                    "must name the real backend: {feature}"
+                );
             }
             other => panic!("expected FeatureNotSupported, got {other:?}"),
         }
@@ -631,7 +634,10 @@ mod tests {
         let err = model.ensure_loaded().await.unwrap_err();
         match err {
             RecognitionError::ModelLoadError { message, .. } => {
-                assert!(message.contains("No local checkpoint"), "unexpected: {message}");
+                assert!(
+                    message.contains("No local checkpoint"),
+                    "unexpected: {message}"
+                );
             }
             other => panic!("expected ModelLoadError, got {other:?}"),
         }
@@ -665,7 +671,10 @@ mod tests {
         let err = model.ensure_loaded().await.unwrap_err();
         match err {
             RecognitionError::ModelLoadError { message, .. } => {
-                assert!(message.contains("Wav2Vec2 CTC checkpoint"), "unexpected: {message}");
+                assert!(
+                    message.contains("Wav2Vec2 CTC checkpoint"),
+                    "unexpected: {message}"
+                );
             }
             other => panic!("expected ModelLoadError, got {other:?}"),
         }
@@ -744,7 +753,10 @@ mod tests {
         .unwrap();
         let metadata = model.metadata();
 
-        assert!(metadata.wer_benchmarks.is_empty(), "WER must not be fabricated");
+        assert!(
+            metadata.wer_benchmarks.is_empty(),
+            "WER must not be fabricated"
+        );
         assert!(metadata.supported_features.is_empty());
         assert!(!model.supports_feature(ASRFeature::WordTimestamps));
         assert!(!model.supports_feature(ASRFeature::NoiseRobustness));
@@ -781,10 +793,16 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let model = model_with_checkpoint(&dir).await;
-        let audio_stream: AudioStream =
-            Box::pin(stream::iter(vec![AudioBuffer::new(vec![0.0; 160], 16000, 1)]));
+        let audio_stream: AudioStream = Box::pin(stream::iter(vec![AudioBuffer::new(
+            vec![0.0; 160],
+            16000,
+            1,
+        )]));
 
-        assert!(model.transcribe_streaming(audio_stream, None).await.is_err());
+        assert!(model
+            .transcribe_streaming(audio_stream, None)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -811,6 +829,9 @@ mod tests {
         let stats = model.get_stats().await;
         assert_eq!(stats.inference_count, 0);
         assert_eq!(stats.total_inference_time, Duration::ZERO);
-        assert!(stats.load_time.is_some(), "checkpoint validation time must be recorded");
+        assert!(
+            stats.load_time.is_some(),
+            "checkpoint validation time must be recorded"
+        );
     }
 }

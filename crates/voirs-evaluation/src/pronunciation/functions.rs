@@ -285,7 +285,11 @@ mod tests {
         (0..n)
             .map(|i| {
                 let t = i as f32 / sample_rate as f32;
-                let envelope = if (t * 6.0).rem_euclid(1.0) < 0.75 { 1.0 } else { 0.0 };
+                let envelope = if (t * 6.0).rem_euclid(1.0) < 0.75 {
+                    1.0
+                } else {
+                    0.0
+                };
                 envelope * (2.0 * std::f32::consts::PI * 160.0 * t).sin() * 0.7
             })
             .collect()
@@ -308,7 +312,10 @@ mod tests {
             .unwrap();
 
         assert!(!silent_alignment.phonemes.is_empty());
-        assert_eq!(silent_alignment.phonemes.len(), voiced_alignment.phonemes.len());
+        assert_eq!(
+            silent_alignment.phonemes.len(),
+            voiced_alignment.phonemes.len()
+        );
         // Real per-phoneme confidence must not be a fixed constant: the two very
         // different signals must not score identically.
         assert_ne!(

@@ -99,6 +99,9 @@ oxiarc-zstd = { workspace = true, optional = true }
 # SHA-256 model-integrity verification (pipeline/init.rs) - always available
 sha2.workspace = true
 hex.workspace = true
+# Pure-Rust HMAC (RustCrypto), used for real AWS SigV4 / Azure Shared-Key
+# request signing in cloud/storage.rs (no OpenSSL, no vendored C signing lib).
+hmac = { workspace = true, optional = true }
 
 # Real model-weight loading: binds safetensors/pth tensors into the vocoder
 # inference graph (pipeline/init.rs::load_vocoder)
@@ -139,7 +142,7 @@ gpu = ["oxionnx?/gpu", "voirs-acoustic/gpu", "voirs-vocoder/gpu", "voirs-g2p/gpu
 onnx = ["dep:oxionnx", "voirs-acoustic/onnx", "voirs-vocoder/onnx", "voirs-g2p/onnx", "voirs-cloning?/onnx", "voirs-conversion?/onnx", "voirs-emotion?/onnx", "voirs-spatial?/onnx"]
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "web-sys", "js-sys", "console_error_panic_hook", "wasm-logger"]
 http = ["axum", "tower", "tower-http"]
-cloud = ["oxiarc-deflate", "oxiarc-zstd", "aes-gcm", "oxicode"]
+cloud = ["oxiarc-deflate", "oxiarc-zstd", "aes-gcm", "oxicode", "dep:hmac"]
 plugins = ["libloading", "wasmtime"]
 
 # Advanced voice features

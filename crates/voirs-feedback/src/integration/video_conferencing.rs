@@ -1177,7 +1177,7 @@ impl VideoConferencingIntegrationManager {
 
 /// Build the error returned by every real-platform method when the crate is
 /// compiled without the `microservices` feature (no HTTP client available).
-#[cfg(feature = "microservices")]
+#[cfg(not(feature = "microservices"))]
 fn vc_feature_disabled_error() -> VideoConferencingError {
     VideoConferencingError::ConfigurationError(
         "the `microservices` feature (reqwest HTTP client) is not enabled".to_string(),

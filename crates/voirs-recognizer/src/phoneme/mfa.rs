@@ -51,22 +51,14 @@ pub struct MFAConfig {
     pub dictionary: String,
     /// Explicit acoustic model path, overriding `model` when set
     pub acoustic_model_path: Option<String>,
-    /// Language model path (passed through to MFA when set)
-    pub language_model_path: Option<String>,
-    /// G2P model path (used to expand out-of-vocabulary words when set)
-    pub g2p_model_path: Option<String>,
-    /// Number of jobs for parallel processing
+    /// Number of jobs for parallel processing (`mfa align --num_jobs`)
     pub num_jobs: usize,
-    /// Let MFA clean its temporary state after each run
+    /// Pass `mfa align --clean`, so MFA clears its temporary state before each run
     pub cleanup: bool,
-    /// Beam width for alignment
+    /// Beam width for alignment (`mfa align --beam`)
     pub beam_width: f32,
-    /// Retry beam for alignment
+    /// Retry beam for alignment (`mfa align --retry_beam`)
     pub retry_beam: f32,
-    /// Ask MFA to use a GPU where its backend supports one
-    pub use_gpu: bool,
-    /// Output format requested from MFA
-    pub output_format: MFAOutputFormat,
     /// Include phone alignment in the returned result
     pub include_phone_alignment: bool,
     /// Include word alignment in the returned result
@@ -77,33 +69,16 @@ pub struct MFAConfig {
     pub auto_download: bool,
 }
 
-/// MFA output format options
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MFAOutputFormat {
-    /// Praat `TextGrid` (the only format VoiRS parses)
-    TextGrid,
-    /// Json
-    Json,
-    /// Csv
-    Csv,
-    /// Lab
-    Lab,
-}
-
 impl Default for MFAConfig {
     fn default() -> Self {
         Self {
             model: "english_us_arpa".to_string(),
             dictionary: "english_us_arpa".to_string(),
             acoustic_model_path: None,
-            language_model_path: None,
-            g2p_model_path: None,
             num_jobs: num_cpus::get(),
             cleanup: true,
             beam_width: 10.0,
             retry_beam: 40.0,
-            use_gpu: true,
-            output_format: MFAOutputFormat::TextGrid,
             include_phone_alignment: true,
             include_word_alignment: true,
             executable: "mfa".to_string(),
@@ -134,27 +109,27 @@ struct MFAState {
 
 /// Information about an installed MFA acoustic model.
 ///
-/// Only fields MFA really reports (or that can be read from the file on disk) are
-/// populated; anything unknown is `None` rather than an invented value.
-#[derive(Debug, Clone, PartialEq)]
+/// `mfa model list` reports names only, so that is all this carries. Size, architecture
+/// and training-corpus fields were removed rather than filled with invented values;
+/// inspect the model file yourself if you need more.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MFAModelInfo {
     /// Model name as MFA reports it
     pub name: String,
     /// Language inferred from the model name, when the name identifies one
     pub language: Option<LanguageCode>,
-    /// Real file size in mebibytes, when the model file could be located
-    pub size_mb: Option<f32>,
 }
 
 /// Information about an installed MFA pronunciation dictionary.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// As with [`MFAModelInfo`], only what MFA really reports is carried. Use
+/// [`MFAModel::validate_dictionary`] with a path to count a dictionary's real entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MFADictionaryInfo {
     /// Dictionary name as MFA reports it
     pub name: String,
     /// Language inferred from the dictionary name, when the name identifies one
     pub language: Option<LanguageCode>,
-    /// Number of entries, when the dictionary file could be located and parsed
-    pub word_count: Option<usize>,
 }
 
 impl MFAState {
@@ -253,7 +228,9 @@ impl MFAModel {
         let auto_download = self.config.auto_download;
         let model = self.config.model.clone();
         let dictionary = self.config.dictionary.clone();
-        let model_is_path = self.acoustic_model_arg().is_some_and(is_existing_path);
+        let model_is_path = self
+            .acoustic_model_arg()
+            .is_some_and(|arg| is_existing_path(&arg));
         let dictionary_is_path = is_existing_path(&OsString::from(&dictionary));
 
         // The MFA CLI is blocking, so keep it off the async runtime's worker threads.
@@ -262,14 +239,22 @@ impl MFAModel {
             let acoustic = cli.list_models(ModelKind::Acoustic)?;
             let dictionaries = cli.list_models(ModelKind::Dictionary)?;
 
-            if !model_is_path && !acoustic.iter().any(|name| name == &model) {
+            // Pre-validation is a courtesy that turns a long MFA failure into a short,
+            // precise message. It is skipped when `mfa model list` printed nothing this
+            // parser recognised, because an unfamiliar output layout must not block a
+            // model that really is installed — `mfa align` remains the authority.
+            if !acoustic.is_empty() && !model_is_path && !acoustic.iter().any(|name| name == &model)
+            {
                 if auto_download {
                     cli.download_model(ModelKind::Acoustic, &model)?;
                 } else {
                     return Err(missing_asset_error("acoustic model", &model, &acoustic));
                 }
             }
-            if !dictionary_is_path && !dictionaries.iter().any(|name| name == &dictionary) {
+            if !dictionaries.is_empty()
+                && !dictionary_is_path
+                && !dictionaries.iter().any(|name| name == &dictionary)
+            {
                 if auto_download {
                     cli.download_model(ModelKind::Dictionary, &dictionary)?;
                 } else {
@@ -476,15 +461,15 @@ impl MFAModel {
         audio: &AudioBuffer,
         total_duration: f32,
     ) -> Result<PhonemeAlignment, RecognitionError> {
-        let phone_tier = grid.tier_any(&["phones", "phone", "phonemes"]).ok_or_else(|| {
-            RecognitionError::PhonemeRecognitionError {
+        let phone_tier = grid
+            .tier_any(&["phones", "phone", "phonemes"])
+            .ok_or_else(|| RecognitionError::PhonemeRecognitionError {
                 message: format!(
                     "MFA's TextGrid has no phone tier (found: {})",
                     tier_names(grid)
                 ),
                 source: None,
-            }
-        })?;
+            })?;
 
         let energy = FrameEnergy::analyse(audio);
 
@@ -535,7 +520,8 @@ impl MFAModel {
             alignment_count: state.alignment_count,
             total_alignment_time: state.total_alignment_time,
             average_alignment_time: if state.alignment_count > 0 {
-                state.total_alignment_time / u32::try_from(state.alignment_count).unwrap_or(u32::MAX)
+                state.total_alignment_time
+                    / u32::try_from(state.alignment_count).unwrap_or(u32::MAX)
             } else {
                 Duration::ZERO
             },
@@ -560,9 +546,6 @@ impl MFAModel {
             .iter()
             .map(|name| MFAModelInfo {
                 language: Self::infer_language(name),
-                // MFA does not report file sizes; VoiRS reports the real size only when
-                // the name is a path that exists.
-                size_mb: file_size_mb(Path::new(name)),
                 name: name.clone(),
             })
             .collect())
@@ -582,9 +565,6 @@ impl MFAModel {
             .iter()
             .map(|name| MFADictionaryInfo {
                 language: Self::infer_language(name),
-                word_count: parse_dictionary_file(Path::new(name))
-                    .ok()
-                    .map(|entries| entries.len()),
                 name: name.clone(),
             })
             .collect())
@@ -983,12 +963,6 @@ fn is_existing_path(value: &OsString) -> bool {
     Path::new(value).exists()
 }
 
-fn file_size_mb(path: &Path) -> Option<f32> {
-    let bytes = std::fs::metadata(path).ok()?.len();
-    #[allow(clippy::cast_precision_loss)]
-    Some(bytes as f32 / (1024.0 * 1024.0))
-}
-
 /// Strip whitespace from a phoneme symbol so it can be used as a dictionary key.
 fn sanitise_symbol(symbol: &str) -> String {
     symbol.split_whitespace().collect::<Vec<_>>().join("_")
@@ -1272,7 +1246,10 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("training corpus not found"), "{err}");
+        assert!(
+            err.to_string().contains("training corpus not found"),
+            "{err}"
+        );
     }
 
     #[tokio::test]
@@ -1555,7 +1532,10 @@ mod tests {
         let samples: Vec<i16> = reader.samples::<i16>().map(|s| s.unwrap_or(0)).collect();
         assert_eq!(samples.len(), 4);
         assert_eq!(samples[0], 0);
-        assert!(samples[3] > 32_000, "full-scale sample survived: {samples:?}");
+        assert!(
+            samples[3] > 32_000,
+            "full-scale sample survived: {samples:?}"
+        );
     }
 
     #[test]

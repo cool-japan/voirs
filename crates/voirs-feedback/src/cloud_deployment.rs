@@ -989,7 +989,7 @@ fn build_deployment_manifest(config: &DeploymentConfig) -> serde_json::Value {
 
     let env: Vec<serde_json::Value> = {
         let mut vars: Vec<_> = config.environment.iter().collect();
-        vars.sort_by(|(a, _), (b, _)| a.cmp(b)); // deterministic manifest output
+        vars.sort_by_key(|&(k, _)| k); // deterministic manifest output
         vars.into_iter()
             .map(|(k, v)| serde_json::json!({ "name": k, "value": v }))
             .collect()

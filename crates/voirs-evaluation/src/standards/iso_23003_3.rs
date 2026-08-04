@@ -149,7 +149,7 @@ impl IsoUsacValidator {
         }
 
         // 3. Validate delay constraints
-        let delay_ms = self.estimate_delay(audio)?;
+        let delay_ms = self.estimate_delay(audio, reference)?;
         let delay_compliant = self.check_delay_compliance(delay_ms);
 
         if !delay_compliant {
@@ -271,23 +271,119 @@ impl IsoUsacValidator {
         Ok(in_band_ratio >= 0.95)
     }
 
-    /// Estimate codec delay
-    fn estimate_delay(&self, _audio: &AudioBuffer) -> Result<f32, StandardsError> {
-        // USAC codec delay depends on configuration
-        // Typical values: 20-80 ms
-        // This is a placeholder - real delay would be measured or from metadata
+    /// Estimate codec delay.
+    ///
+    /// When a reference signal is available, measures the *real* delay
+    /// between `reference` and `audio` via the lag of peak normalized
+    /// cross-correlation — the standard technique for measuring encode/decode
+    /// pipeline latency from a degraded-vs-clean signal pair (search range
+    /// capped at ±200 ms, generously covering USAC's typical 20-80 ms
+    /// algorithmic delay).
+    ///
+    /// Without a reference, there is no acoustic signal to measure delay
+    /// from at all (algorithmic/lookahead delay is a property of the codec's
+    /// configuration, not of a single decoded waveform) — this returns the
+    /// standard, documented USAC frame-size-plus-lookahead figure for the
+    /// configured bandwidth mode as a conservative *specification-derived*
+    /// estimate, not a fabricated per-signal measurement.
+    fn estimate_delay(
+        &self,
+        audio: &AudioBuffer,
+        reference: Option<&AudioBuffer>,
+    ) -> Result<f32, StandardsError> {
+        if let Some(reference) = reference {
+            if let Some(lag_ms) = self.measure_delay_via_cross_correlation(audio, reference) {
+                return Ok(lag_ms);
+            }
+        }
 
+        // USAC codec delay depends on configuration; typical values: 20-80 ms
+        // (frame size + algorithmic lookahead/processing), per the standard's
+        // reference encoder parameters. No reference signal was supplied (or
+        // cross-correlation could not resolve a lag), so this is the best
+        // available specification-derived estimate rather than a
+        // per-signal measurement.
         let frame_size_ms = match self.bandwidth_mode {
             UsacBandwidthMode::NarrowBand => 20.0,
             UsacBandwidthMode::WideBand => 20.0,
             UsacBandwidthMode::SuperWideBand => 40.0,
             UsacBandwidthMode::FullBand => 40.0,
         };
-
-        // Add algorithmic delay (lookahead + processing)
         let algorithmic_delay_ms = 20.0;
 
         Ok(frame_size_ms + algorithmic_delay_ms)
+    }
+
+    /// Measure the lag (in milliseconds) of peak normalized cross-correlation
+    /// between `audio` and `reference`, restricted to a plausible codec-delay
+    /// search window (0-200 ms). Returns `None` when the signals are too
+    /// short, have mismatched sample rates, or carry essentially no energy
+    /// to correlate.
+    fn measure_delay_via_cross_correlation(
+        &self,
+        audio: &AudioBuffer,
+        reference: &AudioBuffer,
+    ) -> Option<f32> {
+        if audio.sample_rate() != reference.sample_rate() || audio.sample_rate() == 0 {
+            return None;
+        }
+        let sample_rate = audio.sample_rate();
+        let max_lag = ((0.2 * f64::from(sample_rate)) as usize).max(1);
+
+        let ref_samples = reference.samples();
+        let deg_samples = audio.samples();
+        if ref_samples.len() < 32 || deg_samples.len() < 32 {
+            return None;
+        }
+        let usable_len = ref_samples.len().min(deg_samples.len());
+        let max_lag = max_lag.min(usable_len.saturating_sub(1));
+        if max_lag == 0 {
+            return None;
+        }
+
+        let ref_energy: f64 = ref_samples
+            .iter()
+            .take(usable_len)
+            .map(|&x| f64::from(x) * f64::from(x))
+            .sum();
+        if ref_energy <= 1e-12 {
+            return None;
+        }
+
+        let mut best_lag = 0usize;
+        let mut best_corr = f64::MIN;
+        for lag in 0..=max_lag {
+            let n = usable_len - lag;
+            if n == 0 {
+                continue;
+            }
+            let mut cross = 0.0f64;
+            let mut deg_energy = 0.0f64;
+            for i in 0..n {
+                let r = f64::from(ref_samples[i]);
+                let d = f64::from(deg_samples[i + lag]);
+                cross += r * d;
+                deg_energy += d * d;
+            }
+            if deg_energy <= 1e-12 {
+                continue;
+            }
+            let normalized = cross / (ref_energy.sqrt() * deg_energy.sqrt());
+            if normalized > best_corr {
+                best_corr = normalized;
+                best_lag = lag;
+            }
+        }
+
+        if best_corr <= 0.05 {
+            // No meaningfully correlated alignment found within the search
+            // window; the reference and audio are not a clean/degraded pair
+            // of the same underlying signal (or the delay exceeds the search
+            // window), so a lag measurement here would not be trustworthy.
+            return None;
+        }
+
+        Some(1000.0 * best_lag as f32 / sample_rate as f32)
     }
 
     /// Check delay compliance
@@ -450,17 +546,140 @@ impl IsoUsacValidator {
         false
     }
 
-    /// Detect tonal artifacts
-    fn detect_tonal_artifacts(&self, _samples: &[f32]) -> Result<bool, StandardsError> {
-        // Placeholder for spectral analysis to detect coding-induced tones
-        // Would use FFT and peak detection
+    /// Detect tonal artifacts ("birdies") via spectral peak-to-noise-floor ratio.
+    ///
+    /// Lossy coding artifacts characteristically appear as narrow, isolated
+    /// spectral peaks (quantization "birdies") that stand far above the local
+    /// noise floor around them — unlike genuine harmonic content, which forms
+    /// a series of related peaks at multiples of a fundamental. This computes
+    /// the averaged power spectrum (Hann-windowed, 50%-overlapping frames,
+    /// `scirs2_fft::rfft`, matching the pattern in
+    /// [`super::aes_standards::AesStandards::calculate_frequency_response_flatness`]),
+    /// locates local maxima, and flags the signal when at least one peak
+    /// exceeds its local (±5-bin, excluding the peak bin itself) median floor
+    /// by more than 30 dB — a level of isolation well beyond normal harmonic
+    /// spacing in natural or well-coded speech/audio.
+    fn detect_tonal_artifacts(&self, samples: &[f32]) -> Result<bool, StandardsError> {
+        let power = match Self::averaged_power_spectrum(samples, self.sample_rate) {
+            Some(power) if power.len() > 16 => power,
+            _ => return Ok(false),
+        };
+
+        let half_window = 5usize;
+        for i in half_window..power.len().saturating_sub(half_window) {
+            let peak = power[i];
+            if peak <= 1e-20 {
+                continue;
+            }
+            // Local maximum check: strictly greater than immediate neighbours.
+            if peak <= power[i - 1] || peak <= power[i + 1] {
+                continue;
+            }
+            let mut neighborhood: Vec<f32> = (i - half_window..=i + half_window)
+                .filter(|&k| k != i)
+                .map(|k| power[k])
+                .collect();
+            neighborhood.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let median_floor = neighborhood[neighborhood.len() / 2].max(1e-20);
+            let ratio_db = 10.0 * (peak / median_floor).log10();
+            if ratio_db > 30.0 {
+                return Ok(true);
+            }
+        }
         Ok(false)
     }
 
-    /// Detect bandwidth limitation artifacts
-    fn detect_bandwidth_artifacts(&self, _samples: &[f32]) -> Result<bool, StandardsError> {
-        // Placeholder for detecting artifacts near bandwidth edges
-        Ok(false)
+    /// Detect bandwidth-edge limitation artifacts (abrupt low-pass cutoff).
+    ///
+    /// A codec that limits bandwidth more aggressively than its nominal mode
+    /// implies produces a sharp spectral cliff rather than the smooth,
+    /// gradual roll-off of natural speech/audio content. This measures the
+    /// power ratio between the two analysis bins straddling the mode's
+    /// nominal bandwidth edge; a drop of more than 20 dB across that single
+    /// bin boundary indicates an artificially hard cutoff rather than
+    /// content that simply has little energy up there naturally.
+    fn detect_bandwidth_artifacts(&self, samples: &[f32]) -> Result<bool, StandardsError> {
+        let power = match Self::averaged_power_spectrum(samples, self.sample_rate) {
+            Some(power) if power.len() > 4 => power,
+            _ => return Ok(false),
+        };
+
+        let fft_size = Self::fft_size_for(samples.len());
+        let bin_hz = self.sample_rate as f32 / fft_size as f32;
+        let edge_bin = ((self.bandwidth_mode.bandwidth_hz() as f32 / bin_hz) as usize)
+            .clamp(1, power.len() - 2);
+
+        // Average power just below vs. just above the nominal bandwidth edge.
+        let below_start = edge_bin.saturating_sub(2);
+        let below: f32 = power[below_start..edge_bin].iter().sum::<f32>()
+            / (edge_bin - below_start).max(1) as f32;
+        let above_end = (edge_bin + 3).min(power.len());
+        let above: f32 = power[edge_bin..above_end].iter().sum::<f32>()
+            / (above_end - edge_bin).max(1) as f32;
+
+        if below <= 1e-20 {
+            return Ok(false);
+        }
+        let drop_db = 10.0 * (below / above.max(1e-20)).log10();
+        Ok(drop_db > 20.0)
+    }
+
+    /// FFT length used for spectral analysis at a given sample count: the
+    /// next power of two at or above the sample count, clamped to a
+    /// reasonable analysis window (256-4096 samples) so both very short and
+    /// very long inputs get a sane transform size.
+    fn fft_size_for(num_samples: usize) -> usize {
+        num_samples.next_power_of_two().clamp(256, 4096)
+    }
+
+    /// Averaged magnitude-squared power spectrum across Hann-windowed,
+    /// 50%-overlapping analysis frames, via `scirs2_fft::rfft`. Returns
+    /// `None` for empty input.
+    fn averaged_power_spectrum(samples: &[f32], sample_rate: u32) -> Option<Vec<f32>> {
+        if samples.is_empty() || sample_rate == 0 {
+            return None;
+        }
+        let fft_size = Self::fft_size_for(samples.len().min(4096));
+        let num_bins = fft_size / 2 + 1;
+        let hop = (fft_size / 2).max(1);
+
+        let mut summed = vec![0.0f64; num_bins];
+        let mut frame_count = 0usize;
+        let mut start = 0usize;
+        loop {
+            let available = (samples.len() - start).min(fft_size);
+            let mut buffer = vec![0.0f64; fft_size];
+            for (i, slot) in buffer.iter_mut().enumerate().take(available) {
+                let window = 0.5
+                    - 0.5
+                        * (2.0 * std::f64::consts::PI * i as f64 / (fft_size as f64 - 1.0).max(1.0))
+                            .cos();
+                *slot = f64::from(samples[start + i]) * window;
+            }
+            if let Ok(spectrum) = scirs2_fft::rfft(&buffer, Some(fft_size)) {
+                for (k, value) in spectrum.iter().enumerate().take(num_bins) {
+                    summed[k] += value.re * value.re + value.im * value.im;
+                }
+                frame_count += 1;
+            }
+            if available < fft_size {
+                break;
+            }
+            start += hop;
+            if start >= samples.len() {
+                break;
+            }
+        }
+
+        if frame_count == 0 {
+            return None;
+        }
+        Some(
+            summed
+                .into_iter()
+                .map(|p| (p / frame_count as f64) as f32)
+                .collect(),
+        )
     }
 }
 

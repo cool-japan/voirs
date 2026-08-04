@@ -339,8 +339,9 @@ impl AesStandards {
             for (i, slot) in buffer.iter_mut().enumerate().take(available) {
                 let window = 0.5
                     - 0.5
-                        * (2.0 * std::f64::consts::PI * i as f64 / (fft_size as f64 - 1.0).max(1.0))
-                            .cos();
+                        * (2.0 * std::f64::consts::PI * i as f64
+                            / (fft_size as f64 - 1.0).max(1.0))
+                        .cos();
                 *slot = f64::from(samples[start + i]) * window;
             }
             if let Ok(spectrum) = scirs2_fft::rfft(&buffer, Some(fft_size)) {

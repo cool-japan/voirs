@@ -4,19 +4,27 @@
 //! like real-time streaming, batch processing, and quality control.
 
 use crate::{
-    set_last_error, utils::c_str_to_str, VoirsAudioBuffer, VoirsErrorCode, VoirsQualityLevel,
-    VoirsSynthesisConfig,
+    set_last_error, utils::c_str_to_str, VoirsAudioBuffer, VoirsErrorCode, VoirsSynthesisConfig,
 };
-use std::sync::OnceLock;
+use parking_lot::Mutex;
 use std::{
+    collections::HashMap,
     ffi::CString,
     os::raw::{c_char, c_float, c_uint, c_ulong},
     ptr, slice,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Once, OnceLock,
+    },
     time::Instant,
 };
 use tokio;
-use voirs_sdk::streaming::{StreamingConfig, StreamingPipeline};
+// NOTE: `voirs_sdk::VoirsPipelineBuilder` (imported bare below), `builder::VoirsPipelineBuilder`
+// and `pipeline::VoirsPipelineBuilder` all resolve to the exact same real type — there is no
+// separate "dummy" builder reachable from this crate. Without an explicit `.with_test_mode(true)`
+// opt-in, building always resolves real components and fails closed (`Err`) if real model
+// weights are unavailable; it never substitutes stub audio.
+use voirs_sdk::streaming::StreamingConfig;
 use voirs_sdk::{
     error::Result as VoirsResult, pipeline::VoirsPipeline, AudioBuffer, AudioFormat, LanguageCode,
     QualityLevel, SynthesisConfig, VoirsPipelineBuilder,
@@ -78,6 +86,87 @@ fn record_error() {
     TOTAL_ERRORS.fetch_add(1, Ordering::Relaxed);
 }
 
+/// The **only** opt-in letting this crate's own tests bypass real model
+/// loading in favor of the SDK's explicit test-mode stub pipeline.
+///
+/// Namespaced to this crate and requires an exact value match, so no ambient
+/// variable set by CI/CD systems or container/runner tooling (e.g. the very
+/// common bare `CI=true`) can silently switch production output to
+/// fabricated audio. Must only be set by `voirs-ffi`'s own test suite.
+fn dummy_synthesis_requested() -> bool {
+    std::env::var("VOIRS_FFI_TEST_SYNTHESIS")
+        .map(|value| value == "dummy")
+        .unwrap_or(false)
+}
+
+/// Logs a loud, one-time warning the first time dummy synthesis mode is
+/// actually engaged, so the fact that fabricated (stub) audio is being served
+/// is always visible rather than silently blending into normal output.
+fn warn_dummy_mode_engaged() {
+    static WARNED: Once = Once::new();
+    WARNED.call_once(|| {
+        log::warn!(
+            "VOIRS_FFI_TEST_SYNTHESIS=dummy is set: synthesis is being served by the \
+             SDK's explicit test-mode stub pipeline (DummyG2p/DummyAcoustic/DummyVocoder), \
+             NOT real neural models. This must never be set outside voirs-ffi's own tests."
+        );
+    });
+}
+
+/// Cache key identifying a pipeline configuration: quality level, whether
+/// audio enhancement is enabled, and whether this is the explicit dummy/
+/// test-mode pipeline (see [`dummy_synthesis_requested`]).
+type PipelineCacheKey = (u8, bool, bool);
+
+/// Building a [`VoirsPipeline`] resolves real components (loading model
+/// weights from disk/network); rebuilding one on every single synthesis call
+/// is wasteful. This cache lets calls that share a configuration reuse an
+/// already-built pipeline instead.
+static PIPELINE_CACHE: OnceLock<Mutex<HashMap<PipelineCacheKey, Arc<VoirsPipeline>>>> =
+    OnceLock::new();
+
+fn pipeline_cache() -> &'static Mutex<HashMap<PipelineCacheKey, Arc<VoirsPipeline>>> {
+    PIPELINE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Build (or reuse a cached) [`VoirsPipeline`] for the given quality /
+/// enhancement / dummy-mode combination.
+///
+/// When `dummy_mode` is `true` this installs the SDK's own explicit test-mode
+/// stub components via [`VoirsPipelineBuilder::with_test_mode`] — never a
+/// locally fabricated substitute. When `dummy_mode` is `false` this resolves
+/// real components; failures (missing model weights, network errors, ...)
+/// propagate to the caller as `Err` instead of being papered over with fake
+/// audio. Failed builds are never cached.
+async fn get_or_build_pipeline(
+    quality: QualityLevel,
+    enable_enhancement: bool,
+    dummy_mode: bool,
+) -> VoirsResult<Arc<VoirsPipeline>> {
+    let key = (quality as u8, enable_enhancement, dummy_mode);
+
+    if let Some(pipeline) = pipeline_cache().lock().get(&key).cloned() {
+        return Ok(pipeline);
+    }
+
+    if dummy_mode {
+        warn_dummy_mode_engaged();
+    }
+
+    let mut builder = VoirsPipelineBuilder::new()
+        .with_quality(quality)
+        .with_enhancement(enable_enhancement);
+
+    if dummy_mode {
+        builder = builder.with_validation(false).with_test_mode(true);
+    }
+
+    let pipeline = Arc::new(builder.build().await?);
+    pipeline_cache().lock().insert(key, Arc::clone(&pipeline));
+
+    Ok(pipeline)
+}
+
 /// Calculate RMS (Root Mean Square) of audio samples
 fn calculate_audio_rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
@@ -88,44 +177,85 @@ fn calculate_audio_rms(samples: &[f32]) -> f32 {
     (sum_squares / samples.len() as f32).sqrt()
 }
 
-/// Calculate dynamic range of audio samples
+/// Calculate the dynamic range of audio samples, normalized to `[0.0, 1.0]`.
+///
+/// This is `log10(peak / floor)` (clamped to a 100:1, i.e. 40 dB, ratio) where
+/// `floor` is the 1st-percentile absolute sample amplitude rather than the
+/// true minimum. Ordinary periodic signals cross exactly zero at some sample,
+/// which would otherwise always drive the true minimum to `0.0` and collapse
+/// this metric to a meaningless constant regardless of the signal's actual
+/// range; a low percentile is used as a robust noise floor instead. Returns
+/// `0.0` for empty input or true silence (all-zero samples) — there is no
+/// range to measure without a signal.
 fn calculate_dynamic_range(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
 
-    let max_amplitude = samples.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
-    let min_amplitude = samples
-        .iter()
-        .map(|x| x.abs())
-        .fold(f32::INFINITY, f32::min);
+    let mut abs_samples: Vec<f32> = samples.iter().map(|x| x.abs()).collect();
+    abs_samples.sort_unstable_by(|a, b| a.total_cmp(b));
 
-    if min_amplitude > 0.0 {
-        (max_amplitude / min_amplitude).log10().min(2.0) / 2.0 // Normalize to 0-1 range
-    } else {
-        1.0 // Full dynamic range if we have silence
-    }
-}
-
-/// Calculate spectral centroid of audio samples (frequency content analysis)
-fn calculate_spectral_centroid(samples: &[f32], sample_rate: u32) -> f32 {
-    if samples.is_empty() {
+    let max_amplitude = *abs_samples.last().unwrap_or(&0.0);
+    if max_amplitude <= 0.0 {
         return 0.0;
     }
 
-    // Simple spectral centroid calculation using magnitude spectrum
-    let mut weighted_sum = 0.0;
-    let mut magnitude_sum = 0.0;
+    let floor_index = ((abs_samples.len() as f32) * 0.01) as usize;
+    let floor_index = floor_index.min(abs_samples.len() - 1);
+    let min_amplitude = abs_samples[floor_index].max(f32::EPSILON);
 
-    for (i, &sample) in samples.iter().enumerate() {
-        let magnitude = sample.abs();
-        let frequency = (i as f32 * sample_rate as f32) / (samples.len() as f32);
-        weighted_sum += frequency * magnitude;
+    (max_amplitude / min_amplitude).log10().min(2.0) / 2.0
+}
+
+/// Calculate the spectral centroid (magnitude-weighted mean frequency) of a
+/// signal via a real FFT, in Hz.
+///
+/// `centroid = Σ(f_k · |X_k|) / Σ|X_k|`, where `X_k` is the `k`-th bin of the
+/// real FFT ([`scirs2_fft::rfft`]) of a Hann-windowed copy of `samples`, and
+/// `f_k = k · sample_rate / n`. This is a genuine frequency-domain
+/// "brightness" measure: signals dominated by high-frequency content yield a
+/// larger centroid than low-frequency-dominant signals, unlike a time-domain
+/// amplitude-weighted sample index (which carries no frequency information at
+/// all). Returns `0.0` for signals shorter than two samples, for signals with
+/// zero total magnitude, or — logging a warning — if the FFT itself fails.
+fn calculate_spectral_centroid(samples: &[f32], sample_rate: u32) -> f32 {
+    let n = samples.len();
+    if n < 2 {
+        return 0.0;
+    }
+
+    // Apply a Hann window to reduce spectral leakage, then take the real FFT
+    // in f64 for precision. The one-sided spectrum has n / 2 + 1 complex bins.
+    let denom = (n - 1) as f64;
+    let windowed: Vec<f64> = samples
+        .iter()
+        .enumerate()
+        .map(|(i, &sample)| {
+            let hann = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / denom).cos();
+            sample as f64 * hann
+        })
+        .collect();
+
+    let spectrum = match scirs2_fft::rfft(&windowed, None) {
+        Ok(spectrum) => spectrum,
+        Err(e) => {
+            log::warn!("calculate_spectral_centroid: RFFT failed, reporting 0.0: {e}");
+            return 0.0;
+        }
+    };
+
+    let bin_hz = sample_rate as f64 / n as f64;
+    let mut magnitude_sum = 0.0f64;
+    let mut weighted_sum = 0.0f64;
+    for (k, bin) in spectrum.iter().enumerate() {
+        let magnitude = bin.norm();
+        let freq = k as f64 * bin_hz;
         magnitude_sum += magnitude;
+        weighted_sum += magnitude * freq;
     }
 
     if magnitude_sum > 0.0 {
-        weighted_sum / magnitude_sum
+        (weighted_sum / magnitude_sum) as f32
     } else {
         0.0
     }
@@ -168,35 +298,18 @@ fn apply_audio_enhancement(samples: &mut [f32], _sample_rate: u32, enable_enhanc
 }
 
 /// Create VoiRS pipeline and synthesize text
+///
+/// This always runs real synthesis through a (cached) [`VoirsPipeline`]. The
+/// only way to receive stub audio instead of real neural synthesis is the
+/// crate-internal [`dummy_synthesis_requested`] opt-in, which routes through
+/// the SDK's own explicit test-mode components rather than fabricating a
+/// tone locally. Ambient environment variables such as `CI` never affect the
+/// output.
 async fn create_pipeline_and_synthesize(
     text: &str,
     config: &VoirsAdvancedSynthesisConfig,
 ) -> VoirsResult<AudioBuffer> {
-    // Check if we should enable test mode for fast testing
-    let test_mode = std::env::var("VOIRS_SKIP_SLOW_TESTS").unwrap_or_default() == "1"
-        || std::env::var("VOIRS_SKIP_SYNTHESIS_TESTS").is_ok()
-        || std::env::var("CI").is_ok(); // Enable test mode in CI environments
-
-    // In test mode, return a simple dummy audio buffer immediately
-    if test_mode {
-        use voirs_sdk::audio::AudioBuffer;
-
-        let sample_rate = config.base_config.sample_rate;
-        let duration_seconds = (text.len() as f32 * 0.1).clamp(0.1, 5.0); // Estimate duration based on text length
-        let sample_count = (sample_rate as f32 * duration_seconds) as usize;
-
-        // Generate a simple test tone instead of actual synthesis
-        let mut samples = Vec::with_capacity(sample_count);
-        for i in 0..sample_count {
-            let t = i as f32 / sample_rate as f32;
-            // Generate a simple sine wave with decreasing amplitude
-            let amplitude = 0.1 * (1.0 - t / duration_seconds);
-            let sample = amplitude * (2.0 * std::f32::consts::PI * 440.0 * t).sin();
-            samples.push(sample);
-        }
-
-        return Ok(AudioBuffer::new(samples, sample_rate, 1));
-    }
+    let dummy_mode = dummy_synthesis_requested();
 
     // Create synthesis configuration
     let synthesis_config = SynthesisConfig {
@@ -234,13 +347,14 @@ async fn create_pipeline_and_synthesize(
         reverb_level: 0.3,
     };
 
-    // Build pipeline and measure creation time - components are created automatically
+    // Build (or reuse a cached) pipeline and measure creation time.
     let pipeline_start = Instant::now();
-    let pipeline = VoirsPipelineBuilder::new()
-        .with_quality(QualityLevel::High)
-        .with_enhancement(config.enable_noise_reduction)
-        .build()
-        .await?;
+    let pipeline = get_or_build_pipeline(
+        QualityLevel::High,
+        config.enable_noise_reduction,
+        dummy_mode,
+    )
+    .await?;
 
     let pipeline_creation_time = pipeline_start.elapsed();
     record_pipeline_creation_time(pipeline_creation_time.as_millis() as u64);
@@ -381,16 +495,23 @@ pub unsafe extern "C" fn voirs_synthesize_advanced(
         0.0f32
     };
 
+    // Heap-allocate the (possibly enhanced) samples as a boxed slice, matching
+    // the same convention `VoirsAudioBuffer::from_audio_buffer` uses (capacity
+    // == length is guaranteed by `into_boxed_slice`, unlike relying on a
+    // `Vec`'s capacity happening to equal its length); `voirs_free_audio_buffer`
+    // reconstructs and drops this boxed slice.
+    let mut boxed_samples = samples.into_boxed_slice();
+    let length = boxed_samples.len() as u32;
+    let samples_ptr = boxed_samples.as_mut_ptr();
+    std::mem::forget(boxed_samples);
+
     let audio_buffer = Box::new(VoirsAudioBuffer {
-        samples: samples.as_ptr() as *mut f32,
-        length: samples.len() as u32,
+        samples: samples_ptr,
+        length,
         sample_rate,
         channels: channels as u32,
         duration,
     });
-
-    // Prevent deallocation of samples vector
-    std::mem::forget(samples);
 
     (*result).audio = Box::into_raw(audio_buffer);
 
@@ -674,12 +795,42 @@ pub extern "C" fn voirs_reset_synthesis_stats() -> VoirsErrorCode {
 }
 
 /// Buffered streaming synthesis callback function type (includes audio buffer metadata)
+///
+/// # Buffer lifetime
+///
+/// `audio_chunk` points to a heap-allocated [`VoirsAudioBuffer`] (allocated
+/// like every other `VoirsAudioBuffer` this crate hands out) valid **only
+/// for this single call**: VoiRS frees it immediately after the callback
+/// returns. Implementations must copy out any sample data they need before
+/// returning, must never pass `audio_chunk` to `voirs_free_audio_buffer`,
+/// and must never retain it (or its `samples` pointer) past the call.
 pub type VoirsBufferedStreamingCallback = extern "C" fn(
     audio_chunk: *const VoirsAudioBuffer,
     chunk_index: c_uint,
     is_final: bool,
     user_data: *mut std::ffi::c_void,
 );
+
+/// Deliver one audio chunk to a [`VoirsBufferedStreamingCallback`], honoring
+/// the buffer lifetime contract documented there: heap-allocated like every
+/// other [`VoirsAudioBuffer`], freed immediately after `callback` returns.
+fn emit_streaming_chunk(
+    callback: VoirsBufferedStreamingCallback,
+    audio: AudioBuffer,
+    chunk_index: u32,
+    is_final: bool,
+    user_data: *mut std::ffi::c_void,
+) {
+    let boxed = Box::into_raw(Box::new(VoirsAudioBuffer::from_audio_buffer(audio)));
+    callback(boxed, chunk_index, is_final, user_data);
+    // SAFETY: `boxed` was allocated immediately above via `Box::into_raw` and
+    // has not been aliased, freed, or exposed anywhere else. The callback
+    // contract (documented on `VoirsBufferedStreamingCallback`) requires it to
+    // be borrowed only for the duration of the call just made above.
+    unsafe {
+        crate::voirs_free_audio_buffer(boxed);
+    }
+}
 
 /// Simple streaming synthesis function with callback-based output
 ///
@@ -696,7 +847,9 @@ pub type VoirsBufferedStreamingCallback = extern "C" fn(
 /// Error code indicating success or failure
 ///
 /// # Safety
-/// This function accepts raw pointers and function pointers.
+/// This function accepts raw pointers and function pointers. See
+/// [`VoirsBufferedStreamingCallback`] for the lifetime contract of the audio
+/// buffer passed to `callback`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_synthesizeing(
     text: *const c_char,
@@ -730,45 +883,12 @@ pub unsafe extern "C" fn voirs_synthesizeing(
     let rt = get_shared_runtime();
 
     let result = rt.block_on(async {
-        // Create pipeline with test mode enabled for fast processing
-        let mut builder = VoirsPipelineBuilder::new();
+        let quality: QualityLevel = synthesis_config.quality.into();
+        let enable_enhancement = synthesis_config.enable_enhancement != 0;
+        let dummy_mode = dummy_synthesis_requested();
 
-        // Apply configuration settings
-        match synthesis_config.quality {
-            VoirsQualityLevel::Low => builder = builder.with_quality(QualityLevel::Low),
-            VoirsQualityLevel::Medium => builder = builder.with_quality(QualityLevel::Medium),
-            VoirsQualityLevel::High => builder = builder.with_quality(QualityLevel::High),
-            VoirsQualityLevel::Ultra => builder = builder.with_quality(QualityLevel::Ultra),
-        }
-
-        // Check if we should enable test mode for fast testing
-        let test_mode = std::env::var("VOIRS_SKIP_SLOW_TESTS").unwrap_or_default() == "1"
-            || std::env::var("VOIRS_SKIP_SYNTHESIS_TESTS").is_ok()
-            || std::env::var("CI").is_ok(); // Enable test mode in CI environments
-
-        // Use faster quality settings in test mode
-        if test_mode {
-            builder = builder.with_quality(QualityLevel::Low);
-        }
-
-        builder = builder.with_test_mode(test_mode);
-
-        // Enable streaming optimizations
-        // Note: with_streaming_enabled method may not be available in current API
-
-        // Note: StreamingConfig would be applied here if the builder supported it
-        let _streaming_config = StreamingConfig {
-            max_chunk_chars: 50,
-            max_latency: std::time::Duration::from_millis(150),
-            overlap_frames: 256,
-            quality_vs_latency: 0.7,
-            max_concurrent_chunks: 1,
-            adaptive_chunking: true,
-            ..Default::default()
-        };
-
-        // Build pipeline
-        let pipeline = match builder.build().await {
+        // Build (or reuse a cached) pipeline.
+        let pipeline = match get_or_build_pipeline(quality, enable_enhancement, dummy_mode).await {
             Ok(p) => p,
             Err(e) => {
                 set_last_error(format!("Failed to create synthesis pipeline: {}", e));
@@ -776,34 +896,8 @@ pub unsafe extern "C" fn voirs_synthesizeing(
             }
         };
 
-        // Perform streaming synthesis by splitting text into chunks
-        let chunk_size = 100; // Characters per chunk
-        let mut text_chunks = Vec::new();
-        let mut start = 0;
-
-        while start < text_str.len() {
-            let end = std::cmp::min(start + chunk_size, text_str.len());
-            // Find word boundary to avoid cutting words
-            let chunk_end = if end < text_str.len() {
-                text_str[start..end]
-                    .rfind(' ')
-                    .map(|pos| start + pos)
-                    .unwrap_or(end)
-            } else {
-                end
-            };
-
-            if chunk_end > start {
-                text_chunks.push(&text_str[start..chunk_end]);
-                start = chunk_end + 1; // Skip the space
-            } else {
-                // Fallback if no space found
-                text_chunks.push(&text_str[start..end]);
-                start = end;
-            }
-        }
-
-        // Use streaming synthesis with the existing pipeline
+        // Use streaming synthesis with the pipeline, splitting text into
+        // word-boundary-respecting chunks.
         match process_text_streaming_simple(&pipeline, text_str, callback, user_data).await {
             Ok(_) => {}
             Err(e) => {
@@ -838,7 +932,9 @@ pub unsafe extern "C" fn voirs_synthesizeing(
 /// Error code indicating success or failure
 ///
 /// # Safety
-/// This function accepts raw pointers and function pointers.
+/// This function accepts raw pointers and function pointers. See
+/// [`VoirsBufferedStreamingCallback`] for the lifetime contract of the audio
+/// buffer passed to `chunk_callback`.
 #[no_mangle]
 pub unsafe extern "C" fn voirs_synthesizeing_realtime(
     text: *const c_char,
@@ -873,38 +969,11 @@ pub unsafe extern "C" fn voirs_synthesizeing_realtime(
     let rt = get_shared_runtime();
 
     let result = rt.block_on(async {
-        // Create pipeline with streaming support
-        let mut builder = VoirsPipelineBuilder::new();
-
-        // Apply configuration settings
-        match synthesis_config.quality {
-            VoirsQualityLevel::Low => builder = builder.with_quality(QualityLevel::Low),
-            VoirsQualityLevel::Medium => builder = builder.with_quality(QualityLevel::Medium),
-            VoirsQualityLevel::High => builder = builder.with_quality(QualityLevel::High),
-            VoirsQualityLevel::Ultra => builder = builder.with_quality(QualityLevel::Ultra),
-        }
-
-        // Check test mode settings
-        let test_mode = std::env::var("VOIRS_SKIP_SLOW_TESTS").unwrap_or_default() == "1"
-            || std::env::var("VOIRS_SKIP_SYNTHESIS_TESTS").is_ok()
-            || std::env::var("CI").is_ok();
-
-        if test_mode {
-            builder = builder.with_quality(QualityLevel::Low);
-        }
-
-        builder = builder.with_test_mode(test_mode);
-
-        // Build pipeline
-        let pipeline = match builder.build().await {
-            Ok(p) => p,
-            Err(e) => {
-                set_last_error(format!("Failed to create synthesis pipeline: {}", e));
-                return VoirsErrorCode::InitializationFailed;
-            }
-        };
-
-        // Create advanced configuration for streaming
+        // Create advanced configuration for streaming. Pipeline construction
+        // (real or, if `VOIRS_FFI_TEST_SYNTHESIS=dummy` is set, the SDK's
+        // explicit test-mode stub components) happens once, inside
+        // `create_streaming_pipeline_and_synthesize`, via the shared pipeline
+        // cache — no redundant pipeline is built here first.
         let advanced_config = VoirsAdvancedSynthesisConfig {
             base_config: synthesis_config.clone(),
             enable_quality_analysis: false, // Disable for real-time performance
@@ -947,8 +1016,12 @@ pub unsafe extern "C" fn voirs_synthesizeing_realtime(
     result
 }
 
-/// Advanced streaming synthesis with real-time neural model integration
-/// This implements true incremental synthesis using the SDK's streaming infrastructure
+/// Advanced streaming synthesis with real-time neural model integration.
+///
+/// Real audio is always used here: the only way to receive stub output is the
+/// crate-internal [`dummy_synthesis_requested`] opt-in, which installs the
+/// SDK's own explicit test-mode components and runs through this exact same
+/// streaming path — there is no separate hand-rolled fabrication branch.
 async fn create_streaming_pipeline_and_synthesize(
     text: &str,
     config: &VoirsAdvancedSynthesisConfig,
@@ -958,60 +1031,8 @@ async fn create_streaming_pipeline_and_synthesize(
 ) -> VoirsResult<()> {
     #[cfg(feature = "futures")]
     use futures_util::stream::StreamExt;
-    use voirs_sdk::streaming::{StreamingConfig, StreamingPipeline};
 
-    // Check if we should enable test mode for fast testing
-    let test_mode = std::env::var("VOIRS_SKIP_SLOW_TESTS").unwrap_or_default() == "1"
-        || std::env::var("VOIRS_SKIP_SYNTHESIS_TESTS").is_ok()
-        || std::env::var("CI").is_ok();
-
-    // In test mode, generate dummy streaming data and call callbacks
-    if test_mode {
-        use voirs_sdk::audio::AudioBuffer;
-
-        let sample_rate = config.base_config.sample_rate;
-        let chunk_count = (text.len() / 20).clamp(2, 5); // Simulate 2-5 chunks
-        let chunk_duration_ms = 100;
-
-        for chunk_idx in 0..chunk_count {
-            let progress = (chunk_idx as f32) / (chunk_count as f32);
-
-            // Generate dummy audio chunk
-            let chunk_samples = (sample_rate as f32 * (chunk_duration_ms as f32 / 1000.0)) as usize;
-            let mut samples = Vec::with_capacity(chunk_samples);
-            for i in 0..chunk_samples {
-                let t = i as f32 / sample_rate as f32;
-                let amplitude = 0.05 * (1.0 - progress);
-                let sample = amplitude * (2.0 * std::f32::consts::PI * 440.0 * t).sin();
-                samples.push(sample);
-            }
-
-            let audio_buffer = VoirsAudioBuffer {
-                samples: samples.as_ptr() as *mut f32,
-                length: samples.len() as u32,
-                sample_rate,
-                channels: 1,
-                duration: chunk_duration_ms as f32 / 1000.0,
-            };
-
-            let is_final = chunk_idx == chunk_count - 1;
-
-            // Call callbacks
-            chunk_callback(&audio_buffer, chunk_idx as u32, is_final, user_data);
-            if let Some(progress_cb) = progress_callback {
-                let remaining_ms = ((chunk_count - chunk_idx - 1) * chunk_duration_ms) as u64;
-                progress_cb(progress, remaining_ms, user_data);
-            }
-
-            // Small delay to simulate processing
-            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-
-            // Prevent samples from being deallocated too early
-            std::mem::forget(samples);
-        }
-
-        return Ok(());
-    }
+    let dummy_mode = dummy_synthesis_requested();
 
     // Configure streaming for optimal real-time performance
     let streaming_config = StreamingConfig {
@@ -1045,12 +1066,7 @@ async fn create_streaming_pipeline_and_synthesize(
         enable_enhancement: config.enable_noise_reduction,
         output_format: AudioFormat::Wav,
         sample_rate: config.base_config.sample_rate,
-        quality: match config.base_config.quality {
-            VoirsQualityLevel::Low => QualityLevel::Low,
-            VoirsQualityLevel::Medium => QualityLevel::Medium,
-            VoirsQualityLevel::High => QualityLevel::High,
-            VoirsQualityLevel::Ultra => QualityLevel::Ultra,
-        },
+        quality: config.base_config.quality.into(),
         language: LanguageCode::EnUs,
         effects: Vec::new(),
         streaming_chunk_size: Some(streaming_config.max_chunk_chars),
@@ -1078,55 +1094,58 @@ async fn create_streaming_pipeline_and_synthesize(
         reverb_level: 0.3,
     };
 
-    // Build pipeline with streaming optimizations - components are created automatically
-    let pipeline: VoirsPipeline = VoirsPipelineBuilder::new()
-        .with_quality(synthesis_config.quality)
-        .with_enhancement(synthesis_config.enable_enhancement)
-        .build()
-        .await?;
+    // Build (or reuse a cached) pipeline with streaming optimizations.
+    let arc_pipeline = get_or_build_pipeline(
+        synthesis_config.quality,
+        synthesis_config.enable_enhancement,
+        dummy_mode,
+    )
+    .await?;
 
-    // Start streaming synthesis
-    let arc_pipeline = std::sync::Arc::new(pipeline);
     let mut chunk_index = 0u32;
     let text_length = text.len();
     let estimated_chunks = (text_length / streaming_config.max_chunk_chars).max(1);
 
     #[cfg(feature = "futures")]
     {
-        let mut stream = arc_pipeline.synthesize_stream(text).await?;
+        let mut stream = Arc::clone(&arc_pipeline).synthesize_stream(text).await?;
 
-        // Process audio chunks as they arrive from the streaming pipeline
+        // The stream doesn't announce its length up front, so `is_final` can't be
+        // estimate-driven (an estimate can truncate real audio if it undercounts,
+        // or never fire if it overcounts). Instead, buffer one chunk at a time and
+        // emit the *previous* one only once a further chunk actually arrives;
+        // whatever remains buffered once the stream is exhausted is the real final chunk.
+        let mut pending: Option<AudioBuffer> = None;
+
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
 
-            // Report progress if callback provided
-            if let Some(progress_cb) = progress_callback {
-                let progress = (chunk_index as f32 + 0.5) / estimated_chunks as f32;
-                let estimated_remaining =
-                    ((estimated_chunks - chunk_index as usize - 1) * 50) as u64; // Estimate 50ms per chunk
-                progress_cb(progress.min(1.0), estimated_remaining, user_data);
+            if let Some(previous) = pending.replace(chunk) {
+                if let Some(progress_cb) = progress_callback {
+                    let progress = (chunk_index as f32 + 0.5) / estimated_chunks as f32;
+                    let estimated_remaining =
+                        (estimated_chunks.saturating_sub(chunk_index as usize + 1) * 50) as u64; // Estimate 50ms per chunk
+                    progress_cb(progress.min(1.0), estimated_remaining, user_data);
+                }
+
+                emit_streaming_chunk(chunk_callback, previous, chunk_index, false, user_data);
+                chunk_index += 1;
             }
+        }
 
-            // Convert streaming chunk to C audio buffer
-            let c_audio_buffer = VoirsAudioBuffer {
-                samples: chunk.samples().as_ptr() as *mut f32,
-                length: chunk.samples().len() as c_uint,
-                sample_rate: chunk.sample_rate(),
-                channels: chunk.channels(),
-                duration: chunk.duration(),
-            };
-
-            // Determine if this is the final chunk
-            let is_final = chunk_index >= estimated_chunks as u32;
-
-            // Call the callback with this real-time chunk
-            chunk_callback(&c_audio_buffer, chunk_index, is_final, user_data);
-
-            chunk_index += 1;
-
-            // Break if this was the final chunk
-            if is_final {
-                break;
+        match pending.take() {
+            Some(last) => {
+                emit_streaming_chunk(chunk_callback, last, chunk_index, true, user_data);
+            }
+            None => {
+                // The stream yielded no chunks at all (e.g. empty or
+                // whitespace-only text). Fall back to one real,
+                // non-streaming synthesis call rather than silently
+                // reporting success with zero audio delivered.
+                let audio = arc_pipeline
+                    .synthesize_with_config(text, &synthesis_config)
+                    .await?;
+                emit_streaming_chunk(chunk_callback, audio, 0, true, user_data);
             }
         }
 
@@ -1138,32 +1157,15 @@ async fn create_streaming_pipeline_and_synthesize(
 
     #[cfg(not(feature = "futures"))]
     {
-        // Fallback implementation when futures are not available
-        // Use non-streaming synthesis for simplicity
-        let synthesis_config = SynthesisConfig {
-            speaking_rate: 1.0,
-            pitch_shift: 0.0,
-            volume_gain: 1.0,
-            output_format: voirs_sdk::AudioFormat::Wav,
-            sample_rate: 22050,
-            ..Default::default()
-        };
-
-        let audio_buffer = arc_pipeline
+        // Fallback implementation when the `futures` feature is not enabled:
+        // synthesize the whole text in one (still real) call and deliver it
+        // as a single final chunk, honoring the caller's actual synthesis
+        // configuration instead of hardcoded defaults.
+        let audio = arc_pipeline
             .synthesize_with_config(text, &synthesis_config)
             .await?;
 
-        // Convert to C audio buffer
-        let c_audio_buffer = VoirsAudioBuffer {
-            samples: audio_buffer.samples().as_ptr() as *mut f32,
-            length: audio_buffer.samples().len() as c_uint,
-            sample_rate: audio_buffer.sample_rate(),
-            channels: audio_buffer.channels(),
-            duration: audio_buffer.duration(),
-        };
-
-        // Call the callback with the complete audio
-        chunk_callback(&c_audio_buffer, 0, true, user_data);
+        emit_streaming_chunk(chunk_callback, audio, 0, true, user_data);
 
         // Final progress update
         if let Some(progress_cb) = progress_callback {
@@ -1174,63 +1176,13 @@ async fn create_streaming_pipeline_and_synthesize(
     Ok(())
 }
 
-/// Process text with streaming synthesis using the existing pipeline
-async fn process_text_streaming(
-    pipeline: &VoirsPipeline,
-    text: &str,
-    config: &SynthesisConfig,
-    callback: VoirsBufferedStreamingCallback,
-    user_data: *mut std::ffi::c_void,
-) -> VoirsResult<()> {
-    // Split text into chunks for streaming processing
-    let chunk_size = config.streaming_chunk_size.unwrap_or(50);
-    let words: Vec<&str> = text.split_whitespace().collect();
-    let mut chunks = Vec::new();
-    let mut current_chunk = String::new();
-    let mut current_word_count = 0;
-
-    for word in words {
-        if current_word_count > 0 && current_chunk.len() + word.len() + 1 > chunk_size {
-            chunks.push(current_chunk.trim().to_string());
-            current_chunk.clear();
-            current_word_count = 0;
-        }
-
-        if !current_chunk.is_empty() {
-            current_chunk.push(' ');
-        }
-        current_chunk.push_str(word);
-        current_word_count += 1;
-    }
-
-    if !current_chunk.trim().is_empty() {
-        chunks.push(current_chunk.trim().to_string());
-    }
-
-    // Process each chunk
-    for (chunk_index, chunk_text) in chunks.iter().enumerate() {
-        let audio_buffer = pipeline.synthesize(chunk_text).await?;
-
-        // Convert to C audio buffer
-        let c_audio_buffer = VoirsAudioBuffer {
-            samples: audio_buffer.samples().as_ptr() as *mut f32,
-            length: audio_buffer.samples().len() as c_uint,
-            sample_rate: audio_buffer.sample_rate(),
-            channels: audio_buffer.channels(),
-            duration: audio_buffer.duration(),
-        };
-
-        // Determine if this is the final chunk
-        let is_final = chunk_index >= chunks.len() - 1;
-
-        // Call the callback with this streaming chunk
-        callback(&c_audio_buffer, chunk_index as u32, is_final, user_data);
-    }
-
-    Ok(())
-}
-
-/// Process text with simple streaming synthesis
+/// Process text with simple streaming synthesis: split into word-boundary
+/// chunks of up to 50 characters and synthesize each chunk in turn,
+/// delivering it to `callback` as soon as it is ready.
+///
+/// If `text` contains no chunks at all (e.g. empty or whitespace-only input),
+/// falls back to a single real synthesis call on the original text rather
+/// than silently delivering zero chunks while still reporting `Ok`.
 async fn process_text_streaming_simple(
     pipeline: &VoirsPipeline,
     text: &str,
@@ -1262,24 +1214,26 @@ async fn process_text_streaming_simple(
         chunks.push(current_chunk.trim().to_string());
     }
 
+    if chunks.is_empty() {
+        // No word-boundary chunks were produced at all; still deliver one
+        // real synthesis call rather than reporting success with nothing
+        // sent to the callback.
+        let audio_buffer = pipeline.synthesize(text).await?;
+        emit_streaming_chunk(callback, audio_buffer, 0, true, user_data);
+        return Ok(());
+    }
+
     // Process each chunk
     for (chunk_index, chunk_text) in chunks.iter().enumerate() {
         let audio_buffer = pipeline.synthesize(chunk_text).await?;
-
-        // Convert to C audio buffer
-        let c_audio_buffer = VoirsAudioBuffer {
-            samples: audio_buffer.samples().as_ptr() as *mut f32,
-            length: audio_buffer.samples().len() as c_uint,
-            sample_rate: audio_buffer.sample_rate(),
-            channels: audio_buffer.channels(),
-            duration: audio_buffer.duration(),
-        };
-
-        // Determine if this is the final chunk
         let is_final = chunk_index >= chunks.len() - 1;
-
-        // Call the callback with this streaming chunk
-        callback(&c_audio_buffer, chunk_index as u32, is_final, user_data);
+        emit_streaming_chunk(
+            callback,
+            audio_buffer,
+            chunk_index as u32,
+            is_final,
+            user_data,
+        );
     }
 
     Ok(())
@@ -1323,7 +1277,7 @@ pub struct VoirsBatchSynthesisResult {
 pub unsafe extern "C" fn voirs_synthesize_batch(
     texts: *const *const c_char,
     text_count: c_uint,
-    _config: *const VoirsSynthesisConfig,
+    config: *const VoirsSynthesisConfig,
     progress_callback: Option<extern "C" fn(progress: c_float, user_data: *mut std::ffi::c_void)>,
     user_data: *mut std::ffi::c_void,
     result: *mut VoirsBatchSynthesisResult,
@@ -1333,7 +1287,37 @@ pub unsafe extern "C" fn voirs_synthesize_batch(
         return VoirsErrorCode::InvalidParameter;
     }
 
+    // Covers the whole call (including pipeline setup), not just the loop.
     let start_time = Instant::now();
+
+    // Honor the caller's configuration (previously ignored) instead of a
+    // hardcoded synthesis configuration.
+    let voirs_config: VoirsSynthesisConfig = if config.is_null() {
+        VoirsSynthesisConfig::default()
+    } else {
+        (*config).clone()
+    };
+    let quality: QualityLevel = voirs_config.quality.into();
+    let enable_enhancement = voirs_config.enable_enhancement != 0;
+    let per_text_config: SynthesisConfig = voirs_config.into();
+    let dummy_mode = dummy_synthesis_requested();
+
+    // Build (or reuse a cached) pipeline once for the whole batch, rather
+    // than rebuilding one per text. A build failure fails the whole call
+    // closed with a clear error, since every text in the batch would have
+    // hit the exact same failure anyway.
+    let pipeline = match get_shared_runtime().block_on(get_or_build_pipeline(
+        quality,
+        enable_enhancement,
+        dummy_mode,
+    )) {
+        Ok(p) => p,
+        Err(e) => {
+            set_last_error(format!("Failed to create batch synthesis pipeline: {e}"));
+            return VoirsErrorCode::InitializationFailed;
+        }
+    };
+
     let mut audio_buffers = Vec::with_capacity(text_count as usize);
     let mut error_codes = Vec::with_capacity(text_count as usize);
     let mut total_quality_score = 0.0f32;
@@ -1370,68 +1354,9 @@ pub unsafe extern "C" fn voirs_synthesize_batch(
             }
         };
 
-        // Synthesize individual text using the shared runtime
-        let synthesis_result = get_shared_runtime().block_on(async {
-            // Create synthesis configuration
-            let synthesis_config = SynthesisConfig {
-                speaking_rate: 1.0,
-                pitch_shift: 0.0,
-                volume_gain: 1.0,
-                enable_enhancement: true,
-                output_format: AudioFormat::Wav,
-                sample_rate: 22050,
-                quality: QualityLevel::High,
-                language: LanguageCode::EnUs,
-                effects: Vec::new(),
-                streaming_chunk_size: Some(512),
-                seed: Some(42),
-                enable_emotion: false,
-                emotion_type: None,
-                emotion_intensity: 0.7,
-                emotion_preset: None,
-                auto_emotion_detection: false,
-                enable_cloning: false,
-                cloning_method: None,
-                cloning_quality: 0.85,
-                enable_conversion: false,
-                conversion_target: None,
-                realtime_conversion: false,
-                enable_singing: false,
-                singing_voice_type: None,
-                singing_technique: None,
-                musical_key: None,
-                tempo: None,
-                enable_spatial: false,
-                listener_position: None,
-                hrtf_enabled: false,
-                room_size: None,
-                reverb_level: 0.3,
-            };
-
-            // Check if we should enable test mode for fast testing
-            let test_mode = std::env::var("VOIRS_SKIP_SLOW_TESTS").unwrap_or_default() == "1"
-                || std::env::var("VOIRS_SKIP_SYNTHESIS_TESTS").is_ok()
-                || std::env::var("CI").is_ok(); // Enable test mode in CI environments
-
-            // Use faster quality settings in test mode
-            let quality_level = if test_mode {
-                QualityLevel::Low
-            } else {
-                QualityLevel::High
-            };
-
-            // Build pipeline - components are created automatically
-            let pipeline = VoirsPipelineBuilder::new()
-                .with_quality(quality_level)
-                .with_enhancement(!test_mode) // Disable enhancement in test mode for speed
-                .with_test_mode(test_mode)
-                .build()
-                .await?;
-
-            pipeline
-                .synthesize_with_config(text_str, &synthesis_config)
-                .await
-        });
+        // Synthesize this text against the already-built pipeline.
+        let synthesis_result = get_shared_runtime()
+            .block_on(pipeline.synthesize_with_config(text_str, &per_text_config));
 
         match synthesis_result {
             Ok(audio) => {
@@ -1556,8 +1481,11 @@ mod tests {
 
     #[test]
     fn test_advanced_synthesis_basic() {
-        // Always enable test mode for unit tests to avoid hanging
-        std::env::set_var("VOIRS_SKIP_SYNTHESIS_TESTS", "1");
+        // Always enable the crate-internal dummy-synthesis opt-in for unit
+        // tests, so they exercise the SDK's explicit test-mode stub pipeline
+        // (fast, offline, deterministic) instead of attempting real model
+        // loading over the network.
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
 
         let text = CString::new("Hello, world!").unwrap();
         let mut result = VoirsSynthesisResult::default();
@@ -1582,8 +1510,11 @@ mod tests {
 
     #[test]
     fn test_synthesis_stats() {
-        // Always enable test mode for unit tests to avoid hanging
-        std::env::set_var("VOIRS_SKIP_SYNTHESIS_TESTS", "1");
+        // Always enable the crate-internal dummy-synthesis opt-in for unit
+        // tests, so they exercise the SDK's explicit test-mode stub pipeline
+        // (fast, offline, deterministic) instead of attempting real model
+        // loading over the network.
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
 
         // First reset stats to ensure clean state
         let reset_error = voirs_reset_synthesis_stats();
@@ -1625,8 +1556,11 @@ mod tests {
 
     #[test]
     fn test_advanced_synthesis_config() {
-        // Always enable test mode for unit tests to avoid hanging
-        std::env::set_var("VOIRS_SKIP_SYNTHESIS_TESTS", "1");
+        // Always enable the crate-internal dummy-synthesis opt-in for unit
+        // tests, so they exercise the SDK's explicit test-mode stub pipeline
+        // (fast, offline, deterministic) instead of attempting real model
+        // loading over the network.
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
 
         let config = VoirsAdvancedSynthesisConfig {
             enable_quality_analysis: true,
@@ -1667,8 +1601,11 @@ mod tests {
 
     #[test]
     fn test_streaming_synthesis() {
-        // Always enable test mode for unit tests to avoid hanging
-        std::env::set_var("VOIRS_SKIP_SYNTHESIS_TESTS", "1");
+        // Always enable the crate-internal dummy-synthesis opt-in for unit
+        // tests, so they exercise the SDK's explicit test-mode stub pipeline
+        // (fast, offline, deterministic) instead of attempting real model
+        // loading over the network.
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
 
         let text = CString::new("This is a longer text for streaming synthesis").unwrap();
         let mut result = VoirsSynthesisResult::default();
@@ -1698,8 +1635,11 @@ mod tests {
 
     #[test]
     fn test_batch_synthesis() {
-        // Always enable test mode for unit tests to avoid hanging
-        std::env::set_var("VOIRS_SKIP_SYNTHESIS_TESTS", "1");
+        // Always enable the crate-internal dummy-synthesis opt-in for unit
+        // tests, so they exercise the SDK's explicit test-mode stub pipeline
+        // (fast, offline, deterministic) instead of attempting real model
+        // loading over the network.
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
 
         let texts = [
             CString::new("Hello world").unwrap(),
@@ -1730,7 +1670,9 @@ mod tests {
                 assert!(!batch_result.audio_buffers.is_null());
                 assert_eq!(batch_result.buffer_count, 3);
                 assert!(!batch_result.error_codes.is_null());
-                assert!(batch_result.total_time_ms > 0);
+                // No `total_time_ms > 0` assertion: a fully in-process, no-I/O
+                // dummy batch can legitimately finish under 1ms; it's a clock
+                // reading, not synthesis behavior.
 
                 // Check individual results
                 let audio_buffers = slice::from_raw_parts(
@@ -1760,8 +1702,11 @@ mod tests {
 
     #[test]
     fn test_realtime_streaming_synthesis() {
-        // Always enable test mode for unit tests to avoid hanging
-        std::env::set_var("VOIRS_SKIP_SYNTHESIS_TESTS", "1");
+        // Always enable the crate-internal dummy-synthesis opt-in for unit
+        // tests, so they exercise the SDK's explicit test-mode stub pipeline
+        // (fast, offline, deterministic) instead of attempting real model
+        // loading over the network.
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
 
         // Data to track callback invocations
         struct StreamingTestData {
@@ -1853,5 +1798,202 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_buffered_streaming_synthesis() {
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
+
+        struct BufferedTestData {
+            chunks_received: u32,
+            total_samples: u32,
+            final_chunk_received: bool,
+        }
+
+        extern "C" fn chunk_cb(
+            audio_chunk: *const VoirsAudioBuffer,
+            _chunk_index: c_uint,
+            is_final: bool,
+            user_data: *mut std::ffi::c_void,
+        ) {
+            unsafe {
+                let data = &mut *(user_data as *mut BufferedTestData);
+                data.chunks_received += 1;
+                if !audio_chunk.is_null() {
+                    data.total_samples += (*audio_chunk).length;
+                }
+                if is_final {
+                    data.final_chunk_received = true;
+                }
+            }
+        }
+
+        let mut data = BufferedTestData {
+            chunks_received: 0,
+            total_samples: 0,
+            final_chunk_received: false,
+        };
+
+        let text = CString::new("Hello from the buffered streaming synthesis test").unwrap();
+
+        unsafe {
+            let error_code = voirs_synthesizeing(
+                text.as_ptr(),
+                ptr::null(),
+                chunk_cb,
+                &mut data as *mut BufferedTestData as *mut std::ffi::c_void,
+            );
+
+            if error_code == VoirsErrorCode::Success {
+                assert!(
+                    data.chunks_received > 0,
+                    "should deliver at least one chunk"
+                );
+                assert!(data.total_samples > 0, "should deliver real audio samples");
+                assert!(
+                    data.final_chunk_received,
+                    "must mark exactly one chunk final"
+                );
+            } else {
+                println!(
+                    "Buffered streaming synthesis test skipped: synthesis failed with {:?}",
+                    error_code
+                );
+            }
+        }
+    }
+
+    /// Covers both the P1 finding directly (a bare `CI` var — set by many
+    /// CI/CD systems and some production container/runner tooling — must
+    /// never silently enable fabricated audio) and the exact-match contract
+    /// of the one variable that may.
+    #[test]
+    fn test_dummy_synthesis_requires_exact_opt_in() {
+        std::env::remove_var("VOIRS_FFI_TEST_SYNTHESIS");
+        assert!(!dummy_synthesis_requested(), "must be off when unset");
+
+        std::env::set_var("CI", "true");
+        assert!(
+            !dummy_synthesis_requested(),
+            "a bare CI env var must never enable the dummy synthesis path"
+        );
+        std::env::remove_var("CI");
+
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "1");
+        assert!(
+            !dummy_synthesis_requested(),
+            "only the exact value 'dummy' may opt in, not an arbitrary truthy value"
+        );
+
+        std::env::set_var("VOIRS_FFI_TEST_SYNTHESIS", "dummy");
+        assert!(dummy_synthesis_requested());
+
+        std::env::remove_var("VOIRS_FFI_TEST_SYNTHESIS");
+    }
+
+    #[test]
+    fn test_spectral_centroid_reflects_real_frequency_content() {
+        let sample_rate = 16_000u32;
+        let n = 4096;
+
+        let sine_at = |freq: f32| -> Vec<f32> {
+            (0..n)
+                .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate as f32).sin())
+                .collect()
+        };
+
+        let low = sine_at(200.0);
+        let high = sine_at(4000.0);
+
+        let low_centroid = calculate_spectral_centroid(&low, sample_rate);
+        let high_centroid = calculate_spectral_centroid(&high, sample_rate);
+
+        // A real FFT-based centroid must track actual frequency content: a
+        // higher-frequency tone yields a higher centroid. The old time-domain
+        // amplitude-index formula it replaces had no notion of frequency at
+        // all and would not reliably reproduce this ordering.
+        assert!(
+            high_centroid > low_centroid,
+            "higher-frequency tone must yield a higher spectral centroid: low={low_centroid}, high={high_centroid}"
+        );
+        // Coarse sanity bands (loose enough to tolerate Hann-window leakage).
+        assert!(
+            low_centroid < 1000.0,
+            "low centroid out of band: {low_centroid}"
+        );
+        assert!(
+            high_centroid > 2000.0,
+            "high centroid out of band: {high_centroid}"
+        );
+
+        // Degenerate inputs.
+        assert_eq!(calculate_spectral_centroid(&[], sample_rate), 0.0);
+        assert_eq!(calculate_spectral_centroid(&[0.5], sample_rate), 0.0);
+        assert_eq!(
+            calculate_spectral_centroid(&[0.0, 0.0, 0.0], sample_rate),
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_dynamic_range_escapes_degenerate_silence_branch() {
+        // An ordinary sine wave crosses exactly zero at some sample; the old
+        // implementation used that exact minimum and therefore always
+        // returned the constant 1.0 for signals like this one.
+        let samples: Vec<f32> = (0..1000)
+            .map(|i| (2.0 * std::f32::consts::PI * 5.0 * i as f32 / 1000.0).sin())
+            .collect();
+        let dynamic_range = calculate_dynamic_range(&samples);
+        assert!(
+            dynamic_range < 0.99,
+            "ordinary zero crossings must not force the degenerate 'full range' constant: got {dynamic_range}"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_range_varies_with_actual_range() {
+        // A wide-range signal (loud peaks, a quiet tail) must report a higher
+        // dynamic range than a signal whose amplitude barely varies at all,
+        // proving the metric is driven by the real samples, not a constant.
+        let mut wide_range = vec![1.0f32; 10];
+        wide_range.extend(vec![0.01f32; 990]);
+        let narrow_range = vec![0.5f32; 1000];
+
+        let wide = calculate_dynamic_range(&wide_range);
+        let narrow = calculate_dynamic_range(&narrow_range);
+        assert!(
+            wide > narrow,
+            "a larger peak/floor ratio must report a higher dynamic range: wide={wide}, narrow={narrow}"
+        );
+
+        // True silence (all-zero, and empty) has no signal to measure a range
+        // over: it must report 0.0, not the old code's inverted "1.0 = full
+        // range" degenerate case.
+        assert_eq!(calculate_dynamic_range(&[0.0f32; 500]), 0.0);
+        assert_eq!(calculate_dynamic_range(&[]), 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_cache_reuses_dummy_pipeline() {
+        let first = get_or_build_pipeline(QualityLevel::Low, false, true)
+            .await
+            .expect("dummy pipeline build must succeed");
+        let second = get_or_build_pipeline(QualityLevel::Low, false, true)
+            .await
+            .expect("dummy pipeline build must succeed");
+
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a second call with the same (quality, enhancement, dummy_mode) key must reuse the cached pipeline instead of rebuilding"
+        );
+
+        // A different key must not reuse the same cached instance.
+        let different = get_or_build_pipeline(QualityLevel::High, true, true)
+            .await
+            .expect("dummy pipeline build must succeed");
+        assert!(
+            !Arc::ptr_eq(&first, &different),
+            "a different cache key must not reuse another configuration's pipeline"
+        );
     }
 }

@@ -285,7 +285,7 @@ impl Default for RetentionConfig {
 /// only per session and per feedback record -- so a policy's category string
 /// is classified into one of these before any real query or deletion can be
 /// attempted against it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum RetentionStore {
     /// Backed by `PersistenceManager::{save,load}_session` / `cleanup`.
     Sessions,
@@ -457,6 +457,16 @@ impl RetentionManager {
         let total_anonymized = 0;
         let mut errors = 0;
         let mut by_category: HashMap<String, CategoryStats> = HashMap::new();
+        // Two enabled policies can map to the same underlying store (e.g.
+        // two policies both classified as `Feedback`), but the real cleanup
+        // pass above only ran *once* for that store. Crediting every
+        // policy's `processed`/`deleted`/`archived` in full to the
+        // aggregate totals would double (or N-times) count the same real
+        // records. Each store's real counts are added to the aggregate at
+        // most once; `by_category` below is unaffected and still reports
+        // each policy's own full view.
+        let mut credited_stores: std::collections::HashSet<RetentionStore> =
+            std::collections::HashSet::new();
 
         // Process each policy
         for policy in &enabled_policies {
@@ -471,9 +481,11 @@ impl RetentionManager {
 
             match result {
                 Ok(stats) => {
-                    total_processed += stats.processed;
-                    total_deleted += stats.deleted;
-                    total_archived += stats.archived;
+                    if credited_stores.insert(classify_category(&policy.data_category)) {
+                        total_processed += stats.processed;
+                        total_deleted += stats.deleted;
+                        total_archived += stats.archived;
+                    }
 
                     by_category.insert(policy.data_category.clone(), stats);
                 }
@@ -717,8 +729,7 @@ impl RetentionManager {
 
         // Count what genuinely exists before deleting, using queries that
         // reliably distinguish "present" from "absent" across every
-        // persistence backend (unlike `export_user_data`, whose "no data"
-        // behavior differs between backends).
+        // persistence backend.
         let has_progress = persistence.load_user_progress(user_id).await.is_ok();
         let has_preferences = persistence.load_preferences(user_id).await.is_ok();
         let feedback_count = persistence
@@ -726,8 +737,13 @@ impl RetentionManager {
             .await
             .map(|history| history.len())
             .unwrap_or(0);
-        // Sessions are only enumerable per-user via `export_user_data`; used
-        // solely for this real (if best-effort) count.
+        // Sessions are only enumerable per-user via `export_user_data`
+        // (the trait has no dedicated "list sessions for user" method).
+        // Every backend now defaults a *missing progress record* to
+        // `UserProgress::default()` inside `export_user_data` rather than
+        // erroring the whole bundle, so a `.unwrap_or(0)` here only fires
+        // for genuine backend errors (e.g. connection failure), not for a
+        // user who has sessions but no progress record.
         let session_count = persistence
             .export_user_data(user_id)
             .await
@@ -1037,6 +1053,73 @@ mod tests {
             remaining.len(),
             1,
             "a 30-day-old record must survive when the effective cutoff is 90 days"
+        );
+    }
+
+    /// Two enabled policies mapping to the *same* real store (here, both
+    /// classified as `Feedback`) must not cause the aggregate
+    /// `total_deleted`/`total_processed` to double-count the single real
+    /// deletion the shared cleanup pass actually performed, even though
+    /// each policy's own `by_category` entry legitimately reports the full
+    /// (shared) count for its own view.
+    #[tokio::test]
+    async fn test_run_cleanup_aggregate_totals_do_not_double_count_shared_store() {
+        let manager = test_manager().await;
+
+        manager
+            .add_policy(RetentionPolicy {
+                id: "feedback_a".to_string(),
+                name: "Feedback A".to_string(),
+                data_category: "feedback_a".to_string(),
+                retention_period_days: 30,
+                archive_before_delete: false,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+        manager
+            .add_policy(RetentionPolicy {
+                id: "feedback_b".to_string(),
+                name: "Feedback B".to_string(),
+                data_category: "feedback_b".to_string(),
+                retention_period_days: 30,
+                archive_before_delete: false,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+
+        let persistence = manager.persistence.clone().unwrap();
+        // Exactly one real record, genuinely old enough to be deleted by
+        // both policies' shared (30-day) cutoff.
+        let old_feedback = test_feedback(Utc::now() - Duration::days(90));
+        persistence
+            .save_feedback("user1", &old_feedback)
+            .await
+            .unwrap();
+
+        let stats = manager.run_cleanup().await.unwrap();
+
+        // Each policy's own view legitimately reports the real, shared
+        // deletion count.
+        assert_eq!(stats.by_category["feedback_a"].deleted, 1);
+        assert_eq!(stats.by_category["feedback_b"].deleted, 1);
+
+        // But only one record genuinely existed and was genuinely deleted --
+        // the aggregate must not report 2.
+        assert_eq!(
+            stats.total_deleted, 1,
+            "aggregate total_deleted must not double-count a single real \
+             deletion shared by two policies mapping to the same store"
+        );
+
+        let remaining = persistence
+            .load_feedback_history("user1", None, None)
+            .await
+            .unwrap();
+        assert!(
+            remaining.is_empty(),
+            "the single real record must genuinely be gone"
         );
     }
 

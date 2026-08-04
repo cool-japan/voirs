@@ -785,9 +785,8 @@ impl AdvancedQualityEvaluator {
     /// crate's real FFT-based THD+N estimator
     /// ([`crate::advanced_preprocessing::AdvancedPreprocessor::estimate_thd_n`]).
     fn calculate_thd(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        let thd_n = crate::advanced_preprocessing::AdvancedPreprocessor::estimate_thd_n(
-            audio.samples(),
-        );
+        let thd_n =
+            crate::advanced_preprocessing::AdvancedPreprocessor::estimate_thd_n(audio.samples());
         Ok((1.0 - f64::from(thd_n)).clamp(0.0, 1.0))
     }
 

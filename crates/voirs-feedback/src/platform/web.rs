@@ -2,9 +2,54 @@
 //!
 //! This module provides web browser-specific implementations for `VoiRS` feedback system
 //! including support for Chrome, Firefox, Safari, and Edge browsers.
+//!
+//! ## Why every browser-data function here fails closed
+//!
+//! A real implementation of every function in this module requires calling
+//! into actual browser JavaScript APIs via `web_sys`/`wasm-bindgen` from
+//! code running on the `wasm32-unknown-unknown` target inside a real
+//! browser. This crate cannot currently target `wasm32-unknown-unknown`
+//! **at all**: its required (non-optional) dependencies `voirs-sdk`,
+//! `voirs-recognizer`, and `voirs-evaluation`, plus this crate's own direct
+//! `tokio` dependency, pull in `tokio`'s `full` feature, whose `mio`
+//! transport layer does not support `wasm32-unknown-unknown` (only
+//! `wasm32-wasip1`/`wasip2`). This was verified directly, not assumed:
+//! `RUSTFLAGS="" cargo check -p voirs-sdk --target wasm32-unknown-unknown
+//! --no-default-features --features wasm` fails inside `mio` itself with
+//! `E0599`/`E0425` (missing `register`/`reregister`/`deregister` on
+//! `IoSource`), before any of this crate's own code -- or `web_sys`
+//! correctness -- ever enters the picture. A separate, workspace-level
+//! `.cargo/config.toml` `wasm32-unknown-unknown` rustflags conflict (`-C
+//! embed-bitcode=no` and `-C lto` reported as incompatible) additionally
+//! blocks even a plain `cargo check --target wasm32-unknown-unknown` of
+//! trivial leaf crates, independent of the `mio` issue.
+//!
+//! Given that, shipping hand-written `web_sys` call sites here would be
+//! unverifiable dead code: it can be neither compiled nor clippy'd in this
+//! workspace today, on any target. Every function below therefore honestly
+//! reports [`PlatformError::FeatureNotAvailable`] with the reason, on every
+//! target, instead of the previous behavior of returning identical
+//! fabricated data (a hardcoded `BrowserInfo { name: "Unknown", .. }`,
+//! `request_microphone_permission` always `Ok(true)` without ever calling
+//! `getUserMedia`, and so on) regardless of whether a real browser granted
+//! anything. If this crate's `tokio` dependency is ever decoupled enough to
+//! target `wasm32-unknown-unknown` for real, these functions are exactly
+//! where the real `web_sys` calls belong.
 
 use super::{AudioDeviceInfo, PlatformAdapter, PlatformError, PlatformResult};
 use std::path::PathBuf;
+
+/// Build the error every real-browser-data function in this module
+/// returns: see the module-level docs for the verified, structural reason
+/// (this crate cannot currently target `wasm32-unknown-unknown` at all).
+fn browser_feature_unavailable(feature: &str) -> PlatformError {
+    PlatformError::FeatureNotAvailable {
+        feature: format!(
+            "{feature} -- requires real browser JS interop via web_sys on \
+             wasm32-unknown-unknown, which this crate cannot currently target (see module docs)"
+        ),
+    }
+}
 
 /// Web platform adapter for browser environments
 pub struct WebAdapter {
@@ -18,58 +63,27 @@ impl WebAdapter {
         Self { initialized: false }
     }
 
-    /// Check if running in a secure context (HTTPS)
-    #[must_use]
-    pub fn is_secure_context() -> bool {
-        // In WASM environment, we would check window.isSecureContext
-        // For now, assume secure context in tests
-        #[cfg(target_arch = "wasm32")]
-        {
-            // This would be implemented using web_sys
-            // web_sys::window().expect("value should be present").is_secure_context()
-            true
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // In non-WASM environments, assume secure
-            true
-        }
+    /// Check if running in a secure context (HTTPS or localhost).
+    ///
+    /// Real detection is `window.isSecureContext` via `web_sys`. See the
+    /// module-level docs for why this always fails closed today instead
+    /// of fabricating `true` regardless of the actual page origin.
+    pub fn is_secure_context() -> Result<bool, PlatformError> {
+        Err(browser_feature_unavailable(
+            "secure-context detection (window.isSecureContext)",
+        ))
     }
 
-    /// Get browser information
-    #[must_use]
-    pub fn get_browser_info() -> BrowserInfo {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // This would be implemented using web_sys to get navigator info
-            BrowserInfo {
-                name: "Unknown".to_string(),
-                version: "Unknown".to_string(),
-                user_agent: "Unknown".to_string(),
-                supports_web_audio: true,
-                supports_media_recorder: true,
-                supports_web_workers: true,
-                supports_service_worker: true,
-                supports_indexed_db: true,
-                supports_local_storage: true,
-            }
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            BrowserInfo {
-                name: "Test Browser".to_string(),
-                version: "1.0.0".to_string(),
-                user_agent: "Test User Agent".to_string(),
-                supports_web_audio: true,
-                supports_media_recorder: true,
-                supports_web_workers: true,
-                supports_service_worker: true,
-                supports_indexed_db: true,
-                supports_local_storage: true,
-            }
-        }
+    /// Get browser information.
+    ///
+    /// Real detection queries `navigator.userAgent` and feature-detects
+    /// each API via `web_sys`. See the module-level docs for why this
+    /// always fails closed today instead of returning a hardcoded
+    /// `name: "Unknown"`/`"Test Browser"` regardless of the real browser.
+    pub fn get_browser_info() -> Result<BrowserInfo, PlatformError> {
+        Err(browser_feature_unavailable(
+            "browser identification (navigator.userAgent)",
+        ))
     }
 
     /// Check if specific web API is available
@@ -89,160 +103,55 @@ impl WebAdapter {
         }
     }
 
-    /// Initialize web audio context with enhanced error handling and fallback
+    /// Create a real Web Audio API `AudioContext`.
+    ///
+    /// Real creation is `web_sys::AudioContext::new()`. See the
+    /// module-level docs for why this always fails closed today instead
+    /// of returning the same fixed sample rate/buffer size/latency
+    /// regardless of the real device.
     pub fn initialize_web_audio() -> Result<WebAudioContext, PlatformError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // In WASM environment, this would create an AudioContext with proper error handling
-            // let audio_context = web_sys::AudioContext::new()
-            //     .map_err(|e| PlatformError::AudioDeviceError {
-            //         message: format!("Failed to create AudioContext: {:?}", e)
-            //     })?;
-
-            // For now, return enhanced context with realistic settings
-            Ok(WebAudioContext {
-                sample_rate: 44100,
-                buffer_size: 4096,
-                state: "running".to_string(),
-                latency: 10.0, // 10ms typical web audio latency
-                max_channel_count: 2,
-                supports_worklets: true,
-            })
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // In test environment, simulate realistic web audio context
-            Ok(WebAudioContext {
-                sample_rate: 44100,
-                buffer_size: 4096,
-                state: "running".to_string(),
-                latency: 10.0,
-                max_channel_count: 2,
-                supports_worklets: true,
-            })
-        }
+        Err(browser_feature_unavailable(
+            "Web Audio API AudioContext creation",
+        ))
     }
 
-    /// Request microphone permission with enhanced `MediaDevices` API support
+    /// Request microphone permission via `getUserMedia`.
+    ///
+    /// Real acquisition is
+    /// `navigator.mediaDevices.getUserMedia({audio: true})`. See the
+    /// module-level docs for why this always fails closed today --
+    /// critically, this means a caller can no longer mistake this crate's
+    /// own limitation for the user actually having granted (or denied)
+    /// microphone access.
     pub async fn request_microphone_permission() -> Result<bool, PlatformError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // In WASM environment, this would use navigator.mediaDevices.getUserMedia()
-            // with proper constraints and error handling
-            // let media_devices = web_sys::window()
-            //     .expect("value should be present")
-            //     .navigator()
-            //     .media_devices()
-            //     .map_err(|_| PlatformError::FeatureNotAvailable {
-            //         feature: "MediaDevices".to_string()
-            //     })?;
-            //
-            // let constraints = web_sys::MediaStreamConstraints::new();
-            // constraints.audio(&JsValue::from(true));
-            // constraints.video(&JsValue::from(false));
-            //
-            // let stream = JsFuture::from(media_devices.get_user_media_with_constraints(&constraints)?)
-            //     .await
-            //     .map_err(|e| PlatformError::AudioDeviceError {
-            //         message: format!("Microphone permission denied: {:?}", e)
-            //     })?;
-
-            Ok(true)
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // In test environment, assume permission granted
-            Ok(true)
-        }
+        Err(browser_feature_unavailable(
+            "microphone permission (navigator.mediaDevices.getUserMedia)",
+        ))
     }
 
-    /// Initialize Progressive Web App capabilities
+    /// Detect real Progressive Web App capabilities of the current browser.
+    ///
+    /// Real detection queries `navigator.serviceWorker`, the page's
+    /// manifest link, and `window.matchMedia('(display-mode:
+    /// standalone)')`. See the module-level docs for why this always
+    /// fails closed today.
     pub fn initialize_pwa_features() -> Result<PWACapabilities, PlatformError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Check for service worker support
-            let supports_service_worker = Self::supports_web_api("ServiceWorker");
-
-            // Check for web app manifest
-            let supports_web_manifest = true; // Would check for manifest link in head
-
-            // Check for add to home screen capability
-            let supports_install_prompt = supports_service_worker && supports_web_manifest;
-
-            Ok(PWACapabilities {
-                supports_service_worker,
-                supports_web_manifest,
-                supports_install_prompt,
-                supports_background_sync: supports_service_worker,
-                supports_push_notifications: Self::supports_web_api("Notifications"),
-                supports_offline_usage: supports_service_worker,
-                is_installed: false, // Would check window.matchMedia('(display-mode: standalone)')
-            })
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Ok(PWACapabilities {
-                supports_service_worker: true,
-                supports_web_manifest: true,
-                supports_install_prompt: true,
-                supports_background_sync: true,
-                supports_push_notifications: true,
-                supports_offline_usage: true,
-                is_installed: false,
-            })
-        }
+        Err(browser_feature_unavailable(
+            "Progressive Web App feature detection (ServiceWorker/manifest/display-mode)",
+        ))
     }
 
-    /// Initialize WebRTC capabilities for real-time communication
+    /// Probe real WebRTC capabilities (peer connections, data channels,
+    /// supported codecs) of the current browser.
+    ///
+    /// Real probing constructs a `web_sys::RtcPeerConnection` and
+    /// inspects its capabilities. See the module-level docs for why this
+    /// always fails closed today instead of returning the same fixed
+    /// codec list regardless of the real browser.
     pub fn initialize_webrtc() -> Result<WebRTCCapabilities, PlatformError> {
-        if !Self::supports_web_api("WebRTC") {
-            return Err(PlatformError::FeatureNotAvailable {
-                feature: "WebRTC".to_string(),
-            });
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            // In WASM environment, this would check actual RTCPeerConnection support
-            // let peer_connection = web_sys::RtcPeerConnection::new()
-            //     .map_err(|e| PlatformError::NetworkError {
-            //         message: format!("Failed to create RTCPeerConnection: {:?}", e)
-            //     })?;
-
-            Ok(WebRTCCapabilities {
-                supports_peer_connection: true,
-                supports_data_channels: true,
-                supports_media_streams: true,
-                supports_screen_sharing: true,
-                max_data_channel_size: 64 * 1024, // 64KB typical limit
-                supported_codecs: vec![
-                    "opus".to_string(),
-                    "g722".to_string(),
-                    "pcmu".to_string(),
-                    "pcma".to_string(),
-                ],
-            })
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Ok(WebRTCCapabilities {
-                supports_peer_connection: true,
-                supports_data_channels: true,
-                supports_media_streams: true,
-                supports_screen_sharing: true,
-                max_data_channel_size: 64 * 1024,
-                supported_codecs: vec![
-                    "opus".to_string(),
-                    "g722".to_string(),
-                    "pcmu".to_string(),
-                    "pcma".to_string(),
-                ],
-            })
-        }
+        Err(browser_feature_unavailable(
+            "WebRTC capability probing (RtcPeerConnection)",
+        ))
     }
 }
 
@@ -254,27 +163,23 @@ impl Default for WebAdapter {
 
 impl PlatformAdapter for WebAdapter {
     fn initialize(&self) -> PlatformResult<()> {
-        // Initialize web-specific resources
+        // Every constituent check below honestly fails today (see the
+        // module-level docs): WebAdapter cannot genuinely initialize
+        // outside a real, running browser environment. Delegating to the
+        // real checks -- rather than a single hardcoded Err here -- means
+        // a future fix to any one of them automatically improves this
+        // initialization sequence too.
+        let _is_secure = Self::is_secure_context()?;
 
-        // Check if we're in a secure context
-        if !Self::is_secure_context() {
-            return Err(PlatformError::InitializationError {
-                message: "VoiRS requires a secure context (HTTPS)".to_string(),
-            });
-        }
-
-        // Check browser compatibility
-        let browser_info = Self::get_browser_info();
+        let browser_info = Self::get_browser_info()?;
         if !browser_info.supports_web_audio {
             return Err(PlatformError::FeatureNotAvailable {
                 feature: "WebAudio".to_string(),
             });
         }
 
-        // Initialize web audio context
         let _audio_context = Self::initialize_web_audio()?;
 
-        // Initialize storage
         if !Self::supports_web_api("IndexedDB") {
             return Err(PlatformError::FeatureNotAvailable {
                 feature: "IndexedDB".to_string(),
@@ -322,34 +227,24 @@ impl PlatformAdapter for WebAdapter {
     }
 
     fn show_notification(&self, title: &str, message: &str) -> PlatformResult<()> {
-        // Web notification implementation
-        #[cfg(target_arch = "wasm32")]
-        {
-            // This would use web_sys to create a Notification
-            // let notification = web_sys::Notification::new_with_options(title, ...);
-            println!("Web Notification: {} - {}", title, message);
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // In test environment, just print
-            println!("Web Notification: {title} - {message}");
-        }
-
-        Ok(())
+        // Real delivery is `web_sys::Notification::new_with_options`. See
+        // the module-level docs for why this always fails closed today
+        // instead of printing a line and claiming a banner was shown.
+        let _ = (title, message);
+        Err(browser_feature_unavailable(
+            "browser Notification API delivery",
+        ))
     }
 
     fn get_audio_device_info(&self) -> PlatformResult<AudioDeviceInfo> {
-        // Web audio device info
-        Ok(AudioDeviceInfo {
-            name: "Web Audio Device".to_string(),
-            supported_sample_rates: vec![44100, 48000],
-            supported_buffer_sizes: vec![256, 512, 1024, 2048, 4096],
-            input_channels: 1,
-            output_channels: 2,
-            default_sample_rate: 44100,
-            default_buffer_size: 4096,
-        })
+        // Real enumeration is
+        // `navigator.mediaDevices.enumerateDevices()`. See the
+        // module-level docs for why this always fails closed today
+        // instead of returning the same fixed device description
+        // regardless of the real hardware.
+        Err(browser_feature_unavailable(
+            "audio device enumeration (navigator.mediaDevices.enumerateDevices)",
+        ))
     }
 
     fn configure_feature(&self, feature: &str, enabled: bool) -> PlatformResult<()> {
@@ -671,22 +566,29 @@ mod tests {
         assert!(!WebAdapter::supports_web_api("UnknownAPI"));
     }
 
+    /// `get_browser_info` must never fabricate `BrowserInfo` (e.g. the old
+    /// hardcoded `name: "Unknown"`/`"Test Browser"`): it must honestly
+    /// fail closed on every target, since this crate cannot currently
+    /// query a real browser at all (see module docs).
     #[test]
-    fn test_browser_info() {
-        let browser_info = WebAdapter::get_browser_info();
-        assert!(!browser_info.name.is_empty());
-        assert!(!browser_info.version.is_empty());
-        assert!(!browser_info.user_agent.is_empty());
-        assert!(browser_info.supports_web_audio);
-        assert!(browser_info.supports_media_recorder);
+    fn test_browser_info_fails_closed_not_fake_data() {
+        let result = WebAdapter::get_browser_info();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
+    /// `initialize_web_audio` must never fabricate a `WebAudioContext`
+    /// (e.g. the old hardcoded 44100 Hz/4096-sample buffer): it must
+    /// honestly fail closed since no real `AudioContext` is ever created.
     #[test]
-    fn test_web_audio_context() {
-        let audio_context = WebAdapter::initialize_web_audio().unwrap();
-        assert!(audio_context.sample_rate > 0);
-        assert!(audio_context.buffer_size > 0);
-        assert!(!audio_context.state.is_empty());
+    fn test_web_audio_context_fails_closed_not_fake_data() {
+        let result = WebAdapter::initialize_web_audio();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
     #[test]
@@ -756,18 +658,17 @@ mod tests {
         assert_eq!(cache_path.to_string_lossy(), "/voirs/cache");
     }
 
+    /// `get_audio_device_info` must never fabricate a device description
+    /// (e.g. the old hardcoded "Web Audio Device" / 44100 Hz regardless of
+    /// the real hardware): it must honestly fail closed.
     #[test]
-    fn test_get_audio_device_info() {
+    fn test_get_audio_device_info_fails_closed_not_fake_data() {
         let adapter = WebAdapter::new();
-        let audio_info = adapter.get_audio_device_info().unwrap();
-
-        assert!(!audio_info.name.is_empty());
-        assert!(!audio_info.supported_sample_rates.is_empty());
-        assert!(!audio_info.supported_buffer_sizes.is_empty());
-        assert!(audio_info.input_channels > 0);
-        assert!(audio_info.output_channels > 0);
-        assert!(audio_info.default_sample_rate > 0);
-        assert!(audio_info.default_buffer_size > 0);
+        let result = adapter.get_audio_device_info();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
     #[test]
@@ -786,50 +687,97 @@ mod tests {
         assert!(adapter.configure_feature("invalid_feature", true).is_err());
     }
 
+    /// `is_secure_context` must never fabricate `true` (the old behavior
+    /// on every target): it must honestly fail closed since no real
+    /// `window.isSecureContext` is ever queried.
     #[test]
-    fn test_secure_context() {
-        // In test environment, should return true
-        assert!(WebAdapter::is_secure_context());
+    fn test_secure_context_fails_closed_not_fake_true() {
+        let result = WebAdapter::is_secure_context();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
+    /// `request_microphone_permission` must never fabricate `Ok(true)`
+    /// (the old behavior on every target, without ever calling
+    /// `getUserMedia`): a caller must not be able to mistake this crate's
+    /// own limitation for the user having granted microphone access.
     #[tokio::test]
-    async fn test_microphone_permission() {
-        // In test environment, should return true
-        let permission = WebAdapter::request_microphone_permission().await.unwrap();
-        assert!(permission);
+    async fn test_microphone_permission_fails_closed_not_fake_granted() {
+        let result = WebAdapter::request_microphone_permission().await;
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
+    /// `initialize_pwa_features` must never fabricate `PWACapabilities`:
+    /// it must honestly fail closed.
     #[test]
-    fn test_pwa_capabilities() {
-        let pwa_caps = WebAdapter::initialize_pwa_features().unwrap();
-        assert!(pwa_caps.supports_service_worker);
-        assert!(pwa_caps.supports_web_manifest);
-        assert!(pwa_caps.supports_install_prompt);
-        assert!(pwa_caps.supports_background_sync);
-        assert!(pwa_caps.supports_push_notifications);
-        assert!(pwa_caps.supports_offline_usage);
+    fn test_pwa_capabilities_fail_closed_not_fake_data() {
+        let result = WebAdapter::initialize_pwa_features();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
+    /// `initialize_webrtc` must never fabricate `WebRTCCapabilities` (e.g.
+    /// the old hardcoded `opus`/`g722`/`pcmu`/`pcma` codec list): it must
+    /// honestly fail closed since no real `RtcPeerConnection` is ever
+    /// constructed.
     #[test]
-    fn test_webrtc_capabilities() {
-        let webrtc_caps = WebAdapter::initialize_webrtc().unwrap();
-        assert!(webrtc_caps.supports_peer_connection);
-        assert!(webrtc_caps.supports_data_channels);
-        assert!(webrtc_caps.supports_media_streams);
-        assert!(webrtc_caps.supports_screen_sharing);
-        assert!(webrtc_caps.max_data_channel_size > 0);
-        assert!(!webrtc_caps.supported_codecs.is_empty());
-        assert!(webrtc_caps.supported_codecs.contains(&"opus".to_string()));
+    fn test_webrtc_capabilities_fail_closed_not_fake_data() {
+        let result = WebAdapter::initialize_webrtc();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 
+    /// `WebAdapter::initialize` (the `PlatformAdapter` trait method) must
+    /// never report success: previously it always returned `Ok(())` after
+    /// checking only fabricated data.
     #[test]
-    fn test_enhanced_web_audio_context() {
-        let audio_context = WebAdapter::initialize_web_audio().unwrap();
-        assert!(audio_context.sample_rate > 0);
-        assert!(audio_context.buffer_size > 0);
-        assert!(!audio_context.state.is_empty());
-        assert!(audio_context.latency > 0.0);
-        assert!(audio_context.max_channel_count > 0);
-        assert!(audio_context.supports_worklets);
+    fn test_web_adapter_initialize_fails_closed() {
+        let adapter = WebAdapter::new();
+        let result = adapter.initialize();
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
+    }
+
+    /// `WebAdapter::show_notification` must never report success: the old
+    /// behavior `println!`ed on every target (including the wasm32 branch)
+    /// and claimed a browser notification banner was shown.
+    #[test]
+    fn test_web_adapter_show_notification_fails_closed() {
+        let adapter = WebAdapter::new();
+        let result = adapter.show_notification("Title", "Body");
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
+    }
+
+    /// Every browser-data function must report the *same kind* of honest
+    /// error (never a panic, never a silent `Ok`), regardless of which one
+    /// is called -- proving the fail-closed behavior is systematic, not
+    /// coincidental to a single function.
+    #[tokio::test]
+    async fn test_all_browser_functions_fail_closed_uniformly() {
+        assert!(WebAdapter::is_secure_context().is_err());
+        assert!(WebAdapter::get_browser_info().is_err());
+        assert!(WebAdapter::initialize_web_audio().is_err());
+        assert!(WebAdapter::request_microphone_permission().await.is_err());
+        assert!(WebAdapter::initialize_pwa_features().is_err());
+        assert!(WebAdapter::initialize_webrtc().is_err());
+
+        let adapter = WebAdapter::new();
+        assert!(adapter.initialize().is_err());
+        assert!(adapter.show_notification("t", "b").is_err());
+        assert!(adapter.get_audio_device_info().is_err());
     }
 }

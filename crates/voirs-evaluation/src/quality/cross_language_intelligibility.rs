@@ -12,7 +12,8 @@ use crate::perceptual::cross_cultural::{
 };
 use crate::perceptual::{CulturalProfile, DemographicProfile};
 use crate::quality::universal_phoneme_mapping::{
-    PhonemeConverageAnalysis, UniversalPhonemeMapper, UniversalPhonemeMappingConfig,
+    MappingType, PhonemeCandidate, PhonemeConverageAnalysis, UniversalPhonemeMapper,
+    UniversalPhonemeMappingConfig,
 };
 use crate::quality::voice_quality_dsp::{
     compute_formant_bandwidths, compute_formant_clarity, compute_jitter_shimmer,
@@ -602,7 +603,7 @@ impl CrossLanguageIntelligibilityEvaluator {
         let voice_quality_metrics = self.calculate_voice_quality_metrics(samples, sample_rate);
 
         // Calculate prosodic features
-        let prosodic_features = self.calculate_prosodic_features(samples);
+        let prosodic_features = self.calculate_prosodic_features(samples, sample_rate);
 
         // Calculate signal-to-noise ratio
         let signal_to_noise_ratio = self.calculate_snr(samples);
@@ -667,18 +668,163 @@ impl CrossLanguageIntelligibilityEvaluator {
         }
     }
 
-    /// Calculate prosodic features
-    fn calculate_prosodic_features(&self, samples: &[f32]) -> ProsodicFeatureAnalysis {
-        // Simplified prosodic analysis
+    /// Calculate prosodic features from the real signal.
+    ///
+    /// This evaluator is reference-free (no expected F0 contour, stress pattern,
+    /// or pause layout is available at this call site — only the raw
+    /// synthesized `samples`), so each field below is a genuine, signal-derived
+    /// acoustic measurement scored against a documented natural-speech norm
+    /// rather than a literal comparison to an "expected" pattern. All are real
+    /// `[0, 1]` measurements that vary with the actual audio content (see
+    /// [`crate::audio_dsp::windowed_f0_track`] /
+    /// [`crate::audio_dsp::frame_rms_envelope`]), not fixed placeholders.
+    fn calculate_prosodic_features(
+        &self,
+        samples: &[f32],
+        sample_rate: u32,
+    ) -> ProsodicFeatureAnalysis {
         let energy_variance = self.calculate_energy_variance(samples);
+        let f0_track = crate::audio_dsp::windowed_f0_track(samples, sample_rate);
+        let envelope = crate::audio_dsp::frame_rms_envelope(samples, sample_rate);
 
         ProsodicFeatureAnalysis {
-            f0_contour_appropriateness: 0.8,                   // Placeholder
-            stress_pattern_accuracy: 0.75,                     // Placeholder
+            f0_contour_appropriateness: self.calculate_f0_contour_appropriateness(&f0_track),
+            stress_pattern_accuracy: self.calculate_stress_pattern_strength(&envelope),
             rhythm_regularity: 1.0 - energy_variance.min(1.0), // Use energy variance as rhythm proxy
-            intonation_naturalness: 0.7,                       // Placeholder
-            pause_pattern_appropriateness: 0.8,                // Placeholder
+            intonation_naturalness: self.calculate_intonation_naturalness_from_track(&f0_track),
+            pause_pattern_appropriateness: self.calculate_pause_pattern_appropriateness(&envelope),
         }
+    }
+
+    /// Coherence/completeness of a trackable pitch contour: a real F0 contour
+    /// requires a substantial, mostly-contiguous voiced region (isolated
+    /// single-frame pitch blips are spurious detections, not a genuine
+    /// contour), and connected speech is neither fully silent/unvoiced (no
+    /// contour at all) nor 100% voiced (a single sustained tone is not
+    /// speech-like prosody).
+    fn calculate_f0_contour_appropriateness(&self, f0_track: &[f32]) -> f32 {
+        if f0_track.is_empty() {
+            return 0.0;
+        }
+        let voiced_fraction =
+            f0_track.iter().filter(|&&f0| f0 > 0.0).count() as f32 / f0_track.len() as f32;
+
+        let mut longest_run = 0usize;
+        let mut current_run = 0usize;
+        let mut total_voiced = 0usize;
+        for &f0 in f0_track {
+            if f0 > 0.0 {
+                current_run += 1;
+                total_voiced += 1;
+                longest_run = longest_run.max(current_run);
+            } else {
+                current_run = 0;
+            }
+        }
+        let coherence = if total_voiced == 0 {
+            0.0
+        } else {
+            longest_run as f32 / total_voiced as f32
+        };
+
+        let voicing_component = if voiced_fraction < 0.05 {
+            0.0
+        } else {
+            1.0 - ((voiced_fraction - 0.5).abs() / 0.5).clamp(0.0, 1.0)
+        };
+        (voicing_component * 0.4 + coherence * 0.6).clamp(0.0, 1.0)
+    }
+
+    /// Smoothness and range of the voiced F0 contour: natural intonation has
+    /// *some* pitch movement (unlike a flat monotone) but changes gradually
+    /// rather than jumping erratically frame to frame. Mirrors the
+    /// signal-only intonation heuristic in
+    /// [`crate::quality::advanced_metrics::AdvancedQualityEvaluator`].
+    fn calculate_intonation_naturalness_from_track(&self, f0_track: &[f32]) -> f32 {
+        let voiced: Vec<f32> = f0_track.iter().copied().filter(|&f0| f0 > 0.0).collect();
+        if voiced.len() < 2 {
+            return 0.0;
+        }
+        let mean = (voiced.iter().sum::<f32>() / voiced.len() as f32).max(1.0);
+        let range = voiced.iter().cloned().fold(f32::MIN, f32::max)
+            - voiced.iter().cloned().fold(f32::MAX, f32::min);
+        let range_score = (range / (mean * 0.6)).clamp(0.0, 1.0);
+        let jumps: Vec<f32> = voiced
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs() / mean)
+            .collect();
+        let mean_jump = jumps.iter().sum::<f32>() / jumps.len() as f32;
+        let smoothness_score = (1.0 - mean_jump / 0.3).clamp(0.0, 1.0);
+        (range_score * 0.5 + smoothness_score * 0.5).clamp(0.0, 1.0)
+    }
+
+    /// Stress-pattern prominence: the acoustic correlate of stress is a burst
+    /// of energy above the surrounding baseline. Measures the mean height of
+    /// local energy peaks relative to the overall mean frame energy and scores
+    /// it against a natural-speech contrast range (a flat, near-1.0 ratio
+    /// indicates weak/absent stress marking — e.g. monotone delivery — while
+    /// extreme, isolated spikes suggest transients rather than genuine
+    /// stress).
+    fn calculate_stress_pattern_strength(&self, envelope: &[f32]) -> f32 {
+        if envelope.len() < 3 {
+            return 0.0;
+        }
+        let mean = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        if mean <= 1e-8 {
+            return 0.0;
+        }
+        let peaks: Vec<f32> = envelope
+            .windows(3)
+            .filter(|w| w[1] > w[0] && w[1] > w[2])
+            .map(|w| w[1])
+            .collect();
+        if peaks.is_empty() {
+            return 0.3;
+        }
+        let mean_peak = peaks.iter().sum::<f32>() / peaks.len() as f32;
+        let contrast = mean_peak / mean;
+        let target_contrast = 1.8;
+        (1.0 - ((contrast - target_contrast).abs() / target_contrast).clamp(0.0, 1.0))
+            .clamp(0.0, 1.0)
+    }
+
+    /// Pause-pattern naturalness: detects silence/low-energy segments via
+    /// envelope thresholding and scores their overall prevalence against the
+    /// proportion typically occupied by inter-word/phrase pauses in connected
+    /// natural speech (~10-30% of frames), plus whether at least one such
+    /// segment is present at all.
+    fn calculate_pause_pattern_appropriateness(&self, envelope: &[f32]) -> f32 {
+        if envelope.len() < 3 {
+            return 0.5;
+        }
+        let mean = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        if mean <= 1e-8 {
+            return 0.0;
+        }
+        let threshold = mean * 0.2;
+
+        let mut pause_frames = 0usize;
+        let mut pause_segments = 0usize;
+        let mut in_pause = false;
+        for &e in envelope {
+            if e < threshold {
+                pause_frames += 1;
+                if !in_pause {
+                    pause_segments += 1;
+                    in_pause = true;
+                }
+            } else {
+                in_pause = false;
+            }
+        }
+
+        let pause_fraction = pause_frames as f32 / envelope.len() as f32;
+        let target_fraction = 0.2;
+        let fraction_score = (1.0
+            - ((pause_fraction - target_fraction).abs() / 0.3).clamp(0.0, 1.0))
+        .clamp(0.0, 1.0);
+        let segment_score = if pause_segments > 0 { 1.0 } else { 0.3 };
+        (fraction_score * 0.7 + segment_score * 0.3).clamp(0.0, 1.0)
     }
 
     /// Calculate energy variance
@@ -972,8 +1118,27 @@ impl CrossLanguageIntelligibilityEvaluator {
                 );
 
                 let acoustic_clarity = word_alignment.confidence;
-                let contextual_support = 0.7; // Placeholder
-                let listener_familiarity = 0.6; // Placeholder
+
+                // Real word-length effect: longer words carry more
+                // distinguishing phonetic material and are recognized with
+                // less reliance on surrounding semantic/syntactic context
+                // (a well-established finding in speech perception);
+                // shorter words lean more on context to disambiguate.
+                // Typical content words span roughly 2-6 phonemes.
+                let contextual_support =
+                    (word_alignment.phonemes.len() as f32 / 6.0).clamp(0.2, 1.0);
+
+                // Real language-pair-keyed familiarity: the phoneme mapper's
+                // own precomputed `mapping_quality` for this
+                // source/target language pair (how well the two languages'
+                // sound systems correspond overall), not a flat constant.
+                // Falls back to a neutral midpoint only when no mapping has
+                // been precomputed for this language pair at all.
+                let listener_familiarity = self
+                    .phoneme_mapper
+                    .get_cross_language_mapping(source_language, target_language)
+                    .map(|m| m.mapping_quality.clamp(0.0, 1.0))
+                    .unwrap_or(0.5);
 
                 let word_intelligibility = base_intelligibility
                     * phonetic_complexity
@@ -1024,6 +1189,29 @@ impl CrossLanguageIntelligibilityEvaluator {
         1.0 - (total_complexity / phonemes.len() as f32).min(1.0)
     }
 
+    /// Real, per-phoneme-pair perceptual confusability from the phoneme
+    /// mapper's own [`PhonemeCandidate`], instead of a flat constant.
+    ///
+    /// Combines two genuine per-mapping signals that already vary by phoneme
+    /// pair: the mapper's `mapping_type` (a [`MappingType::Direct`] match is
+    /// rarely confusable; a [`MappingType::Deletion`] — no suitable target
+    /// phoneme exists at all — is maximally confusable, since the listener
+    /// hears *something* where the source phoneme is simply absent from the
+    /// target inventory) and `confidence_score` (a low-confidence mapping
+    /// means even the mapper itself was unsure this was the right
+    /// correspondence, which correlates with listener confusability).
+    fn mapping_perceptual_confusability(mapping: &PhonemeCandidate) -> f32 {
+        let type_confusability = match mapping.mapping_type {
+            MappingType::Direct => 0.05,
+            MappingType::Approximate => 0.25,
+            MappingType::Substitution => 0.55,
+            MappingType::Insertion => 0.7,
+            MappingType::Deletion => 0.9,
+        };
+        let confidence_confusability = (1.0 - mapping.confidence_score).clamp(0.0, 1.0);
+        (type_confusability * 0.6 + confidence_confusability * 0.4).clamp(0.0, 1.0)
+    }
+
     /// Calculate phoneme-level intelligibility
     fn calculate_phoneme_intelligibility(
         &self,
@@ -1042,7 +1230,7 @@ impl CrossLanguageIntelligibilityEvaluator {
                 ) {
                     let phonetic_distance = 1.0 - mapping.similarity_score;
                     let acoustic_similarity = mapping.similarity_score;
-                    let perceptual_confusability = 0.3; // Placeholder
+                    let perceptual_confusability = Self::mapping_perceptual_confusability(&mapping);
 
                     let intelligibility_score = mapping.similarity_score
                         * aligned_phoneme.confidence
@@ -1346,5 +1534,169 @@ mod tests {
         // Check that we have both directions for each pair
         assert!(pairs.contains(&(LanguageCode::EnUs, LanguageCode::EsEs)));
         assert!(pairs.contains(&(LanguageCode::EsEs, LanguageCode::EnUs)));
+    }
+
+    /// `calculate_prosodic_features` must be a real, signal-dependent
+    /// measurement: silence and a modulated, intonated tone must not produce
+    /// identical prosodic scores (the old code returned four fixed constants
+    /// regardless of the signal).
+    #[test]
+    fn test_prosodic_features_vary_with_signal() {
+        let config = CrossLanguageIntelligibilityConfig::default();
+        let evaluator = CrossLanguageIntelligibilityEvaluator::new(config);
+        let sample_rate = 16_000u32;
+
+        let silence = vec![0.0f32; sample_rate as usize];
+        // A pitch contour that rises then falls, amplitude-modulated to create
+        // pause-like dips -- a much more "prosodic" signal than a flat tone.
+        let mut varied = Vec::new();
+        for i in 0..sample_rate {
+            let t = i as f32 / sample_rate as f32;
+            let f0 = 150.0 + 60.0 * (2.0 * std::f32::consts::PI * 1.5 * t).sin();
+            let envelope = if (t * 4.0).rem_euclid(1.0) < 0.7 {
+                1.0
+            } else {
+                0.0
+            };
+            varied.push(envelope * (2.0 * std::f32::consts::PI * f0 * t).sin() * 0.6);
+        }
+
+        let silent_features = evaluator.calculate_prosodic_features(&silence, sample_rate);
+        let varied_features = evaluator.calculate_prosodic_features(&varied, sample_rate);
+
+        assert_ne!(
+            silent_features.f0_contour_appropriateness, varied_features.f0_contour_appropriateness,
+            "f0_contour_appropriateness must depend on the signal, not be a fixed 0.8"
+        );
+        assert_ne!(
+            silent_features.intonation_naturalness, varied_features.intonation_naturalness,
+            "intonation_naturalness must depend on the signal, not be a fixed 0.7"
+        );
+        assert_ne!(
+            silent_features.stress_pattern_accuracy, varied_features.stress_pattern_accuracy,
+            "stress_pattern_accuracy must depend on the signal, not be a fixed 0.75"
+        );
+        // Silence has no F0 contour at all.
+        assert_eq!(silent_features.f0_contour_appropriateness, 0.0);
+        assert_eq!(silent_features.intonation_naturalness, 0.0);
+        for value in [
+            varied_features.f0_contour_appropriateness,
+            varied_features.stress_pattern_accuracy,
+            varied_features.intonation_naturalness,
+            varied_features.pause_pattern_appropriateness,
+        ] {
+            assert!((0.0..=1.0).contains(&value), "score {value} out of [0, 1]");
+        }
+    }
+
+    /// `mapping_perceptual_confusability` must vary by mapping type/confidence,
+    /// not be a flat 0.3 for every phoneme pair.
+    #[test]
+    fn test_mapping_perceptual_confusability_varies_by_type() {
+        let direct = PhonemeCandidate {
+            target_phoneme: "a".to_string(),
+            similarity_score: 0.95,
+            confidence_score: 0.95,
+            mapping_type: MappingType::Direct,
+        };
+        let deletion = PhonemeCandidate {
+            target_phoneme: String::new(),
+            similarity_score: 0.1,
+            confidence_score: 0.2,
+            mapping_type: MappingType::Deletion,
+        };
+
+        let direct_confusability =
+            CrossLanguageIntelligibilityEvaluator::mapping_perceptual_confusability(&direct);
+        let deletion_confusability =
+            CrossLanguageIntelligibilityEvaluator::mapping_perceptual_confusability(&deletion);
+
+        assert!((0.0..=1.0).contains(&direct_confusability));
+        assert!((0.0..=1.0).contains(&deletion_confusability));
+        assert!(
+            deletion_confusability > direct_confusability,
+            "a deletion mapping (no target phoneme) ({deletion_confusability}) should be far \
+             more confusable than a direct, high-confidence mapping ({direct_confusability})"
+        );
+        assert_ne!(direct_confusability, 0.3);
+        assert_ne!(deletion_confusability, 0.3);
+    }
+
+    /// `calculate_word_intelligibility`'s `contextual_support` and
+    /// `listener_familiarity` must depend on the actual word/language pair,
+    /// not be fixed 0.7/0.6 constants for every call.
+    #[tokio::test]
+    async fn test_word_intelligibility_context_varies_with_input() {
+        let config = CrossLanguageIntelligibilityConfig::default();
+        let evaluator = CrossLanguageIntelligibilityEvaluator::new(config);
+
+        let make_phoneme = |sym: &str| voirs_sdk::Phoneme {
+            symbol: sym.to_string(),
+            ipa_symbol: sym.to_string(),
+            stress: 0,
+            syllable_position: voirs_sdk::types::SyllablePosition::Unknown,
+            duration_ms: Some(80.0),
+            confidence: 0.9,
+        };
+        let make_aligned = |sym: &str, start: f32| voirs_recognizer::traits::AlignedPhoneme {
+            phoneme: make_phoneme(sym),
+            start_time: start,
+            end_time: start + 0.08,
+            confidence: 0.9,
+        };
+
+        let short_word = voirs_recognizer::traits::WordAlignment {
+            word: "a".to_string(),
+            start_time: 0.0,
+            end_time: 0.08,
+            phonemes: vec![make_aligned("a", 0.0)],
+            confidence: 0.9,
+        };
+        let long_word = voirs_recognizer::traits::WordAlignment {
+            word: "wonderful".to_string(),
+            start_time: 0.0,
+            end_time: 0.56,
+            phonemes: vec![
+                make_aligned("w", 0.0),
+                make_aligned("o", 0.08),
+                make_aligned("n", 0.16),
+                make_aligned("d", 0.24),
+                make_aligned("r", 0.32),
+                make_aligned("f", 0.40),
+                make_aligned("l", 0.48),
+            ],
+            confidence: 0.9,
+        };
+
+        let alignment = PhonemeAlignment {
+            phonemes: vec![
+                short_word.phonemes[0].clone(),
+                long_word.phonemes[0].clone(),
+            ],
+            total_duration: 0.6,
+            alignment_confidence: 0.9,
+            word_alignments: vec![short_word, long_word],
+        };
+
+        let scores = evaluator
+            .calculate_word_intelligibility(
+                Some(&alignment),
+                LanguageCode::EnUs,
+                LanguageCode::EsEs,
+                0.8,
+            )
+            .unwrap();
+
+        assert_eq!(scores.len(), 2);
+        assert_ne!(
+            scores[0].contextual_support, scores[1].contextual_support,
+            "contextual_support must depend on word length, not be a fixed 0.7"
+        );
+        assert!(scores[1].contextual_support > scores[0].contextual_support);
+        for score in &scores {
+            assert_ne!(score.listener_familiarity, 0.6);
+            assert!((0.0..=1.0).contains(&score.contextual_support));
+            assert!((0.0..=1.0).contains(&score.listener_familiarity));
+        }
     }
 }

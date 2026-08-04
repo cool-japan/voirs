@@ -224,7 +224,10 @@ impl WhisperDecoder {
 
         // Positional embedding comes from the checkpoint.
         let positional_embedding = vs
-            .get((config.n_text_ctx, config.n_text_state), "positional_embedding")
+            .get(
+                (config.n_text_ctx, config.n_text_state),
+                "positional_embedding",
+            )
             .map_err(|e| RecognitionError::ModelLoadError {
                 message: format!(
                     "Whisper checkpoint has no usable decoder.positional_embedding [{}, {}]: {e}",

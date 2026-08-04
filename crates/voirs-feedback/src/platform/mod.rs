@@ -177,6 +177,19 @@ impl PlatformConfig {
             ui: UIConfig::mobile(),
         }
     }
+
+    /// Create configuration for embedded platform
+    #[must_use]
+    pub fn embedded() -> Self {
+        Self {
+            platform: Platform::Embedded,
+            capabilities: PlatformCapabilities::embedded(),
+            storage: StorageConfig::embedded(),
+            network: NetworkConfig::default(),
+            audio: AudioConfig::embedded(),
+            ui: UIConfig::embedded(),
+        }
+    }
 }
 
 /// Storage configuration for different platforms
@@ -235,6 +248,21 @@ impl StorageConfig {
             backup: BackupConfig::mobile(),
         }
     }
+
+    /// Embedded storage configuration: minimal footprint, and encryption
+    /// left disabled by default since embedded targets often lack the CPU
+    /// headroom for it.
+    #[must_use]
+    pub fn embedded() -> Self {
+        Self {
+            base_dir: PathBuf::from("./embedded_data"),
+            cache_dir: PathBuf::from("./embedded_cache"),
+            max_storage_size: 16 * 1024 * 1024, // 16MB
+            encrypt_at_rest: false,
+            auto_cleanup: true,
+            backup: BackupConfig::embedded(),
+        }
+    }
 }
 
 /// Backup configuration
@@ -286,6 +314,20 @@ impl BackupConfig {
             max_backups: 20,
             compress_backups: true,
             remote_backup_url: Some("https://api.voirs.com/backup".to_string()),
+        }
+    }
+
+    /// Embedded backup configuration: disabled by default, since embedded
+    /// targets typically have no reliable persistent or remote storage
+    /// budget for backups.
+    #[must_use]
+    pub fn embedded() -> Self {
+        Self {
+            enable_backup: false,
+            backup_interval_hours: 24,
+            max_backups: 1,
+            compress_backups: true,
+            remote_backup_url: None,
         }
     }
 }
@@ -389,6 +431,23 @@ impl AudioConfig {
             enable_echo_cancellation: true,
         }
     }
+
+    /// Embedded audio configuration: matches [`PlatformCapabilities::embedded`]'s
+    /// smaller buffer and lower sample rate, with DSP-heavy features
+    /// disabled to fit constrained CPU budgets.
+    #[must_use]
+    pub fn embedded() -> Self {
+        Self {
+            sample_rate: 16000,
+            buffer_size: 1024,
+            channels: 1,
+            bit_depth: 16,
+            enable_compression: true,
+            quality_level: 0.5,
+            enable_noise_reduction: false,
+            enable_echo_cancellation: false,
+        }
+    }
 }
 
 /// UI configuration for different platforms
@@ -447,6 +506,21 @@ impl UIConfig {
             font_size: 18,
             enable_animations: true,
             enable_touch_gestures: true,
+            enable_keyboard_shortcuts: false,
+            screen_orientation: ScreenOrientation::Auto,
+            ui_density: UIDensity::Compact,
+        }
+    }
+
+    /// Embedded UI configuration: minimal defaults for the uncommon case an
+    /// embedded target has a display attached at all.
+    #[must_use]
+    pub fn embedded() -> Self {
+        Self {
+            theme: "none".to_string(),
+            font_size: 10,
+            enable_animations: false,
+            enable_touch_gestures: false,
             enable_keyboard_shortcuts: false,
             screen_orientation: ScreenOrientation::Auto,
             ui_density: UIDensity::Compact,
@@ -712,10 +786,37 @@ impl PlatformManager {
         }
     }
 
-    /// Get operating system version
+    /// Get operating system version.
+    ///
+    /// Real values on Linux (`uname -r`, the kernel release) and macOS
+    /// (`sw_vers -productVersion`), via the same [`run_command_stdout`]
+    /// helper already used for the `sysctl`/`vm_stat` queries above --
+    /// spawning the platform's own version-reporting utility, not FFI.
+    /// `"Unknown"` (an honest "not available", not a fabricated guess)
+    /// wherever no such utility is available, its output doesn't parse as
+    /// expected, or on a platform (including Windows) this real query
+    /// hasn't been implemented and verified for yet.
     fn get_os_version() -> String {
-        // In a real implementation, this would query the OS for version info
-        "Unknown".to_string()
+        #[cfg(target_os = "linux")]
+        {
+            run_command_stdout("uname", &["-r"])
+                .map(|out| out.trim().to_string())
+                .filter(|version| !version.is_empty())
+                .unwrap_or_else(|| "Unknown".to_string())
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            run_command_stdout("sw_vers", &["-productVersion"])
+                .map(|out| out.trim().to_string())
+                .filter(|version| !version.is_empty())
+                .unwrap_or_else(|| "Unknown".to_string())
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            "Unknown".to_string()
+        }
     }
 
     /// Get system architecture
@@ -1777,6 +1878,7 @@ mod tests {
             Platform::Desktop | Platform::Web | Platform::Mobile | Platform::Embedded
         ));
         assert!(!info.os_name.is_empty());
+        assert!(!info.os_version.is_empty());
         assert!(!info.architecture.is_empty());
         assert!(info.total_memory > 0);
         assert!(info.available_memory > 0);
@@ -1791,6 +1893,25 @@ mod tests {
                 | NetworkType::Offline
                 | NetworkType::Unknown
         ));
+    }
+
+    /// `get_os_version` must query the real OS (`uname -r` / `sw_vers
+    /// -productVersion`) rather than always reporting the hardcoded
+    /// `"Unknown"` sentinel it used to return unconditionally. Gated to the
+    /// two platforms this is actually verifiable on; Windows and other
+    /// targets keep the same real-or-honestly-"Unknown" contract but can't
+    /// be asserted against a live value from this test host.
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn test_get_os_version_returns_real_value_not_hardcoded_unknown() {
+        let version = PlatformManager::get_os_version();
+        assert!(!version.is_empty());
+        assert_ne!(
+            version, "Unknown",
+            "this host has a real uname/sw_vers to query; a hardcoded \
+             fallback means the real query silently failed or was never \
+             called"
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@
 use crate::persistence::PersistenceManager;
 use crate::traits::{
     AdaptiveConfig, FeedbackConfig, FeedbackProvider, FeedbackResponse, FeedbackType,
-    ProgressIndicators, TrainingExercise, UserFeedback, UserProgress,
+    ProgressIndicators, SessionState, TrainingExercise, UserFeedback, UserProgress,
 };
 // Note: We'll define our own export-friendly versions of these types
 use async_trait::async_trait;
@@ -48,6 +48,64 @@ fn compute_checksum(bytes: &[u8]) -> String {
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a 64-bit prime
         }
         format!("fnv1a:{hash:016x}")
+    }
+}
+
+/// Recursively sort every JSON object's keys, producing a canonical
+/// representation. `std::collections::HashMap`'s iteration order depends on
+/// a per-instance random seed (`RandomState`), so two structurally-identical
+/// packages -- e.g. one freshly built in-process and one reconstructed by
+/// `serde`'s `Deserialize` impl for `HashMap` after a real round trip
+/// through disk -- can otherwise serialize their map fields in different
+/// key orders, producing different bytes (and thus different checksums) for
+/// identical content. Sorting here makes the pre-image hashed by
+/// [`canonical_checksum_bytes`] independent of any particular `HashMap`
+/// instance's iteration order.
+fn canonicalize_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut entries: Vec<(String, serde_json::Value)> = map
+                .into_iter()
+                .map(|(k, v)| (k, canonicalize_json(v)))
+                .collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            serde_json::Value::Object(entries.into_iter().collect())
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(canonicalize_json).collect())
+        }
+        other => other,
+    }
+}
+
+/// Serialize `package` into a canonical (recursively key-sorted) JSON byte
+/// sequence suitable for hashing: two packages with identical real content
+/// produce identical bytes here regardless of which concrete `HashMap`
+/// instance backed any given map field -- see [`canonicalize_json`]. Used
+/// by both [`DataManager::collect_export_data`] (to compute the real
+/// checksum) and [`verify_checksum`] (to independently re-derive and check
+/// it, including after a real deserialize round trip).
+fn canonical_checksum_bytes(package: &DataExportPackage) -> serde_json::Result<Vec<u8>> {
+    let value = serde_json::to_value(package)?;
+    serde_json::to_vec(&canonicalize_json(value))
+}
+
+/// Convert a real, persisted [`SessionState`] into the export-friendly
+/// summary shape, using the real fields tracked on
+/// [`crate::traits::SessionStatistics`] (`end_time`, `duration`,
+/// `audio_generated_count`) rather than fabricated placeholders.
+/// `audio_generated_count` is used as `activity_count`: no dedicated
+/// per-session activity counter exists, and each generated audio segment
+/// corresponds to a real user interaction in this pipeline.
+fn session_to_export(session: &SessionState) -> ExportSessionData {
+    ExportSessionData {
+        session_id: session.session_id.to_string(),
+        user_id: session.user_id.clone(),
+        started_at: session.start_time,
+        ended_at: session.session_stats.end_time,
+        duration_seconds: session.session_stats.duration.as_secs(),
+        activity_count: u32::try_from(session.session_stats.audio_generated_count)
+            .unwrap_or(u32::MAX),
     }
 }
 
@@ -899,7 +957,7 @@ fn verify_checksum(package: &DataExportPackage) -> bool {
     let claimed_checksum = std::mem::take(&mut repro.metadata.checksum);
     repro.metadata.data_size = 0;
 
-    let Ok(serialized) = serde_json::to_vec(&repro) else {
+    let Ok(serialized) = canonical_checksum_bytes(&repro) else {
         return false;
     };
 
@@ -1170,9 +1228,20 @@ impl DataManager {
             .flat_map(|response| response.feedback_items)
             .collect();
 
+        // Sessions are only enumerable per-user via `export_user_data` (the
+        // trait has no dedicated "list sessions for user" method); a user
+        // with no sessions on record yields an honestly empty list here,
+        // not an error.
+        let sessions: Vec<ExportSessionData> = persistence
+            .export_user_data(user_id)
+            .await
+            .map(|export| export.sessions.iter().map(session_to_export).collect())
+            .unwrap_or_default();
+
         let mut record_counts = HashMap::new();
         record_counts.insert("user_progress".to_string(), user_progress.len() as u64);
         record_counts.insert("feedback_items".to_string(), feedback_history.len() as u64);
+        record_counts.insert("sessions".to_string(), sessions.len() as u64);
 
         let metadata = ExportMetadata {
             created_at: Utc::now(),
@@ -1189,16 +1258,20 @@ impl DataManager {
         let mut package = DataExportPackage {
             metadata,
             user_progress,
-            // No real data source is wired up for these categories yet
-            // (analytics/config/training/quality/gamification live in other
-            // subsystems not reachable from here) -- left honestly empty
-            // rather than fabricated.
             analytics: AnalyticsExportData {
-                sessions: Vec::new(),
+                sessions,
+                // No real data source is wired up for these categories yet
+                // (performance/interaction/system-level metrics live in
+                // other subsystems not reachable from here) -- left
+                // honestly empty rather than fabricated.
                 performance_metrics: Vec::new(),
                 interactions: Vec::new(),
                 system_metrics: Vec::new(),
             },
+            // `configurations`/`training_data`/`quality_metrics`/`gamification`:
+            // no real data source is wired up for these categories yet
+            // (they live in other subsystems not reachable from here) --
+            // left honestly empty rather than fabricated.
             configurations: SystemConfigurations {
                 feedback_configs: HashMap::new(),
                 adaptive_configs: HashMap::new(),
@@ -1229,9 +1302,10 @@ impl DataManager {
 
         // Real checksum/size over the actual serialized payload (computed
         // with `checksum`/`data_size` at the placeholder values set above,
-        // so the same computation is reproducible by re-hashing a
-        // previously exported file -- see `verify_checksum`).
-        let serialized = serde_json::to_vec(&package)?;
+        // and canonicalized so the same checksum is reproducible by
+        // re-hashing a previously exported file regardless of `HashMap`
+        // iteration order -- see `canonical_checksum_bytes`/`verify_checksum`).
+        let serialized = canonical_checksum_bytes(&package)?;
         package.metadata.checksum = compute_checksum(&serialized);
         package.metadata.data_size = serialized.len() as u64;
 
@@ -1300,6 +1374,28 @@ impl DataManager {
             }
         }
 
+        // Import sessions
+        for exported_session in &package.analytics.sessions {
+            match self.import_session(exported_session, options).await {
+                Ok(()) => {
+                    *result
+                        .records_imported
+                        .entry("sessions".to_string())
+                        .or_insert(0) += 1;
+                }
+                Err(e) => {
+                    result.errors.push(format!(
+                        "Failed to import session {}: {e}",
+                        exported_session.session_id
+                    ));
+                    *result
+                        .records_skipped
+                        .entry("sessions".to_string())
+                        .or_insert(0) += 1;
+                }
+            }
+        }
+
         Ok(result)
     }
 
@@ -1359,6 +1455,66 @@ impl DataManager {
         log::info!(
             "Imported feedback for user '{user_id}': {}",
             feedback.message
+        );
+        Ok(())
+    }
+
+    /// Import a session by writing it through the real persistence backend.
+    ///
+    /// The export schema only carries the [`ExportSessionData`] summary,
+    /// not the full [`SessionState`] it originally came from (per-session
+    /// stats, preferences, adaptive state, and current exercise are not
+    /// recoverable from this schema), so this reconstructs a real,
+    /// retrievable session record around the fields that *are* preserved --
+    /// rather than silently dropping the session on import.
+    async fn import_session(
+        &self,
+        exported: &ExportSessionData,
+        _options: &ImportOptions,
+    ) -> DataManagementResult<()> {
+        let persistence = self.require_persistence()?;
+
+        let session_id = uuid::Uuid::parse_str(&exported.session_id).map_err(|e| {
+            DataManagementError::ImportError {
+                message: format!("invalid session id '{}': {e}", exported.session_id),
+            }
+        })?;
+
+        let session = SessionState {
+            session_id,
+            user_id: exported.user_id.clone(),
+            start_time: exported.started_at,
+            last_activity: exported.ended_at.unwrap_or(exported.started_at),
+            current_task: None,
+            stats: crate::traits::SessionStats::default(),
+            preferences: crate::traits::UserPreferences {
+                user_id: exported.user_id.clone(),
+                ..crate::traits::UserPreferences::default()
+            },
+            adaptive_state: crate::traits::AdaptiveState::default(),
+            current_exercise: None,
+            session_stats: crate::traits::SessionStatistics {
+                start_time: exported.started_at,
+                end_time: exported.ended_at,
+                duration: std::time::Duration::from_secs(exported.duration_seconds),
+                audio_generated_count: exported.activity_count as usize,
+                average_quality_score: 0.0,
+                average_pronunciation_score: 0.0,
+                exercises_attempted: 0,
+                exercises_completed: 0,
+            },
+        };
+
+        persistence
+            .save_session(&session)
+            .await
+            .map_err(|e| DataManagementError::ImportError {
+                message: format!("failed to save session '{}': {e}", exported.session_id),
+            })?;
+        log::info!(
+            "Imported session '{}' for user '{}'",
+            exported.session_id,
+            exported.user_id
         );
         Ok(())
     }
@@ -1445,6 +1601,28 @@ mod tests {
         (manager, persistence)
     }
 
+    /// A minimal, real (non-empty) `FeedbackResponse` fixture shared by
+    /// several tests below.
+    fn test_feedback_response() -> FeedbackResponse {
+        FeedbackResponse {
+            feedback_items: vec![UserFeedback {
+                message: "Great articulation".to_string(),
+                suggestion: None,
+                confidence: 0.9,
+                score: 0.88,
+                priority: 0.5,
+                metadata: HashMap::new(),
+            }],
+            overall_score: 0.88,
+            immediate_actions: vec![],
+            long_term_goals: vec![],
+            progress_indicators: ProgressIndicators::default(),
+            timestamp: Utc::now(),
+            processing_time: std::time::Duration::from_millis(5),
+            feedback_type: FeedbackType::Quality,
+        }
+    }
+
     #[tokio::test]
     async fn test_data_manager_creation() {
         let storage = Arc::new(RwLock::new(FileDataStorage::new("test_data".to_string())));
@@ -1501,6 +1679,157 @@ mod tests {
         assert!(!package.metadata.checksum.is_empty());
         assert!(package.metadata.checksum != "placeholder_checksum");
         assert!(verify_checksum(&package));
+    }
+
+    /// The export package must contain the user's real, seeded *session*
+    /// data too -- not an empty placeholder list regardless of what
+    /// sessions actually exist.
+    #[tokio::test]
+    async fn test_export_package_reflects_real_seeded_sessions() {
+        use crate::traits::{AdaptiveState, SessionStatistics, SessionStats, UserPreferences};
+
+        let (manager, persistence) = manager_with_persistence().await;
+
+        let session_id = uuid::Uuid::new_v4();
+        let start = Utc::now() - chrono::Duration::minutes(10);
+        let end = Utc::now();
+        let session = crate::traits::SessionState {
+            session_id,
+            user_id: "user1".to_string(),
+            start_time: start,
+            last_activity: end,
+            current_task: None,
+            stats: SessionStats::default(),
+            preferences: UserPreferences::default(),
+            adaptive_state: AdaptiveState::default(),
+            current_exercise: None,
+            session_stats: SessionStatistics {
+                start_time: start,
+                end_time: Some(end),
+                duration: std::time::Duration::from_secs(600),
+                audio_generated_count: 7,
+                average_quality_score: 0.8,
+                average_pronunciation_score: 0.75,
+                exercises_attempted: 3,
+                exercises_completed: 2,
+            },
+        };
+        persistence.save_session(&session).await.unwrap();
+
+        let package = manager
+            .collect_export_data("user1", ExportFormat::Json)
+            .await
+            .unwrap();
+
+        assert_eq!(package.analytics.sessions.len(), 1);
+        let exported = &package.analytics.sessions[0];
+        assert_eq!(exported.session_id, session_id.to_string());
+        assert_eq!(exported.user_id, "user1");
+        assert_eq!(exported.duration_seconds, 600);
+        assert_eq!(exported.activity_count, 7);
+        assert!(exported.ended_at.is_some());
+        assert_eq!(
+            package.metadata.record_counts.get("sessions"),
+            Some(&1),
+            "record_counts must reflect the real seeded session count"
+        );
+
+        assert!(verify_checksum(&package));
+    }
+
+    /// Evidence for why `verify_checksum` must canonicalize before hashing:
+    /// `std::collections::HashMap`'s iteration order depends on a
+    /// per-instance random seed (`RandomState`), so two structurally
+    /// identical maps built independently commonly serialize their JSON
+    /// object keys in different orders. `record_counts: HashMap<String,
+    /// u64>` always has exactly 2 entries in a real `collect_export_data`
+    /// package, so this reordering is a real, frequently-observed hazard
+    /// for any naive (non-canonicalized) re-hash -- e.g. after
+    /// `import_data` deserializes a package fresh from disk via
+    /// `load_package`. This does not assert a specific count (the exact
+    /// probability distribution is an implementation detail of
+    /// `RandomState`), only that canonicalization is exercised for a
+    /// real reason.
+    #[test]
+    fn evidence_hashmap_json_order_varies_across_instances() {
+        use std::collections::HashMap;
+        let mut orders = std::collections::HashSet::new();
+        for _ in 0..200 {
+            let mut map: HashMap<String, u64> = HashMap::new();
+            map.insert("user_progress".to_string(), 1);
+            map.insert("feedback_items".to_string(), 3);
+            orders.insert(serde_json::to_string(&map).unwrap());
+        }
+        println!(
+            "observed {} distinct raw JSON key orderings across 200 fresh 2-entry HashMaps",
+            orders.len()
+        );
+
+        // Regardless of how many distinct raw orderings were observed above,
+        // canonicalization must always collapse them to exactly one.
+        let mut canonical_orders = std::collections::HashSet::new();
+        for _ in 0..200 {
+            let mut map: HashMap<String, u64> = HashMap::new();
+            map.insert("user_progress".to_string(), 1);
+            map.insert("feedback_items".to_string(), 3);
+            let value = serde_json::to_value(&map).unwrap();
+            canonical_orders.insert(serde_json::to_string(&canonicalize_json(value)).unwrap());
+        }
+        assert_eq!(
+            canonical_orders.len(),
+            1,
+            "canonicalize_json must produce identical bytes for identical content \
+             regardless of the source HashMap's iteration order"
+        );
+    }
+
+    /// The exact real-world scenario `verify_checksum` must handle: a
+    /// package that was serialized, then genuinely deserialized back (as
+    /// `FileDataStorage::load_package` does for every real
+    /// import/restore), producing an entirely fresh `DataExportPackage`
+    /// whose `HashMap` fields have their own independent (likely
+    /// different) iteration order. The checksum must still verify -- a
+    /// legitimately unmodified re-imported archive must never spuriously
+    /// report "corrupted" purely due to `HashMap` reordering.
+    #[tokio::test]
+    async fn test_verify_checksum_survives_real_json_round_trip() {
+        let (manager, persistence) = manager_with_persistence().await;
+
+        // `record_counts` (2 entries) is populated by every real export;
+        // this alone is enough to exercise the reordering hazard.
+        persistence
+            .save_user_progress(
+                "user1",
+                &UserProgress {
+                    user_id: "user1".to_string(),
+                    overall_skill_level: 0.5,
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
+        persistence
+            .save_feedback("user1", &test_feedback_response())
+            .await
+            .unwrap();
+
+        let original = manager
+            .collect_export_data("user1", ExportFormat::Json)
+            .await
+            .unwrap();
+        assert!(verify_checksum(&original));
+
+        // Simulate exactly what `FileDataStorage::load_package` does for a
+        // real JSON export: serialize, then deserialize into a brand-new
+        // `DataExportPackage` with entirely fresh `HashMap` instances.
+        let json = serde_json::to_string(&original).unwrap();
+        let round_tripped: DataExportPackage = serde_json::from_str(&json).unwrap();
+
+        assert!(
+            verify_checksum(&round_tripped),
+            "a real, unmodified export must still verify after a genuine \
+             serialize/deserialize round trip, regardless of HashMap reordering"
+        );
     }
 
     /// A checksum computed from fabricated/placeholder text would never
@@ -1602,6 +1931,31 @@ mod tests {
             )
             .await
             .unwrap();
+        let seeded_session_id = uuid::Uuid::new_v4();
+        source_persistence
+            .save_session(&SessionState {
+                session_id: seeded_session_id,
+                user_id: "roundtrip_user".to_string(),
+                start_time: Utc::now(),
+                last_activity: Utc::now(),
+                current_task: None,
+                stats: crate::traits::SessionStats::default(),
+                preferences: crate::traits::UserPreferences::default(),
+                adaptive_state: crate::traits::AdaptiveState::default(),
+                current_exercise: None,
+                session_stats: crate::traits::SessionStatistics {
+                    start_time: Utc::now(),
+                    end_time: Some(Utc::now()),
+                    duration: std::time::Duration::from_secs(120),
+                    audio_generated_count: 4,
+                    average_quality_score: 0.0,
+                    average_pronunciation_score: 0.0,
+                    exercises_attempted: 0,
+                    exercises_completed: 0,
+                },
+            })
+            .await
+            .unwrap();
 
         let export_path = std::env::temp_dir().join(format!(
             "voirs_export_roundtrip_{}.json",
@@ -1654,6 +2008,10 @@ mod tests {
             report.import_result.records_imported.get("feedback"),
             Some(&1)
         );
+        assert_eq!(
+            report.import_result.records_imported.get("sessions"),
+            Some(&1)
+        );
 
         // The real data must now genuinely exist in the destination backend.
         let restored_progress = dest_persistence
@@ -1668,6 +2026,16 @@ mod tests {
             .unwrap();
         assert_eq!(restored_feedback.len(), 1);
         assert!((restored_feedback[0].overall_score - 0.88).abs() < 1e-6);
+
+        let restored_session = dest_persistence
+            .load_session(&seeded_session_id)
+            .await
+            .unwrap();
+        assert_eq!(restored_session.user_id, "roundtrip_user");
+        assert_eq!(
+            restored_session.session_stats.audio_generated_count, 4,
+            "the real seeded session's activity count must survive the round trip"
+        );
 
         let _ = std::fs::remove_file(&export_path);
     }
@@ -1789,7 +2157,7 @@ mod tests {
         // Give the package a genuine checksum, computed the same way
         // `collect_export_data` does, rather than a placeholder string --
         // `validate_data` now really verifies it.
-        let serialized = serde_json::to_vec(&package).unwrap();
+        let serialized = canonical_checksum_bytes(&package).unwrap();
         package.metadata.checksum = compute_checksum(&serialized);
 
         let storage = FileDataStorage::new("test".to_string());

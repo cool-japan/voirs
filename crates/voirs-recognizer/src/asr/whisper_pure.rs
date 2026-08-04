@@ -743,11 +743,62 @@ mod tests {
     use futures::stream;
     use tokio_stream::StreamExt;
 
+    /// A config carrying real assets, or `None` when this machine has none.
+    ///
+    /// Set `VOIRS_WHISPER_ASSETS` to a directory holding `model.safetensors` and
+    /// `vocab.json` to run the model-dependent tests against a real checkpoint.
+    fn config_with_real_assets() -> Option<WhisperConfig> {
+        crate::asr::whisper::assets::assets_from_env()
+            .map(|assets| WhisperConfig::default().with_assets(assets))
+    }
+
     #[tokio::test]
-    async fn test_pure_rust_whisper_creation() {
+    async fn creation_fails_closed_without_pretrained_weights() {
         let config = WhisperConfig::default();
-        let model = PureRustWhisper::new(config).await;
-        assert!(model.is_ok());
+        assert!(!config.has_assets());
+
+        let Err(err) = PureRustWhisper::new(config).await else {
+            panic!("PureRustWhisper must refuse to run on untrained parameters");
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("No pretrained weights configured"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("OnnxWhisper") || rendered.contains("with_assets"),
+            "the error should say how to fix it: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn creation_names_the_checkpoint_it_could_not_find() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = WhisperConfig::default()
+            .with_assets(crate::asr::whisper::WhisperAssets::from_dir(dir.path()));
+
+        let Err(err) = PureRustWhisper::new(config).await else {
+            panic!("a missing checkpoint must not build a model");
+        };
+        assert!(
+            err.to_string().contains("model.safetensors"),
+            "the error should name the file it looked for: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn creation_succeeds_with_real_assets() {
+        let Some(config) = config_with_real_assets() else {
+            eprintln!(
+                "skipping: set {} to run against a real checkpoint",
+                crate::asr::whisper::ASSETS_ENV_VAR
+            );
+            return;
+        };
+        let model = PureRustWhisper::new(config)
+            .await
+            .expect("real assets must build a model");
+        assert!(!model.metadata().name.is_empty());
     }
 
     #[test]
@@ -779,14 +830,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_transcription_interface() {
-        // Test that the streaming interface can be called without errors
-        let config = WhisperConfig::default();
-        let model = PureRustWhisper::new(config).await;
-        assert!(model.is_ok());
+        let Some(config) = config_with_real_assets() else {
+            eprintln!(
+                "skipping: set {} to run against a real checkpoint",
+                crate::asr::whisper::ASSETS_ENV_VAR
+            );
+            return;
+        };
+        let model = PureRustWhisper::new(config)
+            .await
+            .expect("real assets must build a model");
 
-        let model = model.unwrap();
-
-        // Create a mock audio stream with a few audio buffers
         let audio_buffers = vec![
             AudioBuffer::mono(vec![0.0; 16000], 16000), // 1 second of silence
             AudioBuffer::mono(vec![0.1; 16000], 16000), // 1 second of low amplitude audio
@@ -795,20 +849,15 @@ mod tests {
         let audio_stream = stream::iter(audio_buffers);
         let boxed_stream: AudioStream = Box::pin(audio_stream);
 
-        // Test that streaming can be initiated (even if the actual processing might not work without real models)
-        let result = model.transcribe_streaming(boxed_stream, None).await;
+        let mut transcript_stream = model
+            .transcribe_streaming(boxed_stream, None)
+            .await
+            .expect("streaming must start once the model is loaded");
 
-        // The method should return a stream interface, even if processing fails later
-        assert!(result.is_ok());
-
-        let mut transcript_stream = result.unwrap();
-
-        // Try to get at least one result from the stream (may be an error due to mock data)
-        if let Some(_chunk_result) = transcript_stream.next().await {
-            // We received something from the stream, which means the interface works
-            // The actual content might be an error due to mock data, but that's expected
+        // Every chunk the real model emits must carry a real transcript.
+        while let Some(chunk) = transcript_stream.next().await {
+            let chunk = chunk.expect("a loaded model must not error mid-stream");
+            assert!(chunk.confidence >= 0.0 && chunk.confidence <= 1.0);
         }
-
-        // The test passes if we can create the stream interface without panicking
     }
 }

@@ -621,11 +621,12 @@ impl ShardedPersistenceManager {
 #[async_trait]
 impl PersistenceManager for ShardedPersistenceManager {
     async fn initialize(&mut self) -> PersistenceResult<()> {
-        // Initialize all shard managers
-        for manager in self.sharding_manager.shard_managers.values() {
-            // Note: This would require making shard managers mutable
-            // In practice, initialization would be handled differently
-        }
+        // Each shard's underlying `PersistenceManager` is supplied to
+        // `ShardingManager::new` already wrapped in an `Arc`, so it must
+        // have been initialized by the caller before being registered as a
+        // shard: an `Arc<dyn PersistenceManager>` gives no safe way to
+        // acquire `&mut` access to call `initialize` on it again here.
+        // There is nothing further to do.
         Ok(())
     }
 

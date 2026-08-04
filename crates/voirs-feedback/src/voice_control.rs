@@ -421,10 +421,15 @@ impl VoiceControlManager {
         }
         drop(config);
 
-        // Extract parameters
-        let command = commands
-            .get(&best_command_id)
-            .expect("value should be present");
+        // Extract parameters. `best_command_id` was drawn directly from
+        // `commands` above, so this lookup should never miss -- but a real,
+        // typed error is returned instead of panicking if that invariant is
+        // ever violated.
+        let command = commands.get(&best_command_id).ok_or_else(|| {
+            VoiceControlError::CommandNotRecognized {
+                input: input.to_string(),
+            }
+        })?;
         let parameters = self.extract_parameters(input, command);
 
         let intent = VoiceIntent {
@@ -579,12 +584,6 @@ impl VoiceControlManager {
     }
 
     // Private helper methods
-
-    async fn register_default_commands(&self) {
-        for command in Self::build_default_commands() {
-            let _ = self.register_command(command).await;
-        }
-    }
 
     fn calculate_similarity(&self, input: &str, trigger: &str) -> f32 {
         // Intent-focused similarity that checks what fraction of trigger keywords

@@ -531,48 +531,42 @@ impl HorizontalScalingManager {
                 Ok(Some(instance.instance_id.clone()))
             }
             LoadBalancingStrategy::LeastConnections => {
+                // `healthy_instances` was already confirmed non-empty above,
+                // so `min_by_key` always yields `Some` here in practice --
+                // `Ok(None)` is nonetheless a real, typed fallback rather
+                // than a panic if that invariant is ever violated.
                 let best_instance = healthy_instances
                     .iter()
-                    .min_by_key(|i| lb_state.connection_counts.get(&i.instance_id).unwrap_or(&0))
-                    .expect("value should be present");
-                Ok(Some(best_instance.instance_id.clone()))
+                    .min_by_key(|i| lb_state.connection_counts.get(&i.instance_id).unwrap_or(&0));
+                Ok(best_instance.map(|i| i.instance_id.clone()))
             }
             LoadBalancingStrategy::LeastResponseTime => {
-                let best_instance = healthy_instances
-                    .iter()
-                    .min_by(|a, b| {
-                        a.metrics
-                            .avg_response_time_ms
-                            .partial_cmp(&b.metrics.avg_response_time_ms)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .expect("value should be present");
-                Ok(Some(best_instance.instance_id.clone()))
+                let best_instance = healthy_instances.iter().min_by(|a, b| {
+                    a.metrics
+                        .avg_response_time_ms
+                        .partial_cmp(&b.metrics.avg_response_time_ms)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                Ok(best_instance.map(|i| i.instance_id.clone()))
             }
             LoadBalancingStrategy::ResourceBased => {
-                let best_instance = healthy_instances
-                    .iter()
-                    .min_by(|a, b| {
-                        let score_a = a.resources.cpu_utilization + a.resources.memory_utilization;
-                        let score_b = b.resources.cpu_utilization + b.resources.memory_utilization;
-                        score_a
-                            .partial_cmp(&score_b)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .expect("value should be present");
-                Ok(Some(best_instance.instance_id.clone()))
+                let best_instance = healthy_instances.iter().min_by(|a, b| {
+                    let score_a = a.resources.cpu_utilization + a.resources.memory_utilization;
+                    let score_b = b.resources.cpu_utilization + b.resources.memory_utilization;
+                    score_a
+                        .partial_cmp(&score_b)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                Ok(best_instance.map(|i| i.instance_id.clone()))
             }
             LoadBalancingStrategy::WeightedRoundRobin => {
                 // Simplified weighted round-robin
-                let best_instance = healthy_instances
-                    .iter()
-                    .max_by(|a, b| {
-                        a.weight
-                            .partial_cmp(&b.weight)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .expect("value should be present");
-                Ok(Some(best_instance.instance_id.clone()))
+                let best_instance = healthy_instances.iter().max_by(|a, b| {
+                    a.weight
+                        .partial_cmp(&b.weight)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                Ok(best_instance.map(|i| i.instance_id.clone()))
             }
         }
     }

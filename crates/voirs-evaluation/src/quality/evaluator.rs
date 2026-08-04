@@ -1098,11 +1098,14 @@ impl QualityEvaluator {
         Ok(dct_coeffs)
     }
 
-    /// Deep learning-based MOS prediction using neural network features
+    /// DSP-feature-based MOS estimate using a transparent, hand-authored heuristic.
     ///
-    /// This method uses spectral, temporal, and perceptual features as inputs
-    /// to a neural network-based model for more accurate MOS prediction.
-    pub async fn calculate_mos_deep_learning(
+    /// This method extracts real spectral, temporal, and perceptual features from
+    /// `audio` (and, if supplied, a faithfulness comparison against `reference`)
+    /// and combines them via [`Self::apply_dsp_heuristic_scoring`], a single
+    /// auditable weighted sum — **not** a trained neural network. See that
+    /// method's documentation for why, and for a real trained-weights alternative.
+    pub async fn calculate_mos_dsp_heuristic(
         &self,
         audio: &AudioBuffer,
         reference: Option<&AudioBuffer>,
@@ -1110,7 +1113,7 @@ impl QualityEvaluator {
         let samples = audio.samples();
         let sample_rate = audio.sample_rate();
 
-        // Extract neural network features
+        // Extract the named feature groups consumed by the heuristic scorer.
         let spectral_features = self
             .extract_spectral_features(samples, sample_rate as f32)
             .await?;
@@ -1126,24 +1129,25 @@ impl QualityEvaluator {
             self.extract_reference_comparison_features(audio, ref_audio)
                 .await?
         } else {
-            vec![0.0; 8] // Default reference features
+            vec![0.0; 8] // No reference supplied: comparison terms are inert (see
+                         // `apply_dsp_heuristic_scoring`'s `has_reference` check).
         };
 
-        // Combine all features into a feature vector
+        // Combine all features into a single fixed-layout feature vector.
         let mut features = Vec::new();
         features.extend(spectral_features);
         features.extend(temporal_features);
         features.extend(perceptual_features);
         features.extend(reference_features);
 
-        // Apply neural network model (simplified implementation)
-        let mos_score = self.apply_neural_network_model(&features).await?;
+        let mos_score = self.apply_dsp_heuristic_scoring(&features)?;
 
         // Clamp to valid MOS range
         Ok(mos_score.max(1.0).min(5.0))
     }
 
-    /// Extract spectral features for neural network input
+    /// Extract spectral features consumed by the DSP-heuristic MOS scorer
+    /// (see [`Self::apply_dsp_heuristic_scoring`])
     async fn extract_spectral_features(
         &self,
         samples: &[f32],
@@ -1190,7 +1194,8 @@ impl QualityEvaluator {
         Ok(features)
     }
 
-    /// Extract temporal features for neural network input
+    /// Extract temporal features consumed by the DSP-heuristic MOS scorer
+    /// (see [`Self::apply_dsp_heuristic_scoring`])
     async fn extract_temporal_features(
         &self,
         samples: &[f32],
@@ -1226,7 +1231,8 @@ impl QualityEvaluator {
         Ok(features)
     }
 
-    /// Extract perceptual features for neural network input
+    /// Extract perceptual features consumed by the DSP-heuristic MOS scorer
+    /// (see [`Self::apply_dsp_heuristic_scoring`])
     async fn extract_perceptual_features(
         &self,
         samples: &[f32],
@@ -1308,129 +1314,99 @@ impl QualityEvaluator {
         Ok(features)
     }
 
-    /// Apply neural network model for MOS prediction
+    /// Combine the extracted spectral/temporal/perceptual/reference-comparison
+    /// features into a single MOS-range (1.0-5.0) quality estimate.
     ///
-    /// This is a simplified neural network implementation using
-    /// handcrafted weights optimized for speech quality assessment
-    async fn apply_neural_network_model(&self, features: &[f32]) -> Result<f32, EvaluationError> {
+    /// This is a **hand-authored linear heuristic**, not a trained model or
+    /// neural network: every coefficient below is a fixed constant chosen to
+    /// encode a single documented, domain-motivated expectation about natural
+    /// speech (e.g. "audible roughness/beating lowers perceived quality"), not a
+    /// value learned via gradient descent on labeled Mean-Opinion-Score data. It
+    /// is deliberately a single, auditable weighted sum over named real features
+    /// (each genuinely measured from `audio`/`reference` by
+    /// `extract_spectral_features`/`extract_temporal_features`/
+    /// `extract_perceptual_features`/`extract_reference_comparison_features` —
+    /// real FFT/autocorrelation/Bark-band analysis, not placeholders) rather than
+    /// a black-box multi-layer transform, so every term's contribution to the
+    /// final score can be inspected directly. It has **not** been validated
+    /// against human MOS ratings and should be treated as a coarse, explainable
+    /// proxy, not a certified quality predictor.
+    ///
+    /// For a MOS predictor backed by weights actually trained on a labeled MOS
+    /// dataset, see [`crate::backends::onnx::OnnxMosPredictor`], which loads a
+    /// real ONNX checkpoint from disk and fails closed (returns an error, never a
+    /// fabricated score) when no model file is configured.
+    fn apply_dsp_heuristic_scoring(&self, features: &[f32]) -> Result<f32, EvaluationError> {
         if features.len() < 20 {
             return Err(EvaluationError::InvalidInput {
-                message: "Insufficient features for neural network model".to_string(),
+                message: "Insufficient features for the DSP-heuristic quality model".to_string(),
             });
         }
 
-        // Hidden layer 1 (32 neurons)
-        let hidden1_weights = self.get_hidden1_weights();
-        let hidden1_bias = self.get_hidden1_bias();
-        let mut hidden1_output = [0.0; 32];
+        // Fixed feature layout produced by `calculate_mos_dsp_heuristic`:
+        //   [0..13)  spectral:   centroid, bandwidth, rolloff, zcr, flux, mfcc[0..8)
+        //   [13..18) temporal:   rms_energy, energy_variance, temporal_centroid,
+        //                        attack_time, decay_time
+        //   [18..23) perceptual: loudness, roughness, sharpness, tonality, harmonicity
+        //   [23..31) reference:  spectral_similarity, temporal_similarity, energy_diff,
+        //                        f0_similarity, phase_coherence, cross_correlation,
+        //                        spectral_convergence, log_spectral_distance
+        //                        (all zero when no reference was supplied)
+        let spectral_flux = features[4];
+        let roughness = features[19];
+        let tonality = features[21];
+        let harmonicity = features[22];
 
-        for i in 0..32 {
-            let mut sum = hidden1_bias[i];
-            for j in 0..features.len().min(64) {
-                if j < features.len() {
-                    sum += features[j] * hidden1_weights[i * 64 + j];
-                }
-            }
-            hidden1_output[i] = self.relu_activation(sum);
-        }
+        // Start from a neutral mid-scale MOS and adjust additively; each term
+        // below is individually clamped/scaled so no single feature can push the
+        // score far outside a plausible neighborhood of the baseline on its own.
+        let mut score = 3.0f32;
 
-        // Hidden layer 2 (16 neurons)
-        let hidden2_weights = self.get_hidden2_weights();
-        let hidden2_bias = self.get_hidden2_bias();
-        let mut hidden2_output = [0.0; 16];
+        // Harmonicity: energy concentrated at clean harmonic partials of an
+        // estimated F0 is characteristic of well-formed voiced speech; noisy or
+        // broken voicing lowers it. The dominant "good" signal.
+        score += (harmonicity.clamp(0.0, 1.0) - 0.4) * 1.5;
 
-        for i in 0..16 {
-            let mut sum = hidden2_bias[i];
-            for j in 0..32 {
-                sum += hidden1_output[j] * hidden2_weights[i * 32 + j];
-            }
-            hidden2_output[i] = self.relu_activation(sum);
-        }
+        // Roughness: audible beating between closely-spaced spectral peaks is a
+        // hallmark of synthesis artifacts (buzziness, interference). Penalize
+        // directly; the single strongest "bad" signal available reference-free.
+        score -= roughness.clamp(0.0, 1.0) * 1.8;
 
-        // Output layer (1 neuron for MOS score)
-        let output_weights = self.get_output_weights();
-        let output_bias = self.get_output_bias();
+        // Tonality (1 - spectral flatness): natural voiced speech is more tonal
+        // than broadband noise; very low tonality suggests noise contamination.
+        score += (tonality.clamp(0.0, 1.0) - 0.5) * 0.6;
 
-        let mut mos_score = output_bias;
-        for i in 0..16 {
-            mos_score += hidden2_output[i] * output_weights[i];
-        }
+        // Spectral flux is unbounded, but sustained very high frame-to-frame
+        // spectral change beyond what natural articulation produces indicates
+        // instability/artifacts; a mild, saturating penalty so a single outlier
+        // frame can't dominate the score.
+        score -= (spectral_flux / 4.0).clamp(0.0, 0.6);
 
-        // Apply sigmoid activation and scale to MOS range (1-5)
-        let sigmoid_output = 1.0 / (1.0 + (-mos_score).exp());
-        let scaled_mos = 1.0 + sigmoid_output * 4.0;
-
-        Ok(scaled_mos)
-    }
-
-    /// `ReLU` activation function
-    fn relu_activation(&self, x: f32) -> f32 {
-        x.max(0.0)
-    }
-
-    /// Get hidden layer 1 weights (optimized for speech quality assessment)
-    fn get_hidden1_weights(&self) -> Vec<f32> {
-        // Weights optimized for speech quality features
-        // These are based on common patterns in speech quality assessment
-        let mut weights = Vec::with_capacity(32 * 64);
-
-        for i in 0..32 {
-            for j in 0..64 {
-                let w = match j {
-                    // Spectral features (higher weights)
-                    0..=12 => 0.2 + 0.1 * (i as f32 / 32.0) * (-(j as f32 / 8.0).powi(2)).exp(),
-                    // Temporal features
-                    13..=17 => 0.15 + 0.05 * ((i + j) as f32 / 45.0).sin(),
-                    // Perceptual features (moderate weights)
-                    18..=22 => 0.12 + 0.08 * (i as f32 / 32.0),
-                    // Reference features (if available)
-                    23..=30 => 0.18 + 0.06 * ((i * j) as f32 / 960.0).cos(),
-                    // Padding features
-                    _ => 0.05 + 0.02 * ((i + j) as f32 / 96.0),
-                };
-                weights.push(w);
+        if features.len() >= 31 {
+            let spectral_similarity = features[23];
+            let temporal_similarity = features[24];
+            let f0_similarity = features[26];
+            let spectral_convergence = features[29];
+            let has_reference = spectral_similarity != 0.0
+                || temporal_similarity != 0.0
+                || f0_similarity != 0.0
+                || spectral_convergence != 0.0;
+            if has_reference {
+                // With a reference signal available, faithfulness to it
+                // dominates: these terms measure how closely `audio` reproduces
+                // `reference`'s spectral shape, temporal envelope, and pitch
+                // contour.
+                score += (spectral_similarity.clamp(0.0, 1.0) - 0.5) * 2.0;
+                score += (temporal_similarity.clamp(0.0, 1.0) - 0.5) * 1.0;
+                score += (f0_similarity.clamp(0.0, 1.0) - 0.5) * 1.0;
+                // Spectral convergence is a normalized distance (0 = identical
+                // spectra); penalize divergence, saturating so a wildly
+                // mismatched reference doesn't dominate the whole score.
+                score -= spectral_convergence.clamp(0.0, 2.0) * 0.5;
             }
         }
-        weights
-    }
 
-    /// Get hidden layer 1 bias (optimized)
-    fn get_hidden1_bias(&self) -> Vec<f32> {
-        (0..32).map(|i| -0.5 + 0.1 * (i as f32 / 32.0)).collect()
-    }
-
-    /// Get hidden layer 2 weights (optimized)
-    fn get_hidden2_weights(&self) -> Vec<f32> {
-        let mut weights = Vec::with_capacity(16 * 32);
-
-        for i in 0..16 {
-            for j in 0..32 {
-                let w = 0.08
-                    + 0.04
-                        * ((i * 3 + j * 2) as f32 / 80.0).sin()
-                        * (-(i as f32 / 8.0).powi(2)).exp();
-                weights.push(w);
-            }
-        }
-        weights
-    }
-
-    /// Get hidden layer 2 bias (optimized)
-    fn get_hidden2_bias(&self) -> Vec<f32> {
-        (0..16).map(|i| -0.3 + 0.05 * (i as f32 / 16.0)).collect()
-    }
-
-    /// Get output layer weights (optimized for MOS prediction)
-    fn get_output_weights(&self) -> Vec<f32> {
-        vec![
-            0.15, 0.18, 0.12, 0.16, 0.14, 0.17, 0.13, 0.19, 0.11, 0.16, 0.15, 0.14, 0.18, 0.12,
-            0.17, 0.13,
-        ]
-    }
-
-    /// Get output bias (calibrated for MOS range)
-    fn get_output_bias(&self) -> f32 {
-        0.5
+        Ok(score.clamp(1.0, 5.0))
     }
 
     // Placeholder implementations for feature extraction methods

@@ -432,8 +432,18 @@ pub(crate) fn spectral_temporal_coherence(samples: &[f32], sample_rate: u32) -> 
             continue;
         }
         let dot: f64 = (0..len).map(|k| a[k] as f64 * b[k] as f64).sum();
-        let norm_a: f64 = a.iter().take(len).map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
-        let norm_b: f64 = b.iter().take(len).map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
+        let norm_a: f64 = a
+            .iter()
+            .take(len)
+            .map(|&v| (v as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let norm_b: f64 = b
+            .iter()
+            .take(len)
+            .map(|&v| (v as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
         if norm_a > 1e-9 && norm_b > 1e-9 {
             similarities.push((dot / (norm_a * norm_b)).clamp(0.0, 1.0));
         }
@@ -475,7 +485,11 @@ pub(crate) fn band_energy_fractions(samples: &[f32], sample_rate: u32) -> (f32, 
     if total <= 0.0 {
         (0.0, 0.0, 0.0)
     } else {
-        ((low / total) as f32, (mid / total) as f32, (high / total) as f32)
+        (
+            (low / total) as f32,
+            (mid / total) as f32,
+            (high / total) as f32,
+        )
     }
 }
 

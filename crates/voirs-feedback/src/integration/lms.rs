@@ -1064,7 +1064,7 @@ impl LMSIntegrationManager {
 
 /// Build the error returned by every real-platform method when the crate is
 /// compiled without the `microservices` feature (no HTTP client available).
-#[cfg(feature = "microservices")]
+#[cfg(not(feature = "microservices"))]
 fn feature_disabled_error() -> LMSError {
     LMSError::ConfigurationError(
         "the `microservices` feature (reqwest HTTP client) is not enabled".to_string(),

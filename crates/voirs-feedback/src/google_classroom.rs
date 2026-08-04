@@ -291,6 +291,22 @@ impl ClassroomClient {
         self.config.access_token.is_some()
     }
 
+    /// Get the configured access token, or a typed [`ClassroomError`] if
+    /// none is set. Every real-API method below checks
+    /// [`Self::is_authenticated`] first and returns early on `false`, so
+    /// this can never actually observe `None` in practice -- but routing
+    /// through a typed `Result` instead of `.expect(...)` keeps the
+    /// invariant honest rather than assumed, per the workspace's
+    /// no-`unwrap`/`expect`-in-production-paths policy.
+    fn access_token(&self) -> ClassroomResult<&str> {
+        self.config
+            .access_token
+            .as_deref()
+            .ok_or_else(|| ClassroomError::AuthFailed {
+                message: "Not authenticated".to_string(),
+            })
+    }
+
     /// Get authorization URL for OAuth flow
     #[must_use]
     pub fn get_auth_url(&self) -> String {
@@ -351,7 +367,9 @@ impl ClassroomClient {
             if let Some(expires_in) = token_response["expires_in"].as_u64() {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .expect("value should be present")
+                    .map_err(|e| ClassroomError::ApiError {
+                        message: format!("system clock error: {e}"),
+                    })?
                     .as_secs();
                 self.config.token_expiry = Some(now + expires_in);
             }
@@ -378,12 +396,7 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(
-                    self.config
-                        .access_token
-                        .as_ref()
-                        .expect("value should be present"),
-                )
+                .bearer_auth(self.access_token()?)
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -425,12 +438,7 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(
-                    self.config
-                        .access_token
-                        .as_ref()
-                        .expect("value should be present"),
-                )
+                .bearer_auth(self.access_token()?)
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -471,12 +479,7 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(
-                    self.config
-                        .access_token
-                        .as_ref()
-                        .expect("value should be present"),
-                )
+                .bearer_auth(self.access_token()?)
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -527,12 +530,7 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .post(&url)
-                .bearer_auth(
-                    self.config
-                        .access_token
-                        .as_ref()
-                        .expect("value should be present"),
-                )
+                .bearer_auth(self.access_token()?)
                 .json(&course_work)
                 .send()
                 .await
@@ -577,12 +575,7 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .patch(&url)
-                .bearer_auth(
-                    self.config
-                        .access_token
-                        .as_ref()
-                        .expect("value should be present"),
-                )
+                .bearer_auth(self.access_token()?)
                 .json(&serde_json::json!({
                     "draftGrade": grade.grade,
                 }))
@@ -605,12 +598,7 @@ impl ClassroomClient {
                 let response = self
                     .http_client
                     .post(&comment_url)
-                    .bearer_auth(
-                        self.config
-                            .access_token
-                            .as_ref()
-                            .expect("value should be present"),
-                    )
+                    .bearer_auth(self.access_token()?)
                     .json(&serde_json::json!({ "text": comment }))
                     .send()
                     .await
@@ -654,12 +642,7 @@ impl ClassroomClient {
             let response = self
                 .http_client
                 .get(&url)
-                .bearer_auth(
-                    self.config
-                        .access_token
-                        .as_ref()
-                        .expect("value should be present"),
-                )
+                .bearer_auth(self.access_token()?)
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
@@ -1031,8 +1014,12 @@ mod tests {
         assert_eq!(course.state, CourseState::Active);
         assert_eq!(course.owner_id, "teacher-42");
         assert_eq!(course.enrollment_code.as_deref(), Some("abc123"));
-        // 2024-01-15T09:30:00Z
-        assert_eq!(course.creation_time, 1_705_310_400);
+        // 2024-01-15T09:30:00Z (verified independently: `date -u -d
+        // 2024-01-15T09:30:00Z +%s`; the previous constant here,
+        // 1_705_310_400, was off by 600s -- it decodes to 09:20:00Z, not
+        // 09:30:00Z -- a real bug in the test's expected value, not in
+        // `parse_required_timestamp`).
+        assert_eq!(course.creation_time, 1_705_311_000);
 
         // A different response must parse into genuinely different data,
         // proving this is real parsing rather than a fixed return value.

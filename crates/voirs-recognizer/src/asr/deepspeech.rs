@@ -53,11 +53,10 @@ impl DeepSpeechModelFormat {
 
 /// Read the leading bytes of a file, returning fewer than `max` bytes at EOF.
 fn read_file_header(path: &Path, max: usize) -> Result<Vec<u8>, RecognitionError> {
-    let mut file =
-        std::fs::File::open(path).map_err(|e| RecognitionError::ModelLoadError {
-            message: format!("Failed to open {}: {e}", path.display()),
-            source: Some(Box::new(e)),
-        })?;
+    let mut file = std::fs::File::open(path).map_err(|e| RecognitionError::ModelLoadError {
+        message: format!("Failed to open {}: {e}", path.display()),
+        source: Some(Box::new(e)),
+    })?;
     let mut buf = vec![0_u8; max];
     let mut filled = 0;
     while filled < max {
@@ -300,7 +299,10 @@ impl DeepSpeechModel {
                         source: Some(Box::new(e)),
                     })?
                     .len();
-                tracing::info!("Inspected DeepSpeech scorer {} ({size} bytes)", path.display());
+                tracing::info!(
+                    "Inspected DeepSpeech scorer {} ({size} bytes)",
+                    path.display()
+                );
                 Some(size)
             }
             None => None,
@@ -504,10 +506,7 @@ impl ASRModel for DeepSpeechModel {
         _config: Option<&ASRConfig>,
     ) -> RecognitionResult<TranscriptStream> {
         self.ensure_loaded().await?;
-        Err(
-            Self::unsupported_backend_error(self.state.read().await.model_format)
-                .into(),
-        )
+        Err(Self::unsupported_backend_error(self.state.read().await.model_format).into())
     }
 
     fn supported_languages(&self) -> Vec<LanguageCode> {
@@ -644,7 +643,10 @@ mod tests {
                     feature.contains("DeepSpeech inference"),
                     "unexpected error text: {feature}"
                 );
-                assert!(feature.contains("TensorFlow Lite"), "format should be reported: {feature}");
+                assert!(
+                    feature.contains("TensorFlow Lite"),
+                    "format should be reported: {feature}"
+                );
             }
             other => panic!("expected FeatureNotSupported, got {other:?}"),
         }
@@ -715,7 +717,10 @@ mod tests {
         let (guard, model) = tflite_model().await;
         let metadata = model.metadata();
 
-        assert!(metadata.wer_benchmarks.is_empty(), "WER must not be fabricated");
+        assert!(
+            metadata.wer_benchmarks.is_empty(),
+            "WER must not be fabricated"
+        );
         assert!(metadata.supported_features.is_empty());
         assert!(!model.supports_feature(ASRFeature::WordTimestamps));
         assert!(!model.supports_feature(ASRFeature::StreamingInference));
@@ -757,10 +762,16 @@ mod tests {
         use futures::stream;
 
         let (_guard, model) = tflite_model().await;
-        let audio_stream: AudioStream =
-            Box::pin(stream::iter(vec![AudioBuffer::new(vec![0.0; 160], 16000, 1)]));
+        let audio_stream: AudioStream = Box::pin(stream::iter(vec![AudioBuffer::new(
+            vec![0.0; 160],
+            16000,
+            1,
+        )]));
 
-        assert!(model.transcribe_streaming(audio_stream, None).await.is_err());
+        assert!(model
+            .transcribe_streaming(audio_stream, None)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -785,6 +796,9 @@ mod tests {
         let stats = model.get_stats().await;
         assert_eq!(stats.inference_count, 0);
         assert_eq!(stats.total_inference_time, Duration::ZERO);
-        assert!(stats.load_time.is_some(), "file inspection time must be recorded");
+        assert!(
+            stats.load_time.is_some(),
+            "file inspection time must be recorded"
+        );
     }
 }

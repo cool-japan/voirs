@@ -76,6 +76,25 @@ impl WhisperAssets {
     }
 }
 
+/// Environment variable naming a directory of real Whisper assets.
+pub const ASSETS_ENV_VAR: &str = "VOIRS_WHISPER_ASSETS";
+
+/// Discover real assets from the [`ASSETS_ENV_VAR`] environment variable.
+///
+/// The variable must name a directory laid out like a Hugging Face checkout, holding
+/// `model.safetensors` and `vocab.json`. Returns `None` when the variable is unset or
+/// the directory does not really contain both files, so callers can fall back to their
+/// own configuration instead of failing on a typo.
+///
+/// This is also how the crate's model-dependent tests opt in to running against a real
+/// checkpoint; without it they assert the fail-closed behaviour instead.
+#[must_use]
+pub fn assets_from_env() -> Option<WhisperAssets> {
+    let dir = std::env::var_os(ASSETS_ENV_VAR)?;
+    let assets = WhisperAssets::from_dir(dir);
+    assets.validate().ok().map(|()| assets)
+}
+
 /// The error returned by every constructor that needs assets it was not given.
 #[must_use]
 pub fn missing_assets_error(model_size: &str) -> RecognitionError {
@@ -238,8 +257,14 @@ mod tests {
         let err = assets.validate().unwrap_err();
         match err {
             RecognitionError::ModelLoadError { message, .. } => {
-                assert!(message.contains("model.safetensors"), "unexpected: {message}");
-                assert!(message.contains("does not download"), "unexpected: {message}");
+                assert!(
+                    message.contains("model.safetensors"),
+                    "unexpected: {message}"
+                );
+                assert!(
+                    message.contains("does not download"),
+                    "unexpected: {message}"
+                );
             }
             other => panic!("expected ModelLoadError, got {other:?}"),
         }

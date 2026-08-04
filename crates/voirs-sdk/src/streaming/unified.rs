@@ -3,14 +3,27 @@
 //! This module provides a unified streaming interface that can handle multiple
 //! advanced features (emotion, cloning, conversion, singing, spatial audio) in
 //! a coordinated streaming pipeline.
+//!
+//! [`UnifiedStreamingPipeline`] does not synthesize audio itself: it is a
+//! post-processing coordinator that drives a real [`StreamingPipeline`]
+//! (G2P → acoustic model → vocoder) and then runs each resulting audio chunk
+//! through the [`FeatureStreamingProcessor`]s configured for the request.
+//! Without an attached [`StreamingPipeline`] (see
+//! [`UnifiedStreamingPipeline::with_synthesis_pipeline`]),
+//! [`UnifiedStreamingSynthesis::start_unified_streaming`] fails closed with
+//! [`VoirsError::FeatureUnavailable`] rather than returning a stream that
+//! silently yields no audio.
 
+use super::pipeline::StreamingPipeline;
 use crate::types::{AdvancedFeature, LanguageCode, SynthesisConfig};
 use crate::{AudioBuffer, VoirsError, VoirsResult};
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Unified streaming synthesis request that can handle multiple features
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,7 +164,7 @@ pub struct QualityMetrics {
 }
 
 /// Performance metrics for streaming
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PerformanceMetrics {
     /// Processing time for this chunk in milliseconds
     pub processing_time_ms: u32,
@@ -280,18 +293,27 @@ pub struct ResourceUtilization {
 
 /// Unified streaming pipeline implementation
 pub struct UnifiedStreamingPipeline {
-    /// Feature processors
-    feature_processors: HashMap<AdvancedFeature, Box<dyn FeatureStreamingProcessor>>,
-    /// Current streaming state
-    streaming_state: Option<StreamingState>,
+    /// Feature processors, shared (`Arc`) so a request's active subset can be
+    /// cloned into the `'static` generator stream returned by
+    /// `start_unified_streaming`.
+    feature_processors: HashMap<AdvancedFeature, Arc<dyn FeatureStreamingProcessor>>,
+    /// Current streaming state, behind a lock so it can be updated from
+    /// inside the returned stream (which outlives the `&self` borrow of
+    /// `start_unified_streaming`) and observed by `get_streaming_status`.
+    streaming_state: Arc<RwLock<Option<StreamingState>>>,
     /// Performance monitor
-    performance_monitor: Box<dyn StreamingPerformanceMonitor>,
+    performance_monitor: Arc<dyn StreamingPerformanceMonitor>,
+    /// Real synthesis backend (G2P + acoustic model + vocoder) used to
+    /// actually generate audio for `start_unified_streaming` to post-process.
+    /// `None` until [`Self::with_synthesis_pipeline`] is called.
+    synthesis_pipeline: Option<Arc<StreamingPipeline>>,
 }
 
 /// Internal streaming state
 #[derive(Debug)]
 struct StreamingState {
     /// Current request configuration
+    #[allow(dead_code)] // Retained for introspection/debugging even though no field reads it yet.
     request: UnifiedStreamingRequest,
     /// Chunk counter
     chunk_counter: u32,
@@ -299,6 +321,10 @@ struct StreamingState {
     start_time: std::time::Instant,
     /// Performance metrics history
     metrics_history: Vec<PerformanceMetrics>,
+    /// Set once the underlying synthesis stream has been fully drained (or
+    /// failed). `total_chunks_processed`/`metrics_history` remain queryable
+    /// after completion; only `is_active` flips to `false`.
+    finished: bool,
 }
 
 /// Feature-specific streaming processor trait
@@ -448,20 +474,34 @@ impl Default for UnifiedStreamingPipeline {
 }
 
 impl UnifiedStreamingPipeline {
-    /// Create a new unified streaming pipeline
+    /// Create a new unified streaming pipeline.
+    ///
+    /// No synthesis backend is attached yet — call
+    /// [`Self::with_synthesis_pipeline`] before
+    /// [`UnifiedStreamingSynthesis::start_unified_streaming`], or that call
+    /// will fail closed with [`VoirsError::FeatureUnavailable`].
     pub fn new() -> Self {
         Self {
             feature_processors: HashMap::new(),
-            streaming_state: None,
-            performance_monitor: Box::new(DefaultStreamingPerformanceMonitor::new()),
+            streaming_state: Arc::new(RwLock::new(None)),
+            performance_monitor: Arc::new(DefaultStreamingPerformanceMonitor::new()),
+            synthesis_pipeline: None,
         }
+    }
+
+    /// Attach the real G2P/acoustic-model/vocoder-backed [`StreamingPipeline`]
+    /// that actually produces the audio chunks this pipeline post-processes.
+    #[must_use]
+    pub fn with_synthesis_pipeline(mut self, pipeline: Arc<StreamingPipeline>) -> Self {
+        self.synthesis_pipeline = Some(pipeline);
+        self
     }
 
     /// Add a feature processor to the pipeline
     pub fn add_feature_processor(
         &mut self,
         feature: AdvancedFeature,
-        processor: Box<dyn FeatureStreamingProcessor>,
+        processor: Arc<dyn FeatureStreamingProcessor>,
     ) {
         self.feature_processors.insert(feature, processor);
     }
@@ -473,7 +513,7 @@ impl UnifiedStreamingPipeline {
 
     /// Get supported features
     pub fn supported_features(&self) -> Vec<AdvancedFeature> {
-        self.feature_processors.keys().cloned().collect()
+        self.feature_processors.keys().copied().collect()
     }
 }
 
@@ -486,23 +526,158 @@ impl UnifiedStreamingSynthesis for UnifiedStreamingPipeline {
         // Validate request
         self.validate_request(&request)?;
 
-        // Initialize streaming state
-        let streaming_state = StreamingState {
-            request: request.clone(),
+        let Some(synthesis_pipeline) = self.synthesis_pipeline.clone() else {
+            return Err(VoirsError::FeatureUnavailable {
+                feature: "unified_streaming".to_string(),
+                reason: "no synthesis backend configured; call \
+                    UnifiedStreamingPipeline::with_synthesis_pipeline(..) before streaming"
+                    .to_string(),
+            });
+        };
+
+        // Resolve the concrete processors needed for this request up front so the
+        // generator below only needs to hold owned, 'static handles (it outlives
+        // this `&self` call).
+        let active_processors: Vec<(
+            AdvancedFeature,
+            FeatureStreamingConfig,
+            Arc<dyn FeatureStreamingProcessor>,
+        )> = request
+            .feature_configs
+            .iter()
+            .filter_map(|(feature, config)| {
+                self.feature_processors
+                    .get(feature)
+                    .map(|processor| (*feature, config.clone(), Arc::clone(processor)))
+            })
+            .collect();
+
+        let streaming_state = Arc::clone(&self.streaming_state);
+        let performance_monitor = Arc::clone(&self.performance_monitor);
+        let synthesis_config = request.synthesis_config.clone();
+        let text = request.text.clone();
+
+        *streaming_state.write().await = Some(StreamingState {
+            request,
             chunk_counter: 0,
             start_time: std::time::Instant::now(),
             metrics_history: Vec::new(),
-        };
+            finished: false,
+        });
 
-        // Create the streaming implementation
-        let stream = UnifiedStreamingImpl::new(request).await?;
+        // Real synthesis: drives G2P -> acoustic model -> vocoder over `text`.
+        let base_stream = synthesis_pipeline
+            .synthesize_stream_with_config(&text, &synthesis_config)
+            .await?;
+
+        let stream = async_stream::stream! {
+            futures::pin_mut!(base_stream);
+            let stream_start = std::time::Instant::now();
+
+            while let Some(chunk_result) = base_stream.next().await {
+                let chunk = match chunk_result {
+                    Ok(chunk) => chunk,
+                    Err(e) => {
+                        yield Err(e);
+                        continue;
+                    }
+                };
+
+                let chunk_wall_start = std::time::Instant::now();
+                let mut audio = chunk.audio.clone();
+                let mut feature_results = HashMap::new();
+
+                // Real per-chunk memory footprint of the audio buffer itself
+                // (varies with actual chunk size - never a fabricated constant).
+                let audio_bytes_mb = std::mem::size_of_val(audio.samples()) as u32 / (1024 * 1024);
+
+                let mut metadata = StreamingMetadata {
+                    chunk_id: chunk.chunk_id as u32,
+                    timestamp_ms: stream_start.elapsed().as_millis() as u64,
+                    latency_ms: chunk.processing_time.as_millis() as u32,
+                    quality_metrics: QualityMetrics {
+                        snr_db: 0.0,
+                        thd_percent: 0.0,
+                        spectral_centroid: 0.0,
+                        // Real, per-chunk confidence derived from actual synthesis
+                        // timing/phoneme-density heuristics (AudioChunk::new).
+                        confidence_score: chunk.metadata.confidence_score,
+                    },
+                    performance_metrics: PerformanceMetrics {
+                        processing_time_ms: chunk.processing_time.as_millis() as u32,
+                        memory_usage_mb: audio_bytes_mb,
+                        cpu_utilization: 0.0,
+                        gpu_utilization: None,
+                    },
+                };
+
+                let mut processing_failed = false;
+                for (feature, config, processor) in &active_processors {
+                    match processor.process_chunk(&audio, config, &metadata).await {
+                        Ok((processed_audio, result)) => {
+                            audio = processed_audio;
+                            feature_results.insert(*feature, result);
+                        }
+                        Err(e) => {
+                            yield Err(e);
+                            processing_failed = true;
+                            break;
+                        }
+                    }
+                }
+                if processing_failed {
+                    continue;
+                }
+
+                // Fold in the real wall-clock time spent running feature processors
+                // on top of the base synthesis latency already recorded above.
+                metadata.latency_ms = metadata
+                    .latency_ms
+                    .saturating_add(chunk_wall_start.elapsed().as_millis() as u32);
+
+                performance_monitor
+                    .record_chunk_metrics(&metadata.performance_metrics)
+                    .await;
+
+                {
+                    let mut state_guard = streaming_state.write().await;
+                    if let Some(state) = state_guard.as_mut() {
+                        state.chunk_counter += 1;
+                        state.metrics_history.push(metadata.performance_metrics.clone());
+                    }
+                }
+
+                yield Ok(UnifiedStreamingResult {
+                    audio,
+                    metadata,
+                    feature_results,
+                });
+            }
+
+            // The base stream is exhausted (or errored out permanently): mark the
+            // session finished so `get_streaming_status` honestly reports
+            // `is_active: false` while still exposing the real final counters.
+            if let Some(state) = streaming_state.write().await.as_mut() {
+                state.finished = true;
+            }
+        };
 
         Ok(Box::pin(stream))
     }
 
-    async fn update_streaming_parameters(&self, _params: StreamingParameters) -> VoirsResult<()> {
-        // Implementation would update streaming parameters
-        Ok(())
+    async fn update_streaming_parameters(&self, params: StreamingParameters) -> VoirsResult<()> {
+        let mut state_guard = self.streaming_state.write().await;
+        match state_guard.as_mut() {
+            Some(state) => {
+                state.request.streaming_params = params;
+                Ok(())
+            }
+            None => Err(VoirsError::InvalidStateTransition {
+                from: "idle".to_string(),
+                to: "streaming".to_string(),
+                reason: "no active streaming session to update parameters for".to_string(),
+            }),
+        }
     }
 
     async fn update_feature_config(
@@ -517,24 +692,60 @@ impl UnifiedStreamingSynthesis for UnifiedStreamingPipeline {
     }
 
     async fn stop_streaming(&self) -> VoirsResult<()> {
-        // Implementation would stop streaming
+        *self.streaming_state.write().await = None;
         Ok(())
     }
 
     async fn get_streaming_status(&self) -> VoirsResult<StreamingStatus> {
-        // Return current streaming status
-        Ok(StreamingStatus {
-            is_active: self.streaming_state.is_some(),
-            current_chunk: 0,
-            total_chunks_processed: 0,
-            avg_latency_ms: 0.0,
-            active_features: self.supported_features(),
-            resource_utilization: ResourceUtilization {
+        let state_guard = self.streaming_state.read().await;
+        let (is_active, current_chunk, total_chunks_processed, avg_latency_ms) =
+            match state_guard.as_ref() {
+                Some(state) => {
+                    let avg_latency_ms = if state.metrics_history.is_empty() {
+                        0.0
+                    } else {
+                        state
+                            .metrics_history
+                            .iter()
+                            .map(|m| m.processing_time_ms as f32)
+                            .sum::<f32>()
+                            / state.metrics_history.len() as f32
+                    };
+                    (
+                        !state.finished,
+                        state.chunk_counter,
+                        state.chunk_counter,
+                        avg_latency_ms,
+                    )
+                }
+                None => (false, 0, 0, 0.0),
+            };
+        drop(state_guard);
+
+        let resource_utilization = self
+            .performance_monitor
+            .get_average_performance(60)
+            .await
+            .map(|perf| ResourceUtilization {
+                cpu_percent: perf.cpu_utilization * 100.0,
+                memory_mb: perf.memory_usage_mb,
+                gpu_percent: perf.gpu_utilization.map(|g| g * 100.0),
+                network_mbps: 0.0,
+            })
+            .unwrap_or(ResourceUtilization {
                 cpu_percent: 0.0,
                 memory_mb: 0,
                 gpu_percent: None,
                 network_mbps: 0.0,
-            },
+            });
+
+        Ok(StreamingStatus {
+            is_active,
+            current_chunk,
+            total_chunks_processed,
+            avg_latency_ms,
+            active_features: self.supported_features(),
+            resource_utilization,
         })
     }
 }
@@ -566,32 +777,13 @@ impl UnifiedStreamingPipeline {
     }
 }
 
-/// Streaming implementation
-struct UnifiedStreamingImpl {
-    // Implementation details would go here
-}
-
-impl UnifiedStreamingImpl {
-    async fn new(_request: UnifiedStreamingRequest) -> VoirsResult<Self> {
-        Ok(Self {})
-    }
-}
-
-impl Stream for UnifiedStreamingImpl {
-    type Item = VoirsResult<UnifiedStreamingResult>;
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        // Implementation would handle actual streaming
-        std::task::Poll::Ready(None)
-    }
-}
-
 /// Default performance monitor implementation
+///
+/// Every method here computes real results from `metrics_history` (populated
+/// by genuine [`Self::record_chunk_metrics`] calls during streaming) — never a
+/// fabricated constant.
 struct DefaultStreamingPerformanceMonitor {
-    metrics_history: std::sync::Arc<std::sync::Mutex<Vec<PerformanceMetrics>>>,
+    metrics_history: std::sync::Arc<std::sync::Mutex<Vec<(std::time::Instant, PerformanceMetrics)>>>,
 }
 
 impl DefaultStreamingPerformanceMonitor {
@@ -606,7 +798,7 @@ impl DefaultStreamingPerformanceMonitor {
 impl StreamingPerformanceMonitor for DefaultStreamingPerformanceMonitor {
     async fn record_chunk_metrics(&self, metrics: &PerformanceMetrics) {
         if let Ok(mut history) = self.metrics_history.lock() {
-            history.push(metrics.clone());
+            history.push((std::time::Instant::now(), metrics.clone()));
             // Keep only last 1000 metrics
             if history.len() > 1000 {
                 history.remove(0);
@@ -616,36 +808,133 @@ impl StreamingPerformanceMonitor for DefaultStreamingPerformanceMonitor {
 
     async fn get_average_performance(
         &self,
-        _window_seconds: u32,
+        window_seconds: u32,
     ) -> VoirsResult<PerformanceMetrics> {
-        // Calculate average from history
-        Ok(PerformanceMetrics::default())
+        let history = self
+            .metrics_history
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let cutoff = std::time::Duration::from_secs(window_seconds as u64);
+        let now = std::time::Instant::now();
+        let windowed: Vec<&PerformanceMetrics> = history
+            .iter()
+            .filter(|(recorded_at, _)| now.duration_since(*recorded_at) <= cutoff)
+            .map(|(_, metrics)| metrics)
+            .collect();
+
+        if windowed.is_empty() {
+            return Ok(PerformanceMetrics::default());
+        }
+
+        let count = windowed.len() as f32;
+        let processing_time_ms =
+            (windowed.iter().map(|m| m.processing_time_ms as f32).sum::<f32>() / count) as u32;
+        let memory_usage_mb =
+            (windowed.iter().map(|m| m.memory_usage_mb as f32).sum::<f32>() / count) as u32;
+        let cpu_utilization =
+            windowed.iter().map(|m| m.cpu_utilization).sum::<f32>() / count;
+        let gpu_samples: Vec<f32> = windowed.iter().filter_map(|m| m.gpu_utilization).collect();
+        let gpu_utilization = if gpu_samples.is_empty() {
+            None
+        } else {
+            Some(gpu_samples.iter().sum::<f32>() / gpu_samples.len() as f32)
+        };
+
+        Ok(PerformanceMetrics {
+            processing_time_ms,
+            memory_usage_mb,
+            cpu_utilization,
+            gpu_utilization,
+        })
     }
 
-    async fn check_performance_limits(&self, _limits: &PerformanceLimits) -> VoirsResult<bool> {
-        // Check if current performance is within limits
-        Ok(true)
+    async fn check_performance_limits(&self, limits: &PerformanceLimits) -> VoirsResult<bool> {
+        let history = self
+            .metrics_history
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let within_limits = history.iter().all(|(_, m)| {
+            m.processing_time_ms <= limits.max_latency_ms
+                && m.cpu_utilization <= limits.max_cpu_utilization
+                && m.memory_usage_mb <= limits.max_memory_mb
+        });
+        Ok(within_limits)
     }
 
     async fn get_performance_recommendations(&self) -> Vec<PerformanceRecommendation> {
-        // Generate performance recommendations
-        vec![]
+        let history = self
+            .metrics_history
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        if history.is_empty() {
+            return Vec::new();
+        }
+
+        let count = history.len() as f32;
+        let avg_latency_ms =
+            history.iter().map(|(_, m)| m.processing_time_ms as f32).sum::<f32>() / count;
+        let avg_cpu = history.iter().map(|(_, m)| m.cpu_utilization).sum::<f32>() / count;
+
+        let mut recommendations = Vec::new();
+        if avg_latency_ms > 200.0 {
+            recommendations.push(PerformanceRecommendation {
+                recommendation_type: RecommendationType::ReduceChunkSize,
+                description: format!(
+                    "Average chunk processing latency is {avg_latency_ms:.1}ms across {} \
+                     recorded chunks; smaller chunks may reduce end-to-end latency",
+                    history.len()
+                ),
+                expected_impact: "Lower per-chunk latency".to_string(),
+                priority: RecommendationPriority::Medium,
+            });
+        }
+        if avg_cpu > 0.9 {
+            recommendations.push(PerformanceRecommendation {
+                recommendation_type: RecommendationType::UseGpuAcceleration,
+                description: format!(
+                    "Average CPU utilization is {:.0}%; consider GPU acceleration or disabling \
+                     non-essential features",
+                    avg_cpu * 100.0
+                ),
+                expected_impact: "Reduced CPU load".to_string(),
+                priority: RecommendationPriority::High,
+            });
+        }
+        recommendations
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::{DummyAcoustic, DummyG2p, DummyVocoder};
+    use crate::streaming::StreamingConfig;
 
-    #[test]
-    fn test_unified_streaming_request_creation() {
-        let request = UnifiedStreamingRequest {
-            text: "Hello, world!".to_string(),
+    fn test_synthesis_pipeline() -> Arc<StreamingPipeline> {
+        Arc::new(StreamingPipeline::new(
+            Arc::new(DummyG2p::new()),
+            Arc::new(DummyAcoustic::new()),
+            Arc::new(DummyVocoder::new()),
+            StreamingConfig::default(),
+        ))
+    }
+
+    fn test_request(text: &str) -> UnifiedStreamingRequest {
+        UnifiedStreamingRequest {
+            text: text.to_string(),
             language: LanguageCode::EnUs,
             synthesis_config: SynthesisConfig::default(),
             feature_configs: HashMap::new(),
             streaming_params: StreamingParameters::default(),
-        };
+        }
+    }
+
+    #[test]
+    fn test_unified_streaming_request_creation() {
+        let request = test_request("Hello, world!");
 
         assert_eq!(request.text, "Hello, world!");
         assert_eq!(request.language, LanguageCode::EnUs);
@@ -687,5 +976,166 @@ mod tests {
     fn test_unified_streaming_pipeline_creation() {
         let pipeline = UnifiedStreamingPipeline::new();
         assert!(pipeline.supported_features().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_start_unified_streaming_without_backend_fails_closed() {
+        // Direct regression test for the fabrication bug: without a synthesis
+        // backend attached, the old implementation returned `Ok` with a stream
+        // that silently yielded zero chunks. It must now fail closed instead.
+        let pipeline = UnifiedStreamingPipeline::new();
+        let result = pipeline.start_unified_streaming(test_request("Hello")).await;
+        match result {
+            Err(VoirsError::FeatureUnavailable { .. }) => {}
+            Err(other) => panic!("expected FeatureUnavailable, got {other:?}"),
+            Ok(_) => panic!("expected an error without a configured synthesis backend"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_unified_streaming_produces_real_nonempty_audio() {
+        let pipeline = UnifiedStreamingPipeline::new().with_synthesis_pipeline(test_synthesis_pipeline());
+
+        let mut stream = pipeline
+            .start_unified_streaming(test_request("Hello there, this is real synthesis."))
+            .await
+            .unwrap();
+
+        let mut chunk_count = 0;
+        let mut total_samples = 0usize;
+        while let Some(result) = stream.next().await {
+            let result = result.unwrap();
+            total_samples += result.audio.samples().len();
+            chunk_count += 1;
+        }
+
+        assert!(chunk_count > 0, "expected at least one real audio chunk");
+        assert!(total_samples > 0, "expected non-empty synthesized audio");
+    }
+
+    #[tokio::test]
+    async fn test_streaming_status_reflects_real_activity_then_completion() {
+        let pipeline = UnifiedStreamingPipeline::new().with_synthesis_pipeline(test_synthesis_pipeline());
+
+        // Before streaming starts, honestly idle.
+        let idle_status = pipeline.get_streaming_status().await.unwrap();
+        assert!(!idle_status.is_active);
+        assert_eq!(idle_status.total_chunks_processed, 0);
+
+        let mut stream = pipeline
+            .start_unified_streaming(test_request(
+                "This sentence is long enough to span multiple streaming chunks for a real test.",
+            ))
+            .await
+            .unwrap();
+
+        // Mid-stream: consume exactly one chunk, then check status without
+        // draining the rest.
+        let first = stream.next().await;
+        assert!(first.is_some());
+        let mid_status = pipeline.get_streaming_status().await.unwrap();
+        assert!(mid_status.is_active, "session must be active mid-stream");
+        assert!(mid_status.total_chunks_processed >= 1);
+
+        // Drain the rest.
+        let mut total_chunks = 1u32;
+        while let Some(result) = stream.next().await {
+            result.unwrap();
+            total_chunks += 1;
+        }
+
+        let final_status = pipeline.get_streaming_status().await.unwrap();
+        assert!(
+            !final_status.is_active,
+            "session must be inactive once the stream is exhausted"
+        );
+        assert_eq!(final_status.total_chunks_processed, total_chunks);
+        assert!(
+            final_status.avg_latency_ms >= 0.0,
+            "average latency must be a real (non-negative) measurement"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_average_performance_reflects_recorded_history_not_default() {
+        // Direct regression test: the old implementation ignored history entirely
+        // and always returned `PerformanceMetrics::default()`.
+        let monitor = DefaultStreamingPerformanceMonitor::new();
+
+        monitor
+            .record_chunk_metrics(&PerformanceMetrics {
+                processing_time_ms: 100,
+                memory_usage_mb: 10,
+                cpu_utilization: 0.5,
+                gpu_utilization: None,
+            })
+            .await;
+        monitor
+            .record_chunk_metrics(&PerformanceMetrics {
+                processing_time_ms: 300,
+                memory_usage_mb: 30,
+                cpu_utilization: 0.9,
+                gpu_utilization: None,
+            })
+            .await;
+
+        let avg = monitor.get_average_performance(3600).await.unwrap();
+        assert_eq!(avg.processing_time_ms, 200); // real mean of 100 and 300
+        assert_eq!(avg.memory_usage_mb, 20);
+        assert!((avg.cpu_utilization - 0.7).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn test_get_average_performance_window_excludes_old_samples() {
+        let monitor = DefaultStreamingPerformanceMonitor::new();
+        monitor
+            .record_chunk_metrics(&PerformanceMetrics {
+                processing_time_ms: 999,
+                memory_usage_mb: 999,
+                cpu_utilization: 1.0,
+                gpu_utilization: None,
+            })
+            .await;
+
+        // A zero-second window excludes every sample recorded strictly before "now".
+        let avg = monitor.get_average_performance(0).await.unwrap();
+        assert_eq!(avg, PerformanceMetrics::default());
+    }
+
+    #[tokio::test]
+    async fn test_check_performance_limits_detects_real_violation() {
+        // Direct regression test: the old implementation always returned `Ok(true)`
+        // regardless of the limits argument.
+        let monitor = DefaultStreamingPerformanceMonitor::new();
+        monitor
+            .record_chunk_metrics(&PerformanceMetrics {
+                processing_time_ms: 500,
+                memory_usage_mb: 50,
+                cpu_utilization: 0.95,
+                gpu_utilization: None,
+            })
+            .await;
+
+        let generous_limits = PerformanceLimits {
+            max_latency_ms: 1000,
+            max_cpu_utilization: 1.0,
+            max_memory_mb: 100,
+            min_quality_threshold: 0.0,
+        };
+        assert!(monitor
+            .check_performance_limits(&generous_limits)
+            .await
+            .unwrap());
+
+        let strict_limits = PerformanceLimits {
+            max_latency_ms: 10,
+            max_cpu_utilization: 0.1,
+            max_memory_mb: 1,
+            min_quality_threshold: 0.0,
+        };
+        assert!(!monitor
+            .check_performance_limits(&strict_limits)
+            .await
+            .unwrap());
     }
 }

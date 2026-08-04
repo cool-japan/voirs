@@ -10,7 +10,7 @@
 //! installed or when a run fails — nothing is ever simulated or substituted.
 
 use crate::RecognitionError;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
@@ -142,30 +142,8 @@ impl MfaCli {
     /// Returns [`RecognitionError::PhonemeRecognitionError`] when the aligner exits with
     /// a failure status, quoting its real stderr.
     pub fn align(&self, request: &AlignRequest<'_>) -> Result<(), RecognitionError> {
-        let jobs = request.num_jobs.max(1).to_string();
-        let beam = format_finite(request.beam_width, 10.0);
-        let retry_beam = format_finite(request.retry_beam, 40.0);
-
-        let mut args: Vec<&OsStr> = vec![
-            OsStr::new("align"),
-            OsStr::new("--clean"),
-            OsStr::new("--no_use_mp"),
-            OsStr::new("--num_jobs"),
-            OsStr::new(jobs.as_str()),
-            OsStr::new("--beam"),
-            OsStr::new(beam.as_str()),
-            OsStr::new("--retry_beam"),
-            OsStr::new(retry_beam.as_str()),
-            OsStr::new("--output_format"),
-            OsStr::new("long_textgrid"),
-        ];
-        if !request.cleanup {
-            args.push(OsStr::new("--debug"));
-        }
-        args.push(request.corpus_dir.as_os_str());
-        args.push(request.dictionary.as_ref());
-        args.push(request.acoustic_model.as_ref());
-        args.push(request.output_dir.as_os_str());
+        let owned = align_args(request);
+        let args: Vec<&OsStr> = owned.iter().map(OsString::as_os_str).collect();
 
         let output = self.spawn(&args).map_err(|e| e.into_alignment_error())?;
         if !output.status.success() {
@@ -288,6 +266,32 @@ impl SpawnError {
             source: Some(Box::new(self.source)),
         }
     }
+}
+
+/// Build the exact argument vector for one `mfa align` invocation.
+///
+/// Only long-standing MFA 2.x `align` flags are emitted, and every one of them carries a
+/// value the caller really configured. The output format is left at MFA's default, which
+/// is the `TextGrid` this crate parses.
+#[must_use]
+pub fn align_args(request: &AlignRequest<'_>) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        OsString::from("align"),
+        OsString::from("--num_jobs"),
+        OsString::from(request.num_jobs.max(1).to_string()),
+        OsString::from("--beam"),
+        OsString::from(format_finite(request.beam_width, 10.0)),
+        OsString::from("--retry_beam"),
+        OsString::from(format_finite(request.retry_beam, 40.0)),
+    ];
+    if request.cleanup {
+        args.push(OsString::from("--clean"));
+    }
+    args.push(request.corpus_dir.as_os_str().to_os_string());
+    args.push(request.dictionary.to_os_string());
+    args.push(request.acoustic_model.to_os_string());
+    args.push(request.output_dir.as_os_str().to_os_string());
+    args
 }
 
 /// The typed error every entry point returns when MFA is simply not installed.
@@ -439,6 +443,68 @@ Use `mfa model download acoustic <name>` to install more.
         assert_eq!(format_finite(-1.0, 10.0), "10");
         assert_eq!(format_finite(0.0, 40.0), "40");
         assert_eq!(format_finite(12.4, 10.0), "12");
+    }
+
+    /// Every configured value must really reach the command line — a config field that
+    /// silently does nothing is indistinguishable from a fabricated one.
+    #[test]
+    fn align_arguments_carry_every_configured_value() {
+        let corpus = Path::new("/tmp/corpus");
+        let output = Path::new("/tmp/aligned");
+        let dictionary = OsString::from("english_us_arpa");
+        let acoustic = OsString::from("english_mfa");
+
+        let rendered = |cleanup: bool| -> Vec<String> {
+            align_args(&AlignRequest {
+                corpus_dir: corpus,
+                dictionary: &dictionary,
+                acoustic_model: &acoustic,
+                output_dir: output,
+                num_jobs: 7,
+                beam_width: 18.0,
+                retry_beam: 55.0,
+                cleanup,
+            })
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+        };
+
+        let args = rendered(true);
+        assert_eq!(args[0], "align");
+        // Each flag is immediately followed by the configured value.
+        for (flag, value) in [
+            ("--num_jobs", "7"),
+            ("--beam", "18"),
+            ("--retry_beam", "55"),
+        ] {
+            let index = args
+                .iter()
+                .position(|a| a == flag)
+                .unwrap_or_else(|| panic!("{flag} must be passed"));
+            assert_eq!(
+                args[index + 1],
+                value,
+                "{flag} must carry its configured value"
+            );
+        }
+        assert!(args.contains(&"--clean".to_string()));
+
+        // The four positional arguments come last, in MFA's documented order.
+        assert_eq!(
+            &args[args.len() - 4..],
+            [
+                "/tmp/corpus".to_string(),
+                "english_us_arpa".to_string(),
+                "english_mfa".to_string(),
+                "/tmp/aligned".to_string(),
+            ]
+        );
+
+        // cleanup=false really drops the flag rather than adding an unrelated one.
+        let without = rendered(false);
+        assert!(!without.contains(&"--clean".to_string()));
+        assert_eq!(without.len() + 1, args.len());
     }
 
     #[test]

@@ -4,15 +4,18 @@
 //! including benchmarking against reference datasets, cross-validation testing, and
 //! accuracy assessment across different language pairs and evaluation metrics.
 
-use crate::ground_truth_dataset::{GroundTruthDataset, GroundTruthManager, GroundTruthSample};
+use crate::ground_truth_dataset::{
+    GroundTruthDataset, GroundTruthManager, GroundTruthSample, ValidationStatus,
+};
 use crate::quality::cross_language_intelligibility::{
     CrossLanguageIntelligibilityConfig, CrossLanguageIntelligibilityEvaluator,
     CrossLanguageIntelligibilityResult, ProficiencyLevel,
 };
-use crate::statistical::correlation::CorrelationAnalyzer;
+use crate::statistical::correlation::{CorrelationAnalyzer, CorrelationResult};
 use crate::VoirsError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use statrs::distribution::{ContinuousCDF, StudentsT};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -237,12 +240,82 @@ pub struct ValidationPerformanceMetrics {
     pub language_pairs_tested: usize,
     /// Average processing time per sample (ms)
     pub avg_processing_time_ms: f64,
-    /// Memory usage during validation (MB)
-    pub peak_memory_usage_mb: f64,
+    /// Peak resident-set-size memory usage of this process during validation
+    /// (MB), read from `/proc/self/status` `VmHWM` on Linux. `None` on
+    /// platforms without a pure-Rust process-memory API available (macOS,
+    /// Windows, wasm) rather than a fabricated placeholder value — see
+    /// [`peak_rss_mb`].
+    pub peak_memory_usage_mb: Option<f64>,
     /// Throughput (samples per second)
     pub throughput_sps: f64,
-    /// Evaluation success rate
+    /// Fraction of the dataset's samples with [`ValidationStatus::Valid`]
+    /// (i.e. samples that actually passed ground-truth-dataset validation,
+    /// via [`GroundTruthManager::validate_dataset`]), not an assumption that
+    /// every evaluation succeeded.
     pub success_rate: f64,
+}
+
+/// Peak resident-set-size (RSS) memory usage of the current process, in
+/// megabytes.
+///
+/// Reads the Linux-specific `VmHWM` ("high water mark", i.e. the true peak,
+/// not just current usage) field from `/proc/self/status`. There is no
+/// portable pure-Rust standard-library API for process memory usage, and
+/// adding a native FFI-based crate (e.g. for `mach` on macOS or
+/// `GetProcessMemoryInfo` on Windows) would violate this workspace's
+/// pure-Rust policy, so non-Linux platforms honestly report `None` rather
+/// than a fabricated number.
+fn peak_rss_mb() -> Option<f64> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmHWM:") {
+                let kb: f64 = rest.trim().split_whitespace().next()?.parse().ok()?;
+                return Some(kb / 1024.0);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Statistical power of a one-sample, two-tailed t-test with `n` observations
+/// and standardized effect size `effect_size` (Cohen's d against the null
+/// hypothesis), against a significance level of `α = 0.05`.
+///
+/// Uses the same central-t-shifted-by-non-centrality-parameter approximation
+/// as [`crate::statistical::basic_tests::StatisticalAnalyzer::power_analysis_t_test`],
+/// but with the one-sample test's own degrees of freedom (`df = n - 1`) and
+/// non-centrality parameter (`ncp = d·√n`) rather than that function's
+/// *independent two-sample* `df = 2n - 2` / `ncp = d·√(n/2)`, so the power
+/// genuinely corresponds to the accuracy-vs-chance-level test computed
+/// alongside it in [`CrossLanguageValidator::perform_significance_testing`].
+fn one_sample_t_test_power(effect_size: f64, n: usize) -> f64 {
+    if n < 2 {
+        return 0.0;
+    }
+    let alpha = 0.05f64;
+    let df = (n - 1) as f64;
+    let ncp = effect_size * (n as f64).sqrt();
+
+    let critical_t = match StudentsT::new(0.0, 1.0, df) {
+        Ok(dist) => dist.inverse_cdf(1.0 - alpha / 2.0),
+        Err(_) => return 0.0,
+    };
+
+    // Two-sided power approximated by shifting the central t-distribution by
+    // the non-centrality parameter (same technique as `power_analysis_t_test`).
+    let shifted = |t: f64| match StudentsT::new(0.0, 1.0, df) {
+        Ok(dist) => dist.cdf(t),
+        Err(_) => 0.5,
+    };
+    let upper = 1.0 - shifted(critical_t - ncp);
+    let lower = shifted(-critical_t - ncp);
+    (upper + lower).clamp(0.0, 1.0)
 }
 
 /// Reference dataset benchmark
@@ -654,11 +727,32 @@ impl CrossLanguageValidator {
         })
     }
 
-    /// Validate correlation with human ratings
+    /// Validate correlation with human ratings, returning just the coefficient.
+    ///
+    /// See [`Self::human_correlation_full`] for the full result (p-value,
+    /// confidence interval, sample size), used by
+    /// [`Self::perform_significance_testing`].
     async fn validate_human_correlation(
         &self,
         dataset: &GroundTruthDataset,
     ) -> Result<f64, CrossLanguageValidationError> {
+        match self.human_correlation_full(dataset).await? {
+            Some(result) => Ok(result.coefficient as f64),
+            None => Ok(0.0),
+        }
+    }
+
+    /// Compute the real Pearson correlation between predicted and human
+    /// intelligibility scores across `dataset`'s samples, returning the full
+    /// [`CorrelationResult`] — including its genuinely computed `p_value` and
+    /// Fisher-z confidence interval (see
+    /// [`CorrelationAnalyzer::pearson_correlation`]), not fabricated
+    /// placeholders. Returns `Ok(None)` when the dataset has no samples at all
+    /// (nothing to correlate) rather than a fabricated zero-confidence result.
+    async fn human_correlation_full(
+        &self,
+        dataset: &GroundTruthDataset,
+    ) -> Result<Option<CorrelationResult>, CrossLanguageValidationError> {
         let mut predicted_scores = Vec::new();
         let mut human_scores = Vec::new();
 
@@ -675,7 +769,7 @@ impl CrossLanguageValidator {
         }
 
         if predicted_scores.is_empty() {
-            return Ok(0.0);
+            return Ok(None);
         }
 
         let predicted_scores_f32: Vec<f32> = predicted_scores.iter().map(|&x| x as f32).collect();
@@ -685,7 +779,7 @@ impl CrossLanguageValidator {
             .pearson_correlation(&predicted_scores_f32, &human_scores_f32)
             .map_err(|e| CrossLanguageValidationError::CrossValidationFailed(e.to_string()))?;
 
-        Ok(correlation_result.coefficient as f64)
+        Ok(Some(correlation_result))
     }
 
     /// Calculate accuracy by proficiency level
@@ -873,45 +967,77 @@ impl CrossLanguageValidator {
         accuracy_results: &HashMap<(LanguageCode, LanguageCode), f64>,
     ) -> Result<StatisticalSignificanceResults, CrossLanguageValidationError> {
         let accuracies: Vec<f64> = accuracy_results.values().cloned().collect();
+        let n = accuracies.len();
 
         // Calculate mean and standard deviation
-        let mean_accuracy = accuracies.iter().sum::<f64>() / accuracies.len() as f64;
+        let mean_accuracy = accuracies.iter().sum::<f64>() / n.max(1) as f64;
         let accuracy_variance = accuracies
             .iter()
             .map(|&x| (x - mean_accuracy).powi(2))
             .sum::<f64>()
-            / accuracies.len() as f64;
+            / n.max(1) as f64;
         let accuracy_std = accuracy_variance.sqrt();
 
         // Calculate confidence intervals (assuming normal distribution)
         let z_score = 1.96; // 95% confidence
-        let margin_of_error = z_score * accuracy_std / (accuracies.len() as f64).sqrt();
+        let margin_of_error = z_score * accuracy_std / (n.max(1) as f64).sqrt();
         let accuracy_confidence_interval = (
             mean_accuracy - margin_of_error,
             mean_accuracy + margin_of_error,
         );
 
-        // Calculate correlation statistics
-        let correlation = self.validate_human_correlation(dataset).await?;
-        let correlation_confidence_interval = (
-            correlation - 0.05, // Simplified
-            correlation + 0.05,
-        );
-
-        // Effect size (Cohen's d) - comparing against baseline accuracy of 0.5
+        // Effect size (Cohen's d) - comparing against chance-level accuracy of 0.5
         let baseline_accuracy = 0.5;
         let effect_size = (mean_accuracy - baseline_accuracy) / accuracy_std.max(0.001);
 
-        // Statistical power calculation (simplified)
-        let statistical_power = if mean_accuracy > self.config.min_accuracy_threshold {
-            0.8
+        // Real one-sample, two-tailed t-test of `mean_accuracy` against the
+        // chance-level baseline: t = (x̄ - μ₀) / (s / √n), df = n - 1, using
+        // `statrs`'s exact Student's-t CDF (mirrors the pattern already used in
+        // `statistical::basic_tests`). With fewer than 2 accuracy samples there
+        // is no variance to test against, so `p = 1.0` (no evidence of any
+        // effect) rather than a fabricated confident-looking constant.
+        let accuracy_p_value = if n >= 2 && accuracy_std > 1e-12 {
+            let df = (n - 1) as f64;
+            let standard_error = accuracy_std / (n as f64).sqrt();
+            let t_statistic = (mean_accuracy - baseline_accuracy) / standard_error;
+            match StudentsT::new(0.0, 1.0, df) {
+                Ok(dist) => (2.0 * (1.0 - dist.cdf(t_statistic.abs()))).clamp(0.0, 1.0),
+                Err(_) => 1.0,
+            }
         } else {
-            0.6
+            1.0
         };
 
+        // Real correlation statistics: `human_correlation_full` returns the
+        // actual `CorrelationResult` computed by `pearson_correlation`,
+        // including its own real t-test p-value and Fisher-z confidence
+        // interval — no separate approximation needed here.
+        let correlation_full = self.human_correlation_full(dataset).await?;
+        let (correlation_p_value, correlation_confidence_interval) = match &correlation_full {
+            Some(result) => (
+                f64::from(result.p_value),
+                (
+                    f64::from(result.confidence_interval.0),
+                    f64::from(result.confidence_interval.1),
+                ),
+            ),
+            // No samples to correlate at all: report maximal uncertainty
+            // rather than a fabricated tight interval around zero.
+            None => (1.0, (-1.0, 1.0)),
+        };
+
+        // Real statistical power for the *same* one-sample, two-tailed t-test
+        // used for `accuracy_p_value` above (df = n - 1, ncp = d·√n) — matching
+        // degrees of freedom and non-centrality definition to that test, not
+        // `StatisticalAnalyzer::power_analysis_t_test`'s independent *two*-sample
+        // model (df = 2n - 2, ncp = d·√(n/2)), which would silently answer a
+        // different question. Driven by the actual observed effect size and
+        // sample count rather than a threshold-based binary 0.8/0.6 guess.
+        let statistical_power = one_sample_t_test_power(effect_size, n);
+
         Ok(StatisticalSignificanceResults {
-            accuracy_p_value: 0.05,    // Placeholder
-            correlation_p_value: 0.05, // Placeholder
+            accuracy_p_value,
+            correlation_p_value,
             accuracy_confidence_interval,
             correlation_confidence_interval,
             effect_size,
@@ -928,10 +1054,26 @@ impl CrossLanguageValidator {
         let samples_validated = dataset.samples.len();
         let language_pairs_tested = self.config.language_pairs.len();
         let avg_processing_time_ms =
-            validation_duration.as_millis() as f64 / samples_validated as f64;
-        let peak_memory_usage_mb = 128.0; // Placeholder
-        let throughput_sps = samples_validated as f64 / validation_duration.as_secs_f64();
-        let success_rate = 1.0; // Assuming all evaluations succeeded
+            validation_duration.as_millis() as f64 / samples_validated.max(1) as f64;
+        let peak_memory_usage_mb = peak_rss_mb();
+        let throughput_sps = samples_validated as f64 / validation_duration.as_secs_f64().max(1e-9);
+
+        // Real success rate: the fraction of the dataset's samples that
+        // actually passed ground-truth validation
+        // (`GroundTruthManager::validate_dataset`), not an assumption that
+        // every evaluation succeeded. A sample that is still `Pending` (never
+        // validated) or `Invalid`/`NeedsReview` did not contribute usable
+        // ground truth to this validation run.
+        let success_rate = if samples_validated == 0 {
+            0.0
+        } else {
+            let valid = dataset
+                .samples
+                .iter()
+                .filter(|s| s.validation_status == ValidationStatus::Valid)
+                .count();
+            valid as f64 / samples_validated as f64
+        };
 
         Ok(ValidationPerformanceMetrics {
             samples_validated,
@@ -1086,5 +1228,210 @@ mod tests {
         assert_eq!(config.cross_validation_folds, 5);
         assert!(!config.language_pairs.is_empty());
         assert!(!config.proficiency_levels.is_empty());
+    }
+
+    /// `peak_rss_mb` must never fabricate a value on platforms without a real
+    /// pure-Rust reading available.
+    #[test]
+    fn test_peak_rss_mb_is_real_or_honestly_absent() {
+        let value = peak_rss_mb();
+        #[cfg(target_os = "linux")]
+        {
+            let mb = value.expect("Linux must report a real /proc/self/status VmHWM reading");
+            assert!(mb > 0.0 && mb.is_finite());
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            assert_eq!(
+                value, None,
+                "non-Linux platforms must not fabricate a memory reading"
+            );
+        }
+    }
+
+    fn make_sample(id: &str, status: ValidationStatus) -> GroundTruthSample {
+        GroundTruthSample {
+            id: id.to_string(),
+            audio_path: PathBuf::from(format!("/nonexistent/{id}.wav")),
+            reference_path: None,
+            transcript: "hello world".to_string(),
+            language: "enus".to_string(),
+            speaker_id: "spk1".to_string(),
+            sample_rate: 16_000,
+            duration: 1.0,
+            metadata: HashMap::new(),
+            annotations: Vec::new(),
+            validation_status: status,
+        }
+    }
+
+    fn make_test_dataset(samples: Vec<GroundTruthSample>) -> GroundTruthDataset {
+        let now = Utc::now();
+        GroundTruthDataset {
+            id: "test-dataset".to_string(),
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            description: String::new(),
+            created_at: now,
+            modified_at: now,
+            creator: String::new(),
+            license: String::new(),
+            languages: vec!["enus".to_string()],
+            sample_count: samples.len(),
+            total_duration: samples.iter().map(|s| s.duration).sum(),
+            domain: String::new(),
+            annotation_guidelines: None,
+            samples,
+            quality_metrics: crate::ground_truth_dataset::DatasetQualityMetrics {
+                overall_quality: 0.0,
+                annotation_consistency: 0.0,
+                inter_annotator_agreement: None,
+                audio_quality: 0.0,
+                metadata_completeness: 0.0,
+                validation_completion: 0.0,
+                quality_by_type: HashMap::new(),
+            },
+            tags: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// `success_rate` must be the real fraction of samples that passed
+    /// ground-truth validation, not a hardcoded 1.0 regardless of dataset
+    /// content.
+    #[tokio::test]
+    async fn test_success_rate_reflects_real_validation_status() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = CrossLanguageValidationConfig::default();
+        let validator = CrossLanguageValidator::new(config, temp_dir.path().to_path_buf())
+            .await
+            .unwrap();
+
+        let all_valid = make_test_dataset(vec![
+            make_sample("s1", ValidationStatus::Valid),
+            make_sample("s2", ValidationStatus::Valid),
+        ]);
+        let half_valid = make_test_dataset(vec![
+            make_sample("s1", ValidationStatus::Valid),
+            make_sample("s2", ValidationStatus::Valid),
+            make_sample("s3", ValidationStatus::Pending),
+            make_sample("s4", ValidationStatus::Invalid),
+        ]);
+
+        let all_valid_metrics = validator
+            .calculate_performance_metrics(&all_valid, std::time::Duration::from_millis(50))
+            .await
+            .unwrap();
+        let half_valid_metrics = validator
+            .calculate_performance_metrics(&half_valid, std::time::Duration::from_millis(50))
+            .await
+            .unwrap();
+
+        assert!((all_valid_metrics.success_rate - 1.0).abs() < 1e-9);
+        assert!((half_valid_metrics.success_rate - 0.5).abs() < 1e-9);
+        assert_ne!(
+            all_valid_metrics.success_rate, half_valid_metrics.success_rate,
+            "success_rate must depend on the dataset's actual validation_status values"
+        );
+    }
+
+    /// `perform_significance_testing`'s p-value must be a real statistic that
+    /// responds to the actual accuracy distribution: a set of accuracies tightly
+    /// clustered far from chance level (0.5) must produce a much smaller
+    /// (more significant) p-value than a set of accuracies scattered right
+    /// around chance level.
+    #[tokio::test]
+    async fn test_significance_testing_p_value_reflects_real_effect() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = CrossLanguageValidationConfig::default();
+        let validator = CrossLanguageValidator::new(config, temp_dir.path().to_path_buf())
+            .await
+            .unwrap();
+        let empty_dataset = make_test_dataset(Vec::new());
+
+        let strong_effect: HashMap<(LanguageCode, LanguageCode), f64> = [
+            ((LanguageCode::EnUs, LanguageCode::EsEs), 0.97),
+            ((LanguageCode::EnUs, LanguageCode::FrFr), 0.98),
+            ((LanguageCode::EnUs, LanguageCode::DeDe), 0.96),
+            ((LanguageCode::EnUs, LanguageCode::JaJp), 0.99),
+        ]
+        .into_iter()
+        .collect();
+        let no_effect: HashMap<(LanguageCode, LanguageCode), f64> = [
+            ((LanguageCode::EnUs, LanguageCode::EsEs), 0.51),
+            ((LanguageCode::EnUs, LanguageCode::FrFr), 0.49),
+            ((LanguageCode::EnUs, LanguageCode::DeDe), 0.50),
+            ((LanguageCode::EnUs, LanguageCode::JaJp), 0.52),
+        ]
+        .into_iter()
+        .collect();
+
+        let strong_result = validator
+            .perform_significance_testing(&empty_dataset, &strong_effect)
+            .await
+            .unwrap();
+        let weak_result = validator
+            .perform_significance_testing(&empty_dataset, &no_effect)
+            .await
+            .unwrap();
+
+        assert!((0.0..=1.0).contains(&strong_result.accuracy_p_value));
+        assert!((0.0..=1.0).contains(&weak_result.accuracy_p_value));
+        assert!(
+            strong_result.accuracy_p_value < weak_result.accuracy_p_value,
+            "accuracies far from chance level ({}) should be more significant than \
+             accuracies scattered around chance level ({})",
+            strong_result.accuracy_p_value,
+            weak_result.accuracy_p_value
+        );
+        // A real accuracy comparison must not always be "0.05".
+        assert_ne!(strong_result.accuracy_p_value, 0.05);
+        assert_ne!(weak_result.accuracy_p_value, 0.05);
+        // With no samples at all to correlate, the correlation p-value must
+        // honestly reflect total uncertainty rather than a confident-looking
+        // fabricated placeholder.
+        assert_eq!(strong_result.correlation_p_value, 1.0);
+        assert_eq!(strong_result.correlation_confidence_interval, (-1.0, 1.0));
+
+        // A stronger, more consistent effect must also yield higher statistical
+        // power to detect it -- not a threshold-based binary 0.8/0.6 guess.
+        assert!((0.0..=1.0).contains(&strong_result.statistical_power));
+        assert!((0.0..=1.0).contains(&weak_result.statistical_power));
+        assert!(
+            strong_result.statistical_power > weak_result.statistical_power,
+            "a strong, consistent effect ({}) should have higher statistical power than \
+             a weak, chance-level effect ({})",
+            strong_result.statistical_power,
+            weak_result.statistical_power
+        );
+    }
+
+    /// `one_sample_t_test_power` must increase monotonically with both effect
+    /// size and sample size, and must return `0.0` (not panic or NaN) below the
+    /// minimum feasible sample size.
+    #[test]
+    fn test_one_sample_t_test_power_monotonic() {
+        assert_eq!(one_sample_t_test_power(1.0, 0), 0.0);
+        assert_eq!(one_sample_t_test_power(1.0, 1), 0.0);
+
+        let small_effect_small_n = one_sample_t_test_power(0.2, 5);
+        let large_effect_small_n = one_sample_t_test_power(1.5, 5);
+        assert!(
+            large_effect_small_n > small_effect_small_n,
+            "a larger effect size should yield higher power at the same n"
+        );
+
+        let small_effect_large_n = one_sample_t_test_power(0.2, 200);
+        assert!(
+            small_effect_large_n > small_effect_small_n,
+            "more samples should yield higher power at the same effect size"
+        );
+        for power in [
+            small_effect_small_n,
+            large_effect_small_n,
+            small_effect_large_n,
+        ] {
+            assert!((0.0..=1.0).contains(&power));
+        }
     }
 }

@@ -614,7 +614,9 @@ impl ForcedAlignModel {
         }
 
         // Perform real DTW alignment
-        let (path, cost) = self.compute_dtw(features, phonemes)?;
+        let (path, _total_cost) = self.compute_dtw(features, phonemes)?;
+        // Same projection the DTW used, reused for the confidence posteriors.
+        let templates = self.phoneme_templates_mfcc(phonemes)?;
 
         // Convert DTW path to phoneme alignment
         let mut aligned_phonemes = Vec::new();
@@ -644,16 +646,9 @@ impl ForcedAlignModel {
             let start_time = start_frame as f32 * frame_duration;
             let end_time = (end_frame + 1) as f32 * frame_duration;
 
-            // Calculate confidence based on alignment cost
-            let frame_count = phoneme_frames[i].len();
-            let avg_cost = if frame_count > 0 {
-                cost / (path.len() as f32)
-            } else {
-                1.0
-            };
-
-            // Convert cost to confidence (lower cost = higher confidence)
-            let confidence = (1.0 / (1.0 + avg_cost)).max(0.3).min(1.0);
+            // Real per-phoneme confidence: how much better this phoneme explains the
+            // frames it was given than any of the other phonemes in the sequence would.
+            let confidence = self.phoneme_posterior(features, &templates, &phoneme_frames[i], i);
 
             aligned_phonemes.push(AlignedPhoneme {
                 phoneme: phoneme.clone(),
@@ -707,6 +702,10 @@ impl ForcedAlignModel {
             return Ok((Vec::new(), 0.0));
         }
 
+        // Project each phoneme template into the same cepstral space as the features,
+        // once, instead of rebuilding it for all n*m matrix cells.
+        let templates = self.phoneme_templates_mfcc(phonemes)?;
+
         // Initialize DTW cost matrix
         let mut cost_matrix = vec![vec![f32::INFINITY; m + 1]; n + 1];
         cost_matrix[0][0] = 0.0;
@@ -715,7 +714,7 @@ impl ForcedAlignModel {
         for i in 1..=n {
             for j in 1..=m {
                 // Calculate local cost (distance between feature and phoneme)
-                let local_cost = self.compute_local_cost(&features[i - 1], &phonemes[j - 1]);
+                let local_cost = Self::local_cost(&features[i - 1], &templates[j - 1]);
 
                 // Find minimum cost path
                 let min_prev_cost = cost_matrix[i - 1][j]
@@ -756,19 +755,119 @@ impl ForcedAlignModel {
         Ok((path, final_cost))
     }
 
-    /// Compute local cost between a feature vector and a phoneme
-    fn compute_local_cost(&self, feature: &[f32], phoneme: &Phoneme) -> f32 {
-        // Create a simple phoneme template based on the phoneme symbol
-        let phoneme_template = self.create_phoneme_template(phoneme);
+    /// Project every phoneme's spectral template into MFCC space.
+    ///
+    /// # Errors
+    /// Propagates any DCT failure from [`Self::apply_dct`].
+    fn phoneme_templates_mfcc(
+        &self,
+        phonemes: &[Phoneme],
+    ) -> Result<Vec<Vec<f32>>, RecognitionError> {
+        // Distinct symbols dominate; cache so a repeated phoneme costs one lookup.
+        let mut cache: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut templates = Vec::with_capacity(phonemes.len());
+        for phoneme in phonemes {
+            let key = phoneme.symbol.to_uppercase();
+            if let Some(cached) = cache.get(&key) {
+                templates.push(cached.clone());
+                continue;
+            }
+            let template = self.template_mfcc(phoneme)?;
+            cache.insert(key, template.clone());
+            templates.push(template);
+        }
+        Ok(templates)
+    }
 
-        // Compute Euclidean distance between feature and template
-        let mut distance = 0.0;
-        for (f, t) in feature.iter().zip(phoneme_template.iter()) {
-            let diff = f - t;
-            distance += diff * diff;
+    /// Convert a phoneme's spectral template into the same cepstral space as the
+    /// features extracted from audio.
+    ///
+    /// [`Self::create_phoneme_template`] describes a *log-mel spectral energy profile*,
+    /// while [`Self::compute_mfcc`] produces *cepstral* coefficients — the DCT of the
+    /// log mel energies. Comparing the two directly is meaningless, so the template is
+    /// pushed through the identical tail of the feature pipeline: spread across the
+    /// filterbank's `NUM_MEL_FILTERS` bands, log-compressed with the same floor, then
+    /// DCT-transformed to the same number of coefficients.
+    ///
+    /// # Errors
+    /// Propagates any DCT failure from [`Self::apply_dct`].
+    fn template_mfcc(&self, phoneme: &Phoneme) -> Result<Vec<f32>, RecognitionError> {
+        /// Must match `apply_mel_filterbank`.
+        const NUM_MEL_FILTERS: usize = 26;
+        /// Must match `compute_mfcc`.
+        const NUM_MFCC: usize = 13;
+        /// Must match the floor used on real mel energies in `compute_mfcc`.
+        const ENERGY_FLOOR: f32 = 1e-10;
+
+        let profile = self.create_phoneme_template(phoneme);
+        if profile.is_empty() {
+            return Ok(vec![0.0; NUM_MFCC]);
         }
 
-        distance.sqrt()
+        // Stretch the coarse profile across the filterbank by linear interpolation, so
+        // that bin k of the profile lands on the mel band covering the same frequency.
+        let mut mel_energies = Vec::with_capacity(NUM_MEL_FILTERS);
+        #[allow(clippy::cast_precision_loss)]
+        let last = (profile.len() - 1) as f32;
+        for band in 0..NUM_MEL_FILTERS {
+            #[allow(clippy::cast_precision_loss)]
+            let position = if NUM_MEL_FILTERS > 1 {
+                band as f32 * last / (NUM_MEL_FILTERS - 1) as f32
+            } else {
+                0.0
+            };
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let lower = position.floor() as usize;
+            let upper = (lower + 1).min(profile.len() - 1);
+            #[allow(clippy::cast_precision_loss)]
+            let fraction = position - lower as f32;
+            let value = profile[lower] * (1.0 - fraction) + profile[upper] * fraction;
+            mel_energies.push(value.max(0.0));
+        }
+
+        let log_mel: Vec<f32> = mel_energies
+            .iter()
+            .map(|&e| e.max(ENERGY_FLOOR).ln())
+            .collect();
+
+        self.apply_dct(&log_mel, NUM_MFCC)
+    }
+
+    /// Local cost between a real feature frame and a phoneme template, both in MFCC
+    /// space.
+    ///
+    /// The zeroth coefficient is dropped because it encodes the frame's overall loudness
+    /// rather than its spectral shape, and the remaining coefficients are compared with
+    /// a cosine distance, which is invariant to the absolute scale of either vector.
+    /// The result lies in `[0, 2]`, where 0 means the frame's spectral shape matches the
+    /// template exactly.
+    fn local_cost(feature: &[f32], template: &[f32]) -> f32 {
+        const EPSILON: f32 = 1e-8;
+        /// Neutral cost used when a vector carries no shape information at all.
+        const NEUTRAL: f32 = 1.0;
+
+        fn shape(v: &[f32]) -> &[f32] {
+            if v.len() > 1 {
+                &v[1..]
+            } else {
+                v
+            }
+        }
+        let a = shape(feature);
+        let b = shape(template);
+        let len = a.len().min(b.len());
+        if len == 0 {
+            return NEUTRAL;
+        }
+
+        let dot: f32 = a[..len].iter().zip(&b[..len]).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a[..len].iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b[..len].iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm_a < EPSILON || norm_b < EPSILON {
+            return NEUTRAL;
+        }
+
+        (1.0 - (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)).clamp(0.0, 2.0)
     }
 
     /// Create an acoustically-motivated MFCC-like template for a phoneme.
@@ -975,73 +1074,91 @@ impl ForcedAlignModel {
         template
     }
 
-    /// Calculate alignment confidence using cosine similarity between the
-    /// representative frame features and the phoneme template.
+    /// Real posterior probability that `phoneme_index` explains the frames the DTW
+    /// path assigned to it.
     ///
-    /// Strategy:
-    ///   1. Select the frame that corresponds to the phoneme's proportional
-    ///      position in the utterance.
-    ///   2. Compute cosine similarity between that frame's feature vector and
-    ///      the phoneme template generated by `create_phoneme_template`.
-    ///   3. Map cosine similarity ∈ [-1, 1] → confidence ∈ [0.3, 1.0].
+    /// The aligner already scores every (frame, phoneme) pair with
+    /// [`Self::compute_local_cost`]. Treating those costs as negative log-likelihoods,
+    /// a softmax over the *whole* phoneme sequence turns them into a distribution over
+    /// which phoneme each frame really looks like:
     ///
-    /// If the feature sequence is empty we fall back to a length-normalised
-    /// heuristic that reduces confidence linearly towards the end of long
-    /// sequences, bounded to [0.3, 0.95].
-    fn calculate_alignment_confidence(
+    /// ```text
+    /// p(j | frame) = exp(-(cost_j - min_k cost_k) / T) / Σ_i exp(-(cost_i - min_k cost_k) / T)
+    /// ```
+    ///
+    /// The temperature `T` is the mean deviation of that frame's costs from their
+    /// minimum, which makes the score invariant to the absolute scale of the features —
+    /// the previous implementation divided by a global cost and saturated at its clamp
+    /// floor for every phoneme of every utterance.
+    ///
+    /// The returned confidence is the mean posterior across the phoneme's frames, so it
+    /// is high only when the phoneme fits its frames distinctly better than the
+    /// alternatives, and approaches `1 / n` when it fits no better than the rest.
+    fn phoneme_posterior(
         &self,
         features: &[Vec<f32>],
+        templates: &[Vec<f32>],
+        frames: &[usize],
         phoneme_index: usize,
-        total_phonemes: usize,
     ) -> f32 {
         const EPSILON: f32 = 1e-8;
 
-        if features.is_empty() || total_phonemes == 0 {
-            // No features available: use length-normalised position heuristic
-            let position_penalty = (phoneme_index as f32 / total_phonemes.max(1) as f32) * 0.15;
-            return (0.85 - position_penalty).clamp(0.3, 1.0);
+        if frames.is_empty() || templates.is_empty() || phoneme_index >= templates.len() {
+            return 0.0;
+        }
+        if templates.len() == 1 {
+            // With a single candidate there is nothing to discriminate against.
+            return 1.0;
         }
 
-        // Select representative frame for this phoneme.
-        // Map phoneme_index → frame index proportionally.
-        let frame_idx = ((phoneme_index as f32 / total_phonemes as f32)
-            * (features.len() as f32 - 1.0))
-            .round() as usize;
-        let frame_idx = frame_idx.min(features.len() - 1);
-        let frame = &features[frame_idx];
+        let mut total = 0.0_f32;
+        let mut counted = 0_u32;
 
-        // We need a representative phoneme to build the template.  We reconstruct
-        // a minimal Phoneme only to call create_phoneme_template — the result depends
-        // solely on `phoneme.symbol`, which is not available here.  We therefore
-        // use the first frame's feature norm as a proxy and compute a purely
-        // feature-driven confidence from the local spectral flatness measure (SFM),
-        // which distinguishes voiced regions (high energy concentration) from silence.
-        //
-        // cosine_sim = dot(frame, frame) / (||frame||^2) = 1.0 for identical vectors,
-        // but without the template symbol we measure self-energy against a flat
-        // template to approximate how "structured" the frame is.
-        let flat_template: Vec<f32> = {
-            let len = frame.len();
-            if len == 0 {
-                return 0.3;
+        for &frame_index in frames {
+            let Some(feature) = features.get(frame_index) else {
+                continue;
+            };
+
+            let costs: Vec<f32> = templates
+                .iter()
+                .map(|template| Self::local_cost(feature, template))
+                .collect();
+
+            let min_cost = costs.iter().copied().fold(f32::INFINITY, f32::min);
+            if !min_cost.is_finite() {
+                continue;
             }
-            let val = 1.0 / (len as f32).sqrt(); // unit flat template
-            vec![val; len]
-        };
 
-        // Cosine similarity between the actual frame and the flat (white-noise) template
-        let dot: f32 = frame
-            .iter()
-            .zip(flat_template.iter())
-            .map(|(a, b)| a * b)
-            .sum();
-        let frame_norm: f32 = frame.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let template_norm: f32 = flat_template.iter().map(|x| x * x).sum::<f32>().sqrt();
+            #[allow(clippy::cast_precision_loss)]
+            let count = costs.len() as f32;
+            let temperature = costs.iter().map(|c| c - min_cost).sum::<f32>() / count;
+            if temperature <= EPSILON {
+                // Every phoneme fits this frame equally well: the frame carries no
+                // discriminating evidence, so the posterior is uniform.
+                total += 1.0 / count;
+                counted += 1;
+                continue;
+            }
 
-        let cosine_sim = dot / (frame_norm * template_norm + EPSILON);
+            let weights: Vec<f32> = costs
+                .iter()
+                .map(|cost| (-(cost - min_cost) / temperature).exp())
+                .collect();
+            let normaliser: f32 = weights.iter().sum();
+            if normaliser <= EPSILON {
+                continue;
+            }
 
-        // cosine_sim ∈ [-1, 1] → confidence ∈ [0.3, 1.0]
-        ((cosine_sim + 1.0) / 2.0).clamp(0.3, 1.0)
+            total += weights[phoneme_index] / normaliser;
+            counted += 1;
+        }
+
+        if counted == 0 {
+            return 0.0;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let mean = total / counted as f32;
+        mean.clamp(0.0, 1.0)
     }
 
     /// Convert text to phonemes using dictionary
@@ -1143,47 +1260,31 @@ pub struct ForcedAlignStats {
 
 #[async_trait]
 impl PhonemeRecognizer for ForcedAlignModel {
+    /// Reference-free phoneme recognition is not supported by this model.
+    ///
+    /// [`ForcedAlignModel`] is a *forced* aligner: it decides **where** a phoneme
+    /// sequence you already know occurs, using real MFCC features and DTW. Deciding
+    /// **which** phonemes were spoken, with no reference, requires a trained acoustic
+    /// classifier, and this crate ships none — the spectral templates used for the
+    /// alignment cost are hand-derived formant profiles, far too coarse to label
+    /// phonemes on their own.
+    ///
+    /// Rather than emit labels with no evidence behind them, this method fails closed.
+    /// Use [`PhonemeRecognizer::align_phonemes`] or [`PhonemeRecognizer::align_text`]
+    /// with a reference, or transcribe with an ASR model first and align its output.
     async fn recognize_phonemes(
         &self,
-        audio: &AudioBuffer,
+        _audio: &AudioBuffer,
         _config: Option<&PhonemeRecognitionConfig>,
     ) -> RecognitionResult<Vec<Phoneme>> {
-        // For recognition without expected phonemes, we need to use a different approach
-        // This is a simplified implementation
-        self.ensure_loaded().await?;
-
-        let features = self.extract_features(audio).await.map_err(|e| {
-            RecognitionError::PhonemeRecognitionError {
-                message: format!("Feature extraction failed: {}", e),
-                source: Some(Box::new(e)),
-            }
-        })?;
-
-        // Mock phoneme recognition based on audio characteristics
-        let mut phonemes = Vec::new();
-        let num_phonemes = (features.len() / 10).max(1); // Rough estimate
-
-        for i in 0..num_phonemes {
-            // Mock phoneme based on position
-            let symbol = match i % 5 {
-                0 => "AH",
-                1 => "L",
-                2 => "OW",
-                3 => "W",
-                _ => "ER",
-            };
-
-            phonemes.push(Phoneme {
-                symbol: symbol.to_string(),
-                ipa_symbol: symbol.to_string(),
-                stress: 0, // No stress
-                syllable_position: voirs_sdk::types::SyllablePosition::Unknown,
-                duration_ms: Some(100.0),
-                confidence: 0.8,
-            });
+        Err(RecognitionError::FeatureNotSupported {
+            feature: "reference-free phoneme recognition: ForcedAlignModel aligns a known \
+                      phoneme sequence to audio and has no trained phoneme classifier. Call \
+                      align_phonemes() or align_text() with a reference, or transcribe with an \
+                      ASR model first."
+                .to_string(),
         }
-
-        Ok(phonemes)
+        .into())
     }
 
     async fn align_phonemes(
@@ -1263,17 +1364,30 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Regression test for the removed round-robin "recognition": the model used to
+    /// return `AH, L, OW, W, ER` cycling on position, with a hardcoded confidence, for
+    /// any audio at all. It must now refuse instead of labelling without evidence.
     #[tokio::test]
-    async fn test_phoneme_recognition() {
+    async fn test_phoneme_recognition_fails_closed() {
         let model_file = create_mock_model_file();
         let model_path = model_file.path().to_string_lossy().to_string();
 
         let model = ForcedAlignModel::new(model_path, None).await.unwrap();
         let audio = AudioBuffer::new(vec![0.1; 1600], 16000, 1); // 0.1 second of audio
 
-        let result = model.recognize_phonemes(&audio, None).await.unwrap();
-        assert!(!result.is_empty());
-        assert!(result.iter().all(|p| p.confidence > 0.0));
+        let err = model
+            .recognize_phonemes(&audio, None)
+            .await
+            .expect_err("reference-free recognition must not invent phoneme labels");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("reference-free phoneme recognition"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("align_text"),
+            "the error should point at the supported path: {rendered}"
+        );
     }
 
     #[tokio::test]
@@ -1508,54 +1622,161 @@ mod tests {
         }
     }
 
+    /// Build audio whose first half is a low-frequency tone (vowel-like: energy in the
+    /// low mel bands) and whose second half is a high-frequency buzz (fricative-like).
+    fn vowel_then_fricative(sample_rate: u32) -> AudioBuffer {
+        let half = sample_rate as usize / 2;
+        let mut samples = Vec::with_capacity(half * 2);
+        for i in 0..half {
+            let t = i as f32 / sample_rate as f32;
+            // 200 Hz: energy concentrated in the lowest mel bands.
+            samples.push((t * 200.0 * std::f32::consts::TAU).sin() * 0.8);
+        }
+        for i in 0..half {
+            let t = i as f32 / sample_rate as f32;
+            // 6 kHz: energy concentrated in the highest mel bands.
+            samples.push((t * 6000.0 * std::f32::consts::TAU).sin() * 0.8);
+        }
+        AudioBuffer::new(samples, sample_rate, 1)
+    }
+
+    /// Regression test for the confidence that used to be a saturated constant.
+    ///
+    /// Confidence is now a real posterior over the phoneme sequence, computed from the
+    /// same MFCC features and templates the DTW itself uses, so a phoneme really does
+    /// score higher on the frames that look like it.
     #[tokio::test]
-    async fn test_alignment_confidence_range() {
+    async fn posterior_confidence_is_bounded_and_discriminating() {
         let model_file = create_mock_model_file();
         let model_path = model_file.path().to_string_lossy().to_string();
-
         let model = ForcedAlignModel::new(model_path, None).await.unwrap();
 
-        // Build test cases with named bindings so Vec<f32> elements can be borrowed
-        let empty: Vec<Vec<f32>> = vec![];
-        let single = vec![vec![
-            0.5f32, -0.3, 1.2, 0.0, -0.8, 0.4, 0.1, -0.2, 0.9, 0.3, -0.6, 0.7, 0.2,
-        ]];
-        let multi = vec![
-            vec![
-                1.0f32, 0.5, 0.2, 0.1, 0.05, 0.03, 0.02, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ],
-            vec![
-                0.0f32, 0.1, 0.5, 1.0, 0.5, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ],
-            vec![
-                0.0f32, 0.0, 0.0, 0.1, 0.5, 1.0, 0.5, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ],
-        ];
-        let silence_frame = vec![vec![0.0f32; 13]];
-        let large: Vec<Vec<f32>> = (0..50).map(|_| vec![0.3f32; 13]).collect();
+        // Real MFCC frames, extracted by the model's own pipeline from real audio.
+        let audio = vowel_then_fricative(16000);
+        let features = model
+            .extract_features(&audio)
+            .await
+            .expect("MFCC extraction from real audio");
+        assert!(
+            features.len() >= 4,
+            "need several frames: {}",
+            features.len()
+        );
 
-        let test_cases: &[(&Vec<Vec<f32>>, usize, usize)] = &[
-            // Empty features
-            (&empty, 0, 1),
-            (&empty, 3, 10),
-            // Single frame
-            (&single, 0, 1),
-            // Multiple frames, phoneme at start
-            (&multi, 0, 3),
-            // Multiple frames, phoneme at end
-            (&multi, 2, 3),
-            // Silence-like frame (near-zero features)
-            (&silence_frame, 0, 1),
-            // Large phoneme count, middle position
-            (&large, 25, 50),
-        ];
+        // Frames from the first (low-frequency) and last (high-frequency) quarter.
+        let vowel_frame = features.len() / 4;
+        let fricative_frame = features.len() * 3 / 4;
 
-        for (features, phoneme_idx, total) in test_cases {
-            let confidence = model.calculate_alignment_confidence(features, *phoneme_idx, *total);
+        let phonemes = vec![make_phoneme("AA"), make_phoneme("S")];
+        let templates = model
+            .phoneme_templates_mfcc(&phonemes)
+            .expect("templates project into MFCC space");
+
+        let vowel_on_vowel = model.phoneme_posterior(&features, &templates, &[vowel_frame], 0);
+        let fricative_on_vowel = model.phoneme_posterior(&features, &templates, &[vowel_frame], 1);
+        let fricative_on_fricative =
+            model.phoneme_posterior(&features, &templates, &[fricative_frame], 1);
+        let vowel_on_fricative =
+            model.phoneme_posterior(&features, &templates, &[fricative_frame], 0);
+
+        // Posteriors over one frame form a distribution.
+        assert!(
+            (vowel_on_vowel + fricative_on_vowel - 1.0).abs() < 1e-4,
+            "{vowel_on_vowel} + {fricative_on_vowel} must be 1"
+        );
+        // The vowel template must explain the low-frequency frame better than /s/ does,
+        // and /s/ must explain the high-frequency frame better than the vowel does.
+        assert!(
+            vowel_on_vowel > fricative_on_vowel,
+            "vowel template on a 200 Hz frame: {vowel_on_vowel} vs {fricative_on_vowel}"
+        );
+        assert!(
+            fricative_on_fricative > vowel_on_fricative,
+            "/s/ template on a 6 kHz frame: {fricative_on_fricative} vs {vowel_on_fricative}"
+        );
+
+        // Degenerate inputs are reported as zero confidence, never as a fixed floor.
+        assert_eq!(model.phoneme_posterior(&features, &templates, &[], 0), 0.0);
+        assert_eq!(model.phoneme_posterior(&features, &[], &[0], 0), 0.0);
+        assert_eq!(model.phoneme_posterior(&features, &templates, &[0], 9), 0.0);
+        // Out-of-range frame indices are skipped, leaving nothing measured.
+        assert_eq!(
+            model.phoneme_posterior(&features, &templates, &[usize::MAX], 0),
+            0.0
+        );
+
+        // A single candidate cannot be discriminated against anything.
+        assert_eq!(
+            model.phoneme_posterior(&features, &templates[..1], &[0], 0),
+            1.0
+        );
+
+        // Every value stays inside [0, 1] across a longer sequence.
+        let many: Vec<Phoneme> = ["AA", "S", "M", "T", "IY"]
+            .iter()
+            .map(|s| make_phoneme(s))
+            .collect();
+        let many_templates = model
+            .phoneme_templates_mfcc(&many)
+            .expect("templates project into MFCC space");
+        for index in 0..many.len() {
+            let confidence =
+                model.phoneme_posterior(&features, &many_templates, &[0, 1, 2, 3], index);
             assert!(
                 (0.0..=1.0).contains(&confidence),
-                "confidence {confidence} out of [0.0, 1.0] for phoneme_idx={phoneme_idx}, total={total}"
+                "confidence {confidence} out of range for index {index}"
             );
+        }
+
+        // A frame carrying no spectral shape at all yields a uniform posterior rather
+        // than an invented number.
+        let featureless = vec![vec![0.0f32; 13]];
+        #[allow(clippy::cast_precision_loss)]
+        let expected = 1.0 / many.len() as f32;
+        let uniform = model.phoneme_posterior(&featureless, &many_templates, &[0], 0);
+        assert!(
+            (uniform - expected).abs() < 1e-3,
+            "featureless frames must give a uniform posterior: {uniform} vs {expected}"
+        );
+    }
+
+    /// The aligner's output must follow the audio: aligning the *correct* phoneme order
+    /// to structured speech must score better than aligning the reversed order.
+    #[tokio::test]
+    async fn alignment_confidence_follows_the_audio() {
+        let model_file = create_mock_model_file();
+        let model_path = model_file.path().to_string_lossy().to_string();
+        let model = ForcedAlignModel::new(model_path, None).await.unwrap();
+
+        let audio = vowel_then_fricative(16000);
+        let correct = vec![make_phoneme("AA"), make_phoneme("S")];
+        let reversed = vec![make_phoneme("S"), make_phoneme("AA")];
+
+        let correct_alignment = model
+            .align_phonemes(&audio, &correct, None)
+            .await
+            .expect("alignment in the correct order");
+        let reversed_alignment = model
+            .align_phonemes(&audio, &reversed, None)
+            .await
+            .expect("alignment in the reversed order");
+
+        assert_eq!(correct_alignment.phonemes.len(), 2);
+        assert_eq!(reversed_alignment.phonemes.len(), 2);
+        assert!(
+            correct_alignment.alignment_confidence > reversed_alignment.alignment_confidence,
+            "the vowel-then-fricative order must beat the reverse: {} vs {}",
+            correct_alignment.alignment_confidence,
+            reversed_alignment.alignment_confidence
+        );
+
+        // Timings come from the real DTW path, not from an even subdivision.
+        let first = &correct_alignment.phonemes[0];
+        let second = &correct_alignment.phonemes[1];
+        assert!(first.start_time < second.start_time);
+        assert!(first.end_time <= second.end_time);
+        for phoneme in &correct_alignment.phonemes {
+            assert!((0.0..=1.0).contains(&phoneme.confidence));
         }
     }
 }

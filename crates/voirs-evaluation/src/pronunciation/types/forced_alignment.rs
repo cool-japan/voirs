@@ -234,7 +234,11 @@ pub(crate) fn compute_novelty(frames: &[FrameFeatures]) -> Vec<f64> {
         energy_delta[i] = (e1 - e0).abs();
     }
     let max_flux = flux.iter().cloned().fold(0.0f64, f64::max).max(1e-12);
-    let max_energy = energy_delta.iter().cloned().fold(0.0f64, f64::max).max(1e-12);
+    let max_energy = energy_delta
+        .iter()
+        .cloned()
+        .fold(0.0f64, f64::max)
+        .max(1e-12);
     (0..n)
         .map(|i| 0.6 * (flux[i] / max_flux) + 0.4 * (energy_delta[i] / max_energy))
         .collect()
@@ -412,7 +416,10 @@ mod tests {
             v_voiced > v_noise,
             "sine voicing ({v_voiced}) should exceed noise voicing ({v_noise})"
         );
-        assert!(v_voiced > 0.5, "pure tone should be strongly voiced: {v_voiced}");
+        assert!(
+            v_voiced > 0.5,
+            "pure tone should be strongly voiced: {v_voiced}"
+        );
     }
 
     #[test]
@@ -448,11 +455,12 @@ mod tests {
         assert_eq!(novelty.len(), grid.frames.len());
         // There should be a clear peak near the silence/tone boundary (~frame 25 at a
         // 10ms hop), well above the novelty at the very start of the (silent) signal.
-        let peak = novelty
-            .iter()
-            .cloned()
-            .fold(0.0f64, f64::max);
-        assert!(peak > novelty[1].max(1e-9) * 1.5, "expected a clear onset peak, got peak={peak}, novelty[1]={}", novelty[1]);
+        let peak = novelty.iter().cloned().fold(0.0f64, f64::max);
+        assert!(
+            peak > novelty[1].max(1e-9) * 1.5,
+            "expected a clear onset peak, got peak={peak}, novelty[1]={}",
+            novelty[1]
+        );
     }
 
     #[test]
@@ -463,7 +471,10 @@ mod tests {
         assert_eq!(boundaries[0], 0);
         assert_eq!(*boundaries.last().unwrap(), novelty.len());
         for w in boundaries.windows(2) {
-            assert!(w[1] > w[0], "boundaries must be strictly increasing: {boundaries:?}");
+            assert!(
+                w[1] > w[0],
+                "boundaries must be strictly increasing: {boundaries:?}"
+            );
         }
     }
 
@@ -539,6 +550,9 @@ mod tests {
             *s = (i as f32 * 0.5).sin();
         }
         let peak = peak_rms(&samples, 100);
-        assert!(peak > 0.1, "expected the loud region to dominate peak RMS: {peak}");
+        assert!(
+            peak > 0.1,
+            "expected the loud region to dominate peak RMS: {peak}"
+        );
     }
 }

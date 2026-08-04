@@ -121,21 +121,24 @@ impl SafetensorsHeader {
         file.read_exact(&mut header_bytes)
             .map_err(|e| load_error(&resolved, &e))?;
 
-        let json: serde_json::Value =
-            serde_json::from_slice(&header_bytes).map_err(|e| RecognitionError::ModelLoadError {
+        let json: serde_json::Value = serde_json::from_slice(&header_bytes).map_err(|e| {
+            RecognitionError::ModelLoadError {
                 message: format!(
                     "{} has a safetensors header that is not valid JSON: {e}",
                     resolved.display()
                 ),
                 source: Some(Box::new(e)),
-            })?;
-        let object = json.as_object().ok_or_else(|| RecognitionError::ModelLoadError {
-            message: format!(
-                "{} has a safetensors header that is not a JSON object",
-                resolved.display()
-            ),
-            source: None,
+            }
         })?;
+        let object = json
+            .as_object()
+            .ok_or_else(|| RecognitionError::ModelLoadError {
+                message: format!(
+                    "{} has a safetensors header that is not a JSON object",
+                    resolved.display()
+                ),
+                source: None,
+            })?;
 
         let payload_len = file_size_bytes - 8 - header_len;
         let mut tensors = BTreeMap::new();
@@ -190,7 +193,10 @@ impl SafetensorsHeader {
     /// Total number of scalar parameters across all declared tensors.
     #[must_use]
     pub fn parameter_count(&self) -> usize {
-        self.tensors.values().map(TensorDescriptor::element_count).sum()
+        self.tensors
+            .values()
+            .map(TensorDescriptor::element_count)
+            .sum()
     }
 
     /// Real size of the checkpoint in mebibytes.
@@ -227,23 +233,25 @@ impl SafetensorsHeader {
     /// Returns [`RecognitionError::ModelLoadError`] when the tensor is absent, stored in
     /// an unsupported dtype, or when its declared byte range does not match its shape.
     pub fn read_tensor_f32(&self, name: &str) -> Result<Vec<f32>, RecognitionError> {
-        let descriptor = self.tensors.get(name).ok_or_else(|| {
-            RecognitionError::ModelLoadError {
-                message: format!("{}: checkpoint has no tensor '{name}'", self.path.display()),
-                source: None,
-            }
-        })?;
+        let descriptor =
+            self.tensors
+                .get(name)
+                .ok_or_else(|| RecognitionError::ModelLoadError {
+                    message: format!("{}: checkpoint has no tensor '{name}'", self.path.display()),
+                    source: None,
+                })?;
 
-        let element_size = descriptor.element_size().ok_or_else(|| {
-            RecognitionError::ModelLoadError {
-                message: format!(
-                    "{}: tensor '{name}' has unsupported dtype '{}'",
-                    self.path.display(),
-                    descriptor.dtype
-                ),
-                source: None,
-            }
-        })?;
+        let element_size =
+            descriptor
+                .element_size()
+                .ok_or_else(|| RecognitionError::ModelLoadError {
+                    message: format!(
+                        "{}: tensor '{name}' has unsupported dtype '{}'",
+                        self.path.display(),
+                        descriptor.dtype
+                    ),
+                    source: None,
+                })?;
 
         let elements = descriptor.element_count();
         let declared = descriptor.data_offsets.1 - descriptor.data_offsets.0;
@@ -261,10 +269,11 @@ impl SafetensorsHeader {
             });
         }
 
-        let mut file =
-            std::fs::File::open(&self.path).map_err(|e| load_error(&self.path, &e))?;
-        file.seek(SeekFrom::Start(self.payload_start + descriptor.data_offsets.0))
-            .map_err(|e| load_error(&self.path, &e))?;
+        let mut file = std::fs::File::open(&self.path).map_err(|e| load_error(&self.path, &e))?;
+        file.seek(SeekFrom::Start(
+            self.payload_start + descriptor.data_offsets.0,
+        ))
+        .map_err(|e| load_error(&self.path, &e))?;
         let mut raw = vec![0_u8; elements * element_size];
         file.read_exact(&mut raw)
             .map_err(|e| load_error(&self.path, &e))?;
@@ -328,12 +337,13 @@ impl SafetensorsHeader {
     /// # Errors
     /// Returns [`RecognitionError::ModelLoadError`] on absence or shape mismatch.
     pub fn expect_shape(&self, name: &str, shape: &[usize]) -> Result<(), RecognitionError> {
-        let descriptor = self.tensors.get(name).ok_or_else(|| {
-            RecognitionError::ModelLoadError {
-                message: format!("{}: checkpoint has no tensor '{name}'", self.path.display()),
-                source: None,
-            }
-        })?;
+        let descriptor =
+            self.tensors
+                .get(name)
+                .ok_or_else(|| RecognitionError::ModelLoadError {
+                    message: format!("{}: checkpoint has no tensor '{name}'", self.path.display()),
+                    source: None,
+                })?;
         if descriptor.shape != shape {
             return Err(RecognitionError::ModelLoadError {
                 message: format!(
@@ -389,7 +399,9 @@ fn parse_tensor_descriptor(
         source: None,
     };
 
-    let entry = value.as_object().ok_or_else(|| malformed("is not a JSON object"))?;
+    let entry = value
+        .as_object()
+        .ok_or_else(|| malformed("is not a JSON object"))?;
     let dtype = entry
         .get("dtype")
         .and_then(serde_json::Value::as_str)

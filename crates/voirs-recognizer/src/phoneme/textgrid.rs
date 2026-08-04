@@ -496,10 +496,7 @@ Object class = "TextGrid"
         assert!((words.intervals[1].duration() - 0.5).abs() < 1e-9);
         assert!(words.intervals[0].is_silence());
 
-        let spoken: Vec<&str> = words
-            .speech_intervals()
-            .map(|i| i.text.as_str())
-            .collect();
+        let spoken: Vec<&str> = words.speech_intervals().map(|i| i.text.as_str()).collect();
         assert_eq!(spoken, vec!["hello", "world"]);
 
         let phones = grid.tier("PHONES").expect("case-insensitive tier lookup");

@@ -614,31 +614,70 @@ impl Clone for WhisperBatchProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asr::whisper::assets::{assets_from_env, ASSETS_ENV_VAR};
     use voirs_sdk::AudioBuffer;
 
-    #[tokio::test]
-    async fn test_batch_processor_creation() {
-        let config = WhisperConfig::default();
-        let batch_config = BatchConfig::default();
-        let device = Device::Cpu;
+    /// A config carrying real assets, or `None` when this machine has none.
+    ///
+    /// Set `VOIRS_WHISPER_ASSETS` to a directory holding `model.safetensors` and
+    /// `vocab.json` to run the batching tests against a real checkpoint.
+    fn config_with_real_assets() -> Option<WhisperConfig> {
+        assets_from_env().map(|assets| WhisperConfig::default().with_assets(assets))
+    }
 
-        let processor = WhisperBatchProcessor::new(config, batch_config, device).await;
-        assert!(processor.is_ok());
+    #[tokio::test]
+    async fn batch_processor_fails_closed_without_weights() {
+        let config = WhisperConfig::default();
+        assert!(
+            !config.has_assets(),
+            "the default config must not claim to have weights"
+        );
+
+        let Err(err) =
+            WhisperBatchProcessor::new(config, BatchConfig::default(), Device::Cpu).await
+        else {
+            panic!("a batch processor must not be built on untrained parameters");
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("No pretrained weights configured"),
+            "unexpected error: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_processor_reports_the_missing_file_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = WhisperConfig::default().with_assets(
+            crate::asr::whisper::assets::WhisperAssets::from_dir(dir.path()),
+        );
+
+        let Err(err) =
+            WhisperBatchProcessor::new(config, BatchConfig::default(), Device::Cpu).await
+        else {
+            panic!("a batch processor must not be built from a missing checkpoint");
+        };
+        assert!(
+            err.to_string().contains("model.safetensors"),
+            "the error should name the file it looked for: {err}"
+        );
     }
 
     #[tokio::test]
     async fn test_batch_processing() {
-        let config = WhisperConfig::default();
+        let Some(config) = config_with_real_assets() else {
+            eprintln!("skipping: set {ASSETS_ENV_VAR} to run against a real checkpoint");
+            return;
+        };
         let batch_config = BatchConfig {
             max_batch_size: 2,
             max_concurrent: 1,
             ..Default::default()
         };
-        let device = Device::Cpu;
 
-        let processor = WhisperBatchProcessor::new(config, batch_config, device)
+        let processor = WhisperBatchProcessor::new(config, batch_config, Device::Cpu)
             .await
-            .unwrap();
+            .expect("real assets must build a processor");
 
         let inputs = vec![
             BatchInput {
@@ -663,13 +702,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimal_batch_size_calculation() {
-        let config = WhisperConfig::default();
+        let Some(config) = config_with_real_assets() else {
+            eprintln!("skipping: set {ASSETS_ENV_VAR} to run against a real checkpoint");
+            return;
+        };
         let batch_config = BatchConfig::default();
-        let device = Device::Cpu;
 
-        let processor = WhisperBatchProcessor::new(config, batch_config, device)
+        let processor = WhisperBatchProcessor::new(config, batch_config, Device::Cpu)
             .await
-            .unwrap();
+            .expect("real assets must build a processor");
 
         let inputs = vec![
             BatchInput {

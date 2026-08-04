@@ -11,16 +11,32 @@ VoiRS Recognizer provides comprehensive speech recognition capabilities for the 
 ## Features
 
 ### 🎤 Multi-Model ASR Support
-- **OpenAI Whisper**: State-of-the-art multilingual speech recognition
-- **Mozilla DeepSpeech**: Privacy-focused local speech recognition
-- **Facebook Wav2Vec2**: Self-supervised speech representation learning
-- **Custom Models**: Plugin architecture for additional ASR backends
+
+Every backend needs real pretrained weights, which VoiRS neither ships nor
+fabricates. A backend with no usable weights fails closed with a typed error; it
+never returns an invented transcript.
+
+| Backend | Feature | Status |
+|---------|---------|--------|
+| `OnnxWhisper` | `onnx` | **Runs.** Needs Whisper exported to ONNX. |
+| `OnnxWav2Vec2` / `OnnxConformer` | `onnx` | **Runs.** Needs an exported ONNX graph. |
+| `PureRustWhisper` | `whisper-pure` | **Runs.** Needs a `safetensors` checkpoint plus `vocab.json`. |
+| `ConformerModel` | `conformer` | **Runs** from a `safetensors` checkpoint; refuses to transcribe on untrained parameters. |
+| `DeepSpeechModel` | `deepspeech` | **Inspects and validates** real `.pbmm`/`.tflite` files, then reports that no pure-Rust decoder exists for them. Use the ONNX path. |
+| `Wav2Vec2Model` | `wav2vec2` | Same: validates real checkpoints, then defers to `OnnxWav2Vec2` for inference. |
 
 ### 🔤 Phoneme Recognition & Alignment
-- **Forced Alignment**: Precise time-aligned phoneme segmentation
-- **Montreal Forced Alignment (MFA)**: Professional-grade phoneme alignment
-- **Custom Phoneme Sets**: Support for multiple languages and dialects
-- **Confidence Scoring**: Reliability metrics for recognition results
+- **Forced Alignment** (`forced-align`): real MFCC extraction plus DTW, entirely
+  in Rust — no external tools and no model files needed.
+- **Montreal Forced Alignment** (`mfa`): drives the real `mfa` executable as a
+  subprocess and parses the real `TextGrid` it writes. Requires MFA to be
+  installed; otherwise every call fails closed naming what is missing.
+- **Custom Phoneme Sets**: support for multiple languages and dialects.
+- **Confidence Scoring**: measured from the audio, never a fixed constant.
+
+> Both aligners are *forced* aligners: they place a phoneme sequence you supply.
+> Neither offers reference-free phoneme recognition, and
+> `recognize_phonemes()` returns `FeatureNotSupported` rather than guessing.
 
 ### 📊 Audio Analysis
 - **Quality Assessment**: SNR, THD, and spectral analysis
@@ -139,20 +155,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Supported ASR Models
 
 ### Whisper
-- **Languages**: 99+ languages supported
-- **Model Sizes**: tiny, base, small, medium, large
-- **Features**: Multilingual, robust to noise, timestamp accuracy
-- **Use Case**: General-purpose, multilingual applications
+- **Backends**: `OnnxWhisper` (exported ONNX graph) or `PureRustWhisper`
+  (`safetensors` checkpoint + `vocab.json`, via `WhisperConfig::with_assets`, or
+  the `VOIRS_WHISPER_ASSETS` directory).
+- **Model Sizes**: whichever you export — tiny through large.
+- **Use Case**: General-purpose, multilingual applications.
 
 ### DeepSpeech
-- **Languages**: English (primary), with community models for other languages  
-- **Features**: Local processing, privacy-focused, customizable
-- **Use Case**: Privacy-sensitive applications, offline deployment
+- **Status**: model files are really opened, size-checked and format-detected
+  (`.pbmm` TensorFlow graphs and `.tflite` flatbuffers are told apart from their
+  magic bytes), but decoding them needs a TensorFlow runtime, which is not pure
+  Rust. `transcribe()` therefore returns `FeatureNotSupported` naming the
+  detected format.
+- **Use Case**: validating a DeepSpeech asset you already have; export it to
+  ONNX to actually run it.
 
 ### Wav2Vec2
-- **Languages**: English, with multilingual variants available
-- **Features**: Self-supervised learning, fine-tunable
-- **Use Case**: Research applications, custom domain adaptation
+- **Status**: `Wav2Vec2Model` validates real checkpoints; `OnnxWav2Vec2`
+  (feature `onnx`) runs them.
+- **Use Case**: research applications, custom domain adaptation.
 
 ## Feature Flags
 
@@ -514,17 +535,23 @@ let low_latency_config = StreamingConfig {
 
 ## Language Support
 
-VoiRS Recognizer supports multiple languages through its ASR backends:
+Which languages a backend handles is a property of the checkpoint you load, not
+of this crate. A multilingual Whisper checkpoint covers 99 languages; an
+English-only fine-tune covers one, through exactly the same code.
 
-| Language | Whisper | DeepSpeech | Wav2Vec2 | MFA |
-|----------|---------|------------|----------|-----|
-| English  | ✅      | ✅         | ✅       | ✅  |
-| Spanish  | ✅      | ❌         | ❌       | ✅  |
-| French   | ✅      | ❌         | ❌       | ✅  |
-| German   | ✅      | ❌         | ❌       | ✅  |
-| Japanese | ✅      | ❌         | ❌       | ❌  |
-| Chinese  | ✅      | ❌         | ❌       | ❌  |
-| Korean   | ✅      | ❌         | ❌       | ❌  |
+Ask the loaded model at runtime rather than consulting a static table:
+
+```rust,no_run
+# use voirs_recognizer::traits::ASRModel;
+# fn show(model: &dyn ASRModel) {
+for language in model.supported_languages() {
+    println!("{language:?}");
+}
+# }
+```
+
+For MFA, the answer is whichever acoustic models and dictionaries are really
+installed; `MFAModel::list_available_models()` asks the aligner itself.
 
 ## Configuration
 
@@ -617,13 +644,28 @@ Check out the [examples](examples/) directory for more comprehensive usage examp
 
 ## Benchmarks
 
-Performance benchmarks on common datasets:
+VoiRS publishes no WER or RTF table here, because accuracy and speed depend
+entirely on the checkpoint you supply and the machine you run it on — a number
+measured elsewhere would say nothing about your setup.
 
-| Model | Dataset | WER | RTF | Memory |
-|-------|---------|-----|-----|--------|
-| Whisper-base | LibriSpeech | 5.2% | 0.3x | 1.2GB |
-| DeepSpeech | CommonVoice | 8.1% | 0.8x | 800MB |
-| Wav2Vec2-base | LibriSpeech | 6.4% | 0.5x | 1.0GB |
+Measure your own, on your own hardware and weights:
+
+```rust,no_run
+use voirs_recognizer::asr::whisper::{BenchmarkConfig, WhisperBenchmark};
+
+# async fn run(model: &impl voirs_recognizer::traits::ASRModel) -> Result<(), Box<dyn std::error::Error>> {
+let benchmark = WhisperBenchmark::new(BenchmarkConfig::default());
+// Runs real transcriptions and times them; memory comes from the real RSS of
+// this process.
+let performance = benchmark.quick_benchmark(model).await?;
+println!("RTF {:.3}, peak {:.0} MiB", performance.average_rtf, performance.peak_memory_mb);
+# Ok(())
+# }
+```
+
+`ASRModel::metadata()` reports `inference_speed: 0.0` and an empty
+`wer_benchmarks` map for backends whose figures have not been measured — that is
+"not measured", not "zero".
 
 *RTF = Real Time Factor (processing time / audio duration)*
 

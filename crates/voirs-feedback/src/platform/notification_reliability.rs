@@ -27,9 +27,14 @@ where
     D: serde::Deserializer<'de>,
 {
     let duration = Duration::deserialize(deserializer)?;
-    Ok(Instant::now()
+    // A duration large enough to underflow `Instant::now() - duration` can
+    // only come from a corrupted/adversarial serialized payload (a real
+    // elapsed duration is always <= process uptime); report it as a
+    // deserialization error instead of panicking, per the workspace's
+    // no-unwrap/expect-in-production-paths policy.
+    Instant::now()
         .checked_sub(duration)
-        .expect("value should be present"))
+        .ok_or_else(|| serde::de::Error::custom("serialized duration is too large to represent"))
 }
 
 /// Enhanced delivery status with more granular states
@@ -119,11 +124,12 @@ where
     D: serde::Deserializer<'de>,
 {
     let duration_opt = Option::<Duration>::deserialize(deserializer)?;
-    Ok(duration_opt.map(|d| {
-        Instant::now()
-            .checked_sub(d)
-            .expect("value should be present")
-    }))
+    match duration_opt {
+        Some(d) => Instant::now().checked_sub(d).map(Some).ok_or_else(|| {
+            serde::de::Error::custom("serialized duration is too large to represent")
+        }),
+        None => Ok(None),
+    }
 }
 
 /// Comprehensive notification record with reliability tracking
@@ -292,6 +298,9 @@ pub struct NotificationReliabilityManager {
     config: ReliabilityConfig,
     /// Health check status
     health_status: Arc<RwLock<HealthStatus>>,
+    /// Target platform for real delivery attempts (see
+    /// [`Self::process_next_delivery`]).
+    platform: Platform,
 }
 
 /// Reliability statistics
@@ -393,15 +402,26 @@ impl Default for ReliabilityConfig {
 }
 
 impl NotificationReliabilityManager {
-    /// Create a new reliability manager
+    /// Create a new reliability manager targeting [`Platform::Desktop`]
+    /// (the only platform with a real local delivery backend; see
+    /// [`Self::process_next_delivery`]). Use [`Self::with_platform`] to
+    /// target a different platform explicitly.
     #[must_use]
     pub fn new(config: ReliabilityConfig) -> Self {
+        Self::with_platform(config, Platform::Desktop)
+    }
+
+    /// Create a new reliability manager targeting a specific platform's
+    /// real delivery backend.
+    #[must_use]
+    pub fn with_platform(config: ReliabilityConfig, platform: Platform) -> Self {
         Self {
             notifications: Arc::new(RwLock::new(HashMap::new())),
             delivery_queue: Arc::new(Mutex::new(VecDeque::new())),
             stats: Arc::new(RwLock::new(ReliabilityStats::default())),
             config,
             health_status: Arc::new(RwLock::new(HealthStatus::default())),
+            platform,
         }
     }
 
@@ -549,6 +569,93 @@ impl NotificationReliabilityManager {
         }
 
         None
+    }
+
+    /// Pop the next deliverable notification and attempt real delivery
+    /// through [`super::notifications::deliver_local_notification`] (the
+    /// same OS-native `osascript`/`notify-send` backend used by
+    /// [`super::notifications::NotificationManager`] and
+    /// [`super::reliable_notifications::ReliableNotificationManager`]) on
+    /// [`Self::platform`]. On success, marks the notification delivered;
+    /// on failure, records the real error and schedules a retry per
+    /// [`ReliableNotification::calculate_next_retry`] (or abandons it once
+    /// `max_retries` is exceeded). Returns `Ok(None)` when the queue has
+    /// nothing ready to deliver right now.
+    pub async fn process_next_delivery(&self) -> PlatformResult<Option<String>> {
+        let Some(id) = self.get_next_for_delivery().await else {
+            return Ok(None);
+        };
+
+        {
+            let mut queue = self.delivery_queue.lock().await;
+            queue.retain(|queued_id| queued_id != &id);
+        }
+
+        let (title, body, attempt) = {
+            let notifications = self.notifications.read().await;
+            let Some(notification) = notifications.get(&id) else {
+                return Ok(Some(id));
+            };
+            let attempt = match &notification.status {
+                EnhancedDeliveryStatus::Failed { attempt, .. } => *attempt + 1,
+                _ => 1,
+            };
+            (
+                notification.notification.title.clone(),
+                notification.notification.body.clone(),
+                attempt,
+            )
+        };
+
+        let delivery_result = match self.platform {
+            Platform::Desktop => {
+                super::notifications::deliver_local_notification(&title, &body).await
+            }
+            Platform::Web => Err(PlatformError::FeatureNotAvailable {
+                feature: "web notifications (requires a wasm32 build with a working Web \
+                          Notifications API binding; not available in this crate's current \
+                          dependency graph)"
+                    .to_string(),
+            }),
+            Platform::Mobile => Err(PlatformError::FeatureNotAvailable {
+                feature: "mobile notifications (requires native iOS/Android FFI bindings not \
+                          present in this build)"
+                    .to_string(),
+            }),
+            Platform::Embedded => Err(PlatformError::FeatureNotAvailable {
+                feature: "notifications".to_string(),
+            }),
+        };
+
+        match delivery_result {
+            Ok(()) => {
+                self.mark_delivered(&id, attempt).await?;
+            }
+            Err(e) => {
+                let error_type = match &e {
+                    PlatformError::FeatureNotAvailable { .. } => {
+                        NotificationErrorType::PlatformUnavailable
+                    }
+                    PlatformError::RateLimited { .. } => NotificationErrorType::RateLimited,
+                    PlatformError::Timeout { .. } => NotificationErrorType::TimeoutError,
+                    PlatformError::NetworkError { .. } => NotificationErrorType::NetworkError,
+                    _ => NotificationErrorType::UnknownError,
+                };
+                self.mark_failed(
+                    &id,
+                    NotificationError {
+                        message: e.to_string(),
+                        error_type,
+                        occurred_at: Instant::now(),
+                        attempt,
+                        context: HashMap::new(),
+                    },
+                )
+                .await?;
+            }
+        }
+
+        Ok(Some(id))
     }
 
     /// Perform cleanup of expired and completed notifications
@@ -794,5 +901,86 @@ mod tests {
         // Notification should be gone
         let status = manager.get_notification_status(&id).await;
         assert!(status.is_none());
+    }
+
+    /// `process_next_delivery` must actually invoke the real local
+    /// delivery backend (not a stub that always reports success): on
+    /// platforms with no real backend wired up (`Web`/`Mobile`/`Embedded`)
+    /// it must transition the notification to `Failed`/`Abandoned` with a
+    /// genuine `PlatformUnavailable` error, never silently `Delivered`.
+    #[tokio::test]
+    async fn test_process_next_delivery_web_fails_closed_not_fake_delivered() {
+        let manager = NotificationReliabilityManager::with_platform(
+            ReliabilityConfig::default(),
+            Platform::Web,
+        );
+
+        let notification = Notification {
+            title: "Test".to_string(),
+            body: "Test notification".to_string(),
+            priority: NotificationPriority::Low, // max_retries == 1: abandons after first failure
+            category: super::super::notifications::NotificationCategory::System,
+            icon: None,
+            auto_dismiss_after: None,
+            actions: Vec::new(),
+            data: HashMap::new(),
+        };
+
+        let id = manager
+            .enqueue_notification(notification, None)
+            .await
+            .unwrap();
+
+        let processed_id = manager.process_next_delivery().await.unwrap();
+        assert_eq!(processed_id.as_deref(), Some(id.as_str()));
+
+        let status = manager.get_notification_status(&id).await.unwrap();
+        assert!(
+            matches!(status, EnhancedDeliveryStatus::Abandoned { .. }),
+            "Web platform has no real delivery backend, so the notification must be abandoned \
+             with a real error, not marked Delivered: {status:?}"
+        );
+
+        let stats = manager.get_stats().await;
+        assert_eq!(stats.abandoned_notifications, 1);
+        assert_eq!(stats.successful_deliveries, 0);
+    }
+
+    /// An empty queue must report `Ok(None)`, never fabricate a delivered
+    /// notification ID.
+    #[tokio::test]
+    async fn test_process_next_delivery_empty_queue_returns_none() {
+        let manager = NotificationReliabilityManager::new(ReliabilityConfig::default());
+        assert_eq!(manager.process_next_delivery().await.unwrap(), None);
+    }
+
+    /// On macOS/Linux, `process_next_delivery` against `Platform::Desktop`
+    /// must genuinely invoke `osascript`/`notify-send` (the same real
+    /// backend exercised end-to-end elsewhere in this crate) and mark the
+    /// notification delivered on real success.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn test_process_next_delivery_desktop_uses_real_backend() {
+        let manager = NotificationReliabilityManager::new(ReliabilityConfig::default());
+
+        let notification = Notification {
+            title: "VoiRS reliability test".to_string(),
+            body: "process_next_delivery real backend check".to_string(),
+            priority: NotificationPriority::Normal,
+            category: super::super::notifications::NotificationCategory::System,
+            icon: None,
+            auto_dismiss_after: None,
+            actions: Vec::new(),
+            data: HashMap::new(),
+        };
+
+        let id = manager
+            .enqueue_notification(notification, None)
+            .await
+            .unwrap();
+        manager.process_next_delivery().await.unwrap();
+
+        let status = manager.get_notification_status(&id).await.unwrap();
+        assert!(matches!(status, EnhancedDeliveryStatus::Delivered { .. }));
     }
 }

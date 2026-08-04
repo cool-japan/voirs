@@ -491,10 +491,7 @@ impl WhisperBenchmark {
     // Internal implementation methods
 
     /// Run the model a few times so lazily-initialised buffers are hot before timing.
-    async fn warmup_phase<M: ASRModel + ?Sized>(
-        &self,
-        model: &M,
-    ) -> Result<(), RecognitionError> {
+    async fn warmup_phase<M: ASRModel + ?Sized>(&self, model: &M) -> Result<(), RecognitionError> {
         let test_audio = self.generate_test_audio(5.0, 16000).await?;
         let asr_config = ASRConfig::default();
 
@@ -734,8 +731,10 @@ impl WhisperBenchmark {
         model: &M,
     ) -> Result<MemoryAnalysis, RecognitionError> {
         let Some(baseline) = Self::current_rss_mb() else {
-            tracing::warn!("Resident-set size is unavailable on this platform; memory analysis \
-                            reports zeros rather than estimates");
+            tracing::warn!(
+                "Resident-set size is unavailable on this platform; memory analysis \
+                            reports zeros rather than estimates"
+            );
             return Ok(MemoryAnalysis::default());
         };
 
@@ -884,10 +883,8 @@ impl WhisperBenchmark {
             peak_memory_mb: results.memory_analysis.peak_usage_mb,
             meets_targets: average_rtf > 0.0
                 && average_rtf <= self.config.performance_targets.max_rtf,
-            performance_score: self.calculate_performance_score(
-                average_rtf,
-                results.memory_analysis.peak_usage_mb,
-            ),
+            performance_score: self
+                .calculate_performance_score(average_rtf, results.memory_analysis.peak_usage_mb),
         }
     }
 
@@ -940,7 +937,10 @@ impl WhisperBenchmark {
             .arg(std::process::id().to_string())
             .output()
             .ok()?;
-        let kib: f32 = String::from_utf8_lossy(&output.stdout).trim().parse().ok()?;
+        let kib: f32 = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .ok()?;
         Some(kib / 1024.0)
     }
 
@@ -1246,8 +1246,15 @@ mod tests {
 
         let result = benchmark.quick_benchmark(&model).await.unwrap();
 
-        assert_eq!(model.calls(), 5, "quick_benchmark must run 5 transcriptions");
-        assert!(result.average_rtf > 0.0, "RTF must be measured, not asserted");
+        assert_eq!(
+            model.calls(),
+            5,
+            "quick_benchmark must run 5 transcriptions"
+        );
+        assert!(
+            result.average_rtf > 0.0,
+            "RTF must be measured, not asserted"
+        );
         assert!(result.average_rtf.is_finite());
         assert!(result.average_latency_ms > 0);
     }
@@ -1305,7 +1312,10 @@ mod tests {
 
         // Throughput must be a real audio-seconds-per-second figure.
         assert!(results.throughput_analysis.single_stream_throughput > 0.0);
-        assert_eq!(results.throughput_analysis.throughput_vs_batch_size.len(), 2);
+        assert_eq!(
+            results.throughput_analysis.throughput_vs_batch_size.len(),
+            2
+        );
         assert!(results.throughput_analysis.max_parallel_streams >= 1);
 
         // Overall RTF must be derived from the measured pairs above.
@@ -1328,10 +1338,8 @@ mod tests {
             }
             None => {
                 // Acceptable only on platforms VoiRS cannot measure without C bindings.
-                assert!(
-                    !cfg!(any(target_os = "linux", target_os = "macos")),
-                    "RSS should be measurable on this platform"
-                );
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                panic!("RSS should be measurable on this platform");
             }
         }
     }
@@ -1341,9 +1349,15 @@ mod tests {
     #[tokio::test]
     async fn memory_analysis_is_measured_not_asserted() {
         let benchmark = WhisperBenchmark::new(fast_config());
-        let analysis = benchmark.analyze_memory(&CountingModel::new(100)).await.unwrap();
+        let analysis = benchmark
+            .analyze_memory(&CountingModel::new(100))
+            .await
+            .unwrap();
 
-        assert_eq!(analysis.cache_hit_rate, 0.0, "cache hit rate must not be invented");
+        assert_eq!(
+            analysis.cache_hit_rate, 0.0,
+            "cache hit rate must not be invented"
+        );
         assert_eq!(analysis.fragmentation_level, 0.0);
         if WhisperBenchmark::current_rss_mb().is_some() {
             assert!(analysis.peak_usage_mb > 0.0);

@@ -186,12 +186,22 @@ impl PersistenceManager for MemoryPersistenceManager {
             .cloned()
             .unwrap_or_default();
 
-        let progress = storage.user_progress.get(user_id).cloned().ok_or_else(|| {
-            PersistenceError::NotFound {
-                entity_type: "user_progress".to_string(),
-                id: user_id.to_string(),
-            }
-        })?;
+        // A missing progress record must not fail the *whole* export: a
+        // user can legitimately have sessions/feedback/preferences without
+        // ever having a progress record (e.g. progress was cleared by a
+        // retention policy while sessions remain). Defaulting here matches
+        // the sqlite/postgres backends' `export_user_data`, which already
+        // use `load_user_progress(..).unwrap_or_default()` for the same
+        // reason -- failing here would make callers that only care about
+        // one *other* category (see `secure_sharing.rs`'s
+        // `DataCategory::Sessions` handler and
+        // `data_retention.rs::process_deletion_request`'s session count)
+        // silently lose real, existing data whenever progress is absent.
+        let progress = storage
+            .user_progress
+            .get(user_id)
+            .cloned()
+            .unwrap_or_default();
 
         let feedback_history = self
             .feedback_storage

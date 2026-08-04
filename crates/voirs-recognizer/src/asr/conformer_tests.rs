@@ -34,8 +34,14 @@ fn tiny_layout(config: &ConformerConfig) -> Vec<(String, Vec<usize>)> {
     let dim = config.encoder_dim;
     let hidden = config.feed_forward_dim;
     let mut layout = vec![
-        ("input_projection.weight".to_string(), vec![dim, config.input_dim]),
-        ("output_projection.weight".to_string(), vec![config.vocab_size, dim]),
+        (
+            "input_projection.weight".to_string(),
+            vec![dim, config.input_dim],
+        ),
+        (
+            "output_projection.weight".to_string(),
+            vec![config.vocab_size, dim],
+        ),
     ];
 
     for index in 0..config.num_blocks {
@@ -80,7 +86,7 @@ fn write_checkpoint(dir: &Path, config: &ConformerConfig, seed: u32) -> PathBuf 
 
     let mut header = serde_json::Map::new();
     let mut payload: Vec<u8> = Vec::new();
-    let mut counter = u32::from(seed);
+    let mut counter = seed;
 
     for (name, shape) in &layout {
         let elements: usize = shape.iter().product();
@@ -113,9 +119,7 @@ fn write_checkpoint(dir: &Path, config: &ConformerConfig, seed: u32) -> PathBuf 
 fn tone(freq: f32, seconds: f32) -> AudioBuffer {
     let count = (16_000.0 * seconds) as usize;
     let samples: Vec<f32> = (0..count)
-        .map(|i| {
-            (2.0 * std::f32::consts::PI * freq * i as f32 / 16_000.0).sin() * 0.5
-        })
+        .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / 16_000.0).sin() * 0.5)
         .collect();
     AudioBuffer::new(samples, 16_000, 1)
 }
@@ -187,7 +191,10 @@ async fn test_untrained_conformer_refuses_to_stream() {
     let model = ConformerModel::with_config(tiny_config()).await.unwrap();
     let audio_stream: AudioStream = Box::pin(stream::iter(vec![tone(440.0, 0.2)]));
 
-    assert!(model.transcribe_streaming(audio_stream, None).await.is_err());
+    assert!(model
+        .transcribe_streaming(audio_stream, None)
+        .await
+        .is_err());
 }
 
 /// An untrained model must not advertise capabilities it refuses to perform.
@@ -214,7 +221,10 @@ async fn test_conformer_metadata_is_derived_not_asserted() {
 
     assert_eq!(metadata.name, "Conformer");
     assert_eq!(metadata.architecture, "Conformer");
-    assert!(metadata.wer_benchmarks.is_empty(), "WER must not be fabricated");
+    assert!(
+        metadata.wer_benchmarks.is_empty(),
+        "WER must not be fabricated"
+    );
     assert_eq!(metadata.inference_speed, 0.0, "speed must not be asserted");
 
     // Size must equal the real parameter count times four bytes.
@@ -301,7 +311,9 @@ async fn test_trained_conformer_transcribes() {
     let dir = tempfile::tempdir().unwrap();
     let config = tiny_config();
     let path = write_checkpoint(dir.path(), &config, 11);
-    let model = ConformerModel::from_checkpoint(&path, config).await.unwrap();
+    let model = ConformerModel::from_checkpoint(&path, config)
+        .await
+        .unwrap();
 
     let result = model.transcribe(&tone(440.0, 0.2), None).await.unwrap();
     assert!(result.processing_duration.is_some());
@@ -324,18 +336,14 @@ async fn test_trained_conformer_transcribes() {
 async fn test_forward_output_depends_on_parameters() {
     let dir = tempfile::tempdir().unwrap();
     let config = tiny_config();
-    let a = ConformerModel::from_checkpoint(
-        write_checkpoint(dir.path(), &config, 3),
-        config.clone(),
-    )
-    .await
-    .unwrap();
-    let b = ConformerModel::from_checkpoint(
-        write_checkpoint(dir.path(), &config, 4),
-        config.clone(),
-    )
-    .await
-    .unwrap();
+    let a =
+        ConformerModel::from_checkpoint(write_checkpoint(dir.path(), &config, 3), config.clone())
+            .await
+            .unwrap();
+    let b =
+        ConformerModel::from_checkpoint(write_checkpoint(dir.path(), &config, 4), config.clone())
+            .await
+            .unwrap();
 
     let features = vec![vec![0.3_f32, -0.1, 0.7, 0.2]; 6];
     let out_a = a.forward(features.clone()).await.unwrap();
@@ -355,12 +363,10 @@ async fn test_forward_output_depends_on_parameters() {
 async fn test_forward_output_depends_on_input() {
     let dir = tempfile::tempdir().unwrap();
     let config = tiny_config();
-    let model = ConformerModel::from_checkpoint(
-        write_checkpoint(dir.path(), &config, 5),
-        config.clone(),
-    )
-    .await
-    .unwrap();
+    let model =
+        ConformerModel::from_checkpoint(write_checkpoint(dir.path(), &config, 5), config.clone())
+            .await
+            .unwrap();
 
     let first = vec![vec![0.3_f32, -0.1, 0.7, 0.2]; 6];
     let mut second = first.clone();
@@ -382,12 +388,10 @@ async fn test_forward_output_depends_on_input() {
 async fn test_attention_mixes_across_time() {
     let dir = tempfile::tempdir().unwrap();
     let config = tiny_config();
-    let model = ConformerModel::from_checkpoint(
-        write_checkpoint(dir.path(), &config, 9),
-        config.clone(),
-    )
-    .await
-    .unwrap();
+    let model =
+        ConformerModel::from_checkpoint(write_checkpoint(dir.path(), &config, 9), config.clone())
+            .await
+            .unwrap();
 
     let block = &model.blocks[0];
     let base = vec![vec![0.2_f32; config.encoder_dim]; 5];
@@ -417,12 +421,10 @@ async fn test_attention_mixes_across_time() {
 async fn test_feed_forward_uses_weights_and_scale() {
     let dir = tempfile::tempdir().unwrap();
     let config = tiny_config();
-    let model = ConformerModel::from_checkpoint(
-        write_checkpoint(dir.path(), &config, 13),
-        config.clone(),
-    )
-    .await
-    .unwrap();
+    let model =
+        ConformerModel::from_checkpoint(write_checkpoint(dir.path(), &config, 13), config.clone())
+            .await
+            .unwrap();
 
     let ff = &model.blocks[0].feed_forward_1;
     let input = vec![vec![0.4_f32; config.encoder_dim]; 3];
@@ -432,15 +434,19 @@ async fn test_feed_forward_uses_weights_and_scale() {
 
     for (row_full, row_half) in full.iter().zip(half.iter()) {
         for (a, b) in row_full.iter().zip(row_half.iter()) {
-            assert!((a * 0.5 - b).abs() < 1e-5, "scale was not applied: {a} vs {b}");
+            assert!(
+                (a * 0.5 - b).abs() < 1e-5,
+                "scale was not applied: {a} vs {b}"
+            );
         }
     }
 
     // The result must not be a rescale of the input (the old placeholder behaviour).
-    let is_rescale = full
-        .iter()
-        .zip(input.iter())
-        .all(|(o, i)| o.iter().zip(i.iter()).all(|(x, y)| (x - y * 0.98).abs() < 1e-5));
+    let is_rescale = full.iter().zip(input.iter()).all(|(o, i)| {
+        o.iter()
+            .zip(i.iter())
+            .all(|(x, y)| (x - y * 0.98).abs() < 1e-5)
+    });
     assert!(!is_rescale, "feed-forward is still a scalar rescale");
 }
 
@@ -450,15 +456,17 @@ async fn test_feed_forward_uses_weights_and_scale() {
 async fn test_convolution_uses_its_kernel() {
     let dir = tempfile::tempdir().unwrap();
     let config = tiny_config();
-    let mut model = ConformerModel::from_checkpoint(
-        write_checkpoint(dir.path(), &config, 17),
-        config.clone(),
-    )
-    .await
-    .unwrap();
+    let mut model =
+        ConformerModel::from_checkpoint(write_checkpoint(dir.path(), &config, 17), config.clone())
+            .await
+            .unwrap();
 
     let input: Vec<Vec<f32>> = (0..6)
-        .map(|t| (0..config.encoder_dim).map(|c| (t + c) as f32 * 0.05).collect())
+        .map(|t| {
+            (0..config.encoder_dim)
+                .map(|c| (t + c) as f32 * 0.05)
+                .collect()
+        })
         .collect();
 
     let before = model

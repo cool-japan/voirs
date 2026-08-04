@@ -183,3 +183,99 @@ async fn test_multi_demographic_mos() {
         assert!(score.is_finite() && *score >= 0.0);
     }
 }
+
+/// A synthetic clean harmonic tone: strong single fundamental, no beating
+/// partials, high harmonicity/tonality by construction.
+fn clean_tone(sample_rate: u32, seconds: f32) -> Vec<f32> {
+    let n = (sample_rate as f32 * seconds) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / sample_rate as f32;
+            (2.0 * std::f32::consts::PI * 220.0 * t).sin() * 0.6
+        })
+        .collect()
+}
+
+/// A synthetic rough/noisy signal: two closely-spaced tones (audible beating,
+/// driving up `roughness`) mixed with broadband noise (driving down
+/// `harmonicity`/`tonality`), via a deterministic LCG so the test is
+/// reproducible without pulling in a `rand` dependency.
+fn rough_noisy_signal(sample_rate: u32, seconds: f32) -> Vec<f32> {
+    let n = (sample_rate as f32 * seconds) as usize;
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / sample_rate as f32;
+            let beat = (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                + (2.0 * std::f32::consts::PI * 250.0 * t).sin();
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let noise = ((state >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0;
+            (beat * 0.3 + noise * 0.5).clamp(-1.0, 1.0)
+        })
+        .collect()
+}
+
+/// `calculate_mos_dsp_heuristic` must be a real, input-dependent measurement:
+/// a clean harmonic tone (high harmonicity/tonality, no roughness) must score
+/// higher than a rough, noisy signal, and the two must not collapse to the same
+/// value (the old fabricated-weights "neural network" produced deterministic
+/// output too, but for the wrong reason -- arbitrary sin/cos weight formulas
+/// rather than a genuine dependence on the measured acoustic content).
+#[tokio::test]
+async fn test_mos_dsp_heuristic_varies_with_signal_quality() {
+    let evaluator = QualityEvaluator::new().await.unwrap();
+    let sample_rate = 16_000u32;
+    let clean = AudioBuffer::new(clean_tone(sample_rate, 1.0), sample_rate, 1);
+    let rough = AudioBuffer::new(rough_noisy_signal(sample_rate, 1.0), sample_rate, 1);
+
+    let clean_mos = evaluator
+        .calculate_mos_dsp_heuristic(&clean, None)
+        .await
+        .unwrap();
+    let rough_mos = evaluator
+        .calculate_mos_dsp_heuristic(&rough, None)
+        .await
+        .unwrap();
+
+    assert!((1.0..=5.0).contains(&clean_mos));
+    assert!((1.0..=5.0).contains(&rough_mos));
+    assert_ne!(
+        clean_mos, rough_mos,
+        "the heuristic must not collapse different signals to the same score"
+    );
+    assert!(
+        clean_mos > rough_mos,
+        "a clean harmonic tone ({clean_mos}) should score higher than a rough, \
+         noisy signal ({rough_mos})"
+    );
+}
+
+/// A faithful reproduction of a reference (identical signal) must score higher
+/// than a reference comparison against an unrelated, noisy signal -- exercising
+/// the reference-comparison branch of `apply_dsp_heuristic_scoring`.
+#[tokio::test]
+async fn test_mos_dsp_heuristic_reference_similarity_matters() {
+    let evaluator = QualityEvaluator::new().await.unwrap();
+    let sample_rate = 16_000u32;
+    let reference_samples = clean_tone(sample_rate, 1.0);
+    let reference = AudioBuffer::new(reference_samples.clone(), sample_rate, 1);
+    let identical = AudioBuffer::new(reference_samples, sample_rate, 1);
+    let unrelated = AudioBuffer::new(rough_noisy_signal(sample_rate, 1.0), sample_rate, 1);
+
+    let identical_mos = evaluator
+        .calculate_mos_dsp_heuristic(&identical, Some(&reference))
+        .await
+        .unwrap();
+    let unrelated_mos = evaluator
+        .calculate_mos_dsp_heuristic(&unrelated, Some(&reference))
+        .await
+        .unwrap();
+
+    assert!(
+        identical_mos > unrelated_mos,
+        "an identical reproduction ({identical_mos}) should score higher against the \
+         reference than an unrelated noisy signal ({unrelated_mos})"
+    );
+}

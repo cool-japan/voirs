@@ -1,8 +1,16 @@
 //! Pure Rust implementation of `OpenAI` Whisper
 //!
-//! This module provides a complete Rust port of the `OpenAI` Whisper model,
-//! eliminating Python dependencies while maintaining full compatibility
-//! with the original model architecture and trained weights.
+//! This module provides a Rust port of the `OpenAI` Whisper architecture that runs on
+//! the real trained weights published for that architecture.
+//!
+//! # Weights are mandatory
+//!
+//! Every constructor requires real pretrained parameters, supplied through
+//! [`WhisperConfig::with_assets`](encoder::WhisperConfig::with_assets) or discovered from
+//! the environment with [`assets::assets_from_env`]. Without them construction fails
+//! closed with [`crate::RecognitionError::ModelLoadError`]: an untrained network emits
+//! text that looks like a transcript but carries no information, so VoiRS refuses to
+//! produce one.
 
 pub mod assets;
 pub mod attention;
@@ -17,7 +25,7 @@ pub mod quantization;
 pub mod streaming;
 pub mod tokenizer;
 
-pub use assets::WhisperAssets;
+pub use assets::{assets_from_env, WhisperAssets, ASSETS_ENV_VAR};
 pub use attention::{KVCache, MultiHeadAttention};
 pub use audio_processor::WhisperAudioProcessor;
 pub use batch_processing::{

@@ -323,12 +323,25 @@ impl QueryOptimizer {
 
         // Process in batches to avoid overwhelming the database
         for batch in feedback_items.chunks(self.config.batch_size) {
+            // Pre-serialize every item first, so a real serialization
+            // failure surfaces as a real `Err` here. `QueryBuilder::push_values`'s
+            // binding closure below is not fallible (it returns `()`), so it
+            // cannot propagate an error mid-batch -- panicking there instead
+            // would violate the no-panic-in-production-paths policy.
+            let mut serialized_batch = Vec::with_capacity(batch.len());
+            for (user_id, feedback) in batch {
+                let feedback_data = serde_json::to_value(feedback).map_err(|e| {
+                    PersistenceError::SerializationError {
+                        message: format!("failed to serialize feedback for user '{user_id}': {e}"),
+                    }
+                })?;
+                serialized_batch.push((user_id.clone(), feedback_data));
+            }
+
             let mut query_builder =
                 sqlx::QueryBuilder::new("INSERT INTO feedback_history (user_id, feedback_data) ");
 
-            query_builder.push_values(batch, |mut b, (user_id, feedback)| {
-                let feedback_data =
-                    serde_json::to_value(feedback).expect("Failed to serialize feedback");
+            query_builder.push_values(&serialized_batch, |mut b, (user_id, feedback_data)| {
                 b.push_bind(user_id).push_bind(feedback_data);
             });
 

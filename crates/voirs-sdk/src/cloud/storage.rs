@@ -1,3 +1,4 @@
+use super::s3_client::{AwsCredentials, S3Client};
 use super::*;
 use chrono::{DateTime, Utc};
 use oxiarc_deflate::{GzipStreamDecoder, GzipStreamEncoder};
@@ -13,13 +14,134 @@ use tokio::sync::Mutex;
 #[cfg(feature = "cloud")]
 use oxiarc_zstd;
 
-/// Cloud storage implementation for VoiRS models
+/// Which real remote backend (if any) [`VoirsCloudStorage`] was able to
+/// resolve from its [`CloudConfig`] at construction time.
+///
+/// Resolved once (see [`resolve_cloud_backend`]) so every "cloud" operation
+/// either genuinely talks to a real S3(-compatible) endpoint over HTTPS, or
+/// fails with the exact same clear reason — never silently falling back to
+/// writing local files while claiming to be cloud storage.
+enum CloudBackend {
+    /// A real, SigV4-signed S3(-compatible) client (AWS S3, or any
+    /// S3-compatible endpoint configured via `CloudCredentials::endpoint`,
+    /// e.g. MinIO/Cloudflare R2/on-prem gateways).
+    S3(S3Client),
+    /// No real backend could be resolved (missing credentials/bucket, or an
+    /// unimplemented provider such as Azure/GCP). Every operation against
+    /// this variant fails with `reason`.
+    Unsupported(String),
+}
+
+/// Resolve `config` into a real network backend, or a clear reason why none
+/// is available. Never returns a "fake" backend.
+fn resolve_cloud_backend(config: &CloudConfig) -> CloudBackend {
+    let bucket = config.storage_config.bucket_name.trim();
+    if bucket.is_empty() {
+        return CloudBackend::Unsupported(
+            "cloud storage is not configured: storage_config.bucket_name is empty".to_string(),
+        );
+    }
+
+    let http = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => return CloudBackend::Unsupported(format!("failed to build HTTP client: {e}")),
+    };
+
+    let credentials_present = !config.credentials.access_key.trim().is_empty()
+        && !config.credentials.secret_key.trim().is_empty();
+    let custom_endpoint = config
+        .credentials
+        .endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty());
+
+    match &config.provider {
+        CloudProvider::AWS => {
+            if !credentials_present {
+                return CloudBackend::Unsupported(
+                    "AWS credentials are not configured (CloudCredentials.access_key/secret_key \
+                     are empty)"
+                        .to_string(),
+                );
+            }
+            let credentials = AwsCredentials {
+                region: config.region.clone(),
+                access_key_id: config.credentials.access_key.clone(),
+                secret_access_key: config.credentials.secret_key.clone(),
+                session_token: config.credentials.token.clone(),
+            };
+            match custom_endpoint {
+                // An explicit endpoint override (e.g. a regional/VPC S3
+                // endpoint, or an S3-compatible service) uses path-style
+                // addressing rather than assuming `*.amazonaws.com`.
+                Some(endpoint) => {
+                    CloudBackend::S3(S3Client::new_path_style(http, endpoint, bucket, credentials))
+                }
+                None => CloudBackend::S3(S3Client::new_aws(http, bucket, credentials)),
+            }
+        }
+        CloudProvider::Custom(name) => {
+            let Some(endpoint) = custom_endpoint else {
+                return CloudBackend::Unsupported(format!(
+                    "custom cloud provider '{name}' requires CloudCredentials.endpoint to be \
+                     set to an S3-compatible endpoint URL"
+                ));
+            };
+            if !credentials_present {
+                return CloudBackend::Unsupported(format!(
+                    "custom cloud provider '{name}' requires CloudCredentials.access_key and \
+                     secret_key"
+                ));
+            }
+            let credentials = AwsCredentials {
+                region: config.region.clone(),
+                access_key_id: config.credentials.access_key.clone(),
+                secret_access_key: config.credentials.secret_key.clone(),
+                session_token: config.credentials.token.clone(),
+            };
+            CloudBackend::S3(S3Client::new_path_style(
+                http,
+                endpoint,
+                bucket,
+                credentials,
+            ))
+        }
+        CloudProvider::Azure => CloudBackend::Unsupported(
+            "Azure Blob Storage is not implemented in this build; use CloudProvider::AWS or \
+             CloudProvider::Custom with an S3-compatible endpoint instead"
+                .to_string(),
+        ),
+        CloudProvider::GCP => CloudBackend::Unsupported(
+            "Google Cloud Storage is not implemented in this build; use CloudProvider::AWS or \
+             CloudProvider::Custom with an S3-compatible endpoint instead"
+                .to_string(),
+        ),
+    }
+}
+
+/// Cloud storage implementation for VoiRS models.
+///
+/// The local disk cache (`local_cache`) is a genuine, always-real on-disk
+/// cache — that part was never fabricated. What used to be fabricated was
+/// the "cloud" half: `upload_model`/`download_model`/`delete_model` queue a
+/// [`SyncOperation`] that a background task executes via internal
+/// `upload_model_to_cloud`/`download_model_from_cloud`/`delete_model_from_cloud`
+/// helpers, which now perform real SigV4-signed S3(-compatible) HTTP
+/// requests through `cloud_backend` instead of mirroring to a local
+/// directory.
 pub struct VoirsCloudStorage {
     config: CloudConfig,
     local_cache: Arc<Mutex<LocalCache>>,
     sync_manager: Arc<SyncManager>,
     backup_manager: Arc<BackupManager>,
     version_manager: Arc<VersionManager>,
+    /// Real remote backend resolved once from `config` (see
+    /// [`resolve_cloud_backend`]); shared into the background sync task.
+    cloud_backend: Arc<CloudBackend>,
 }
 
 struct LocalCache {
@@ -188,12 +310,15 @@ impl VoirsCloudStorage {
             current_versions: Arc::new(Mutex::new(BTreeMap::new())),
         });
 
+        let cloud_backend = Arc::new(resolve_cloud_backend(&config));
+
         let storage = Self {
             config,
             local_cache,
             sync_manager,
             backup_manager,
             version_manager,
+            cloud_backend,
         };
 
         // Initialize cache from existing files
@@ -424,9 +549,10 @@ impl VoirsCloudStorage {
         // Start background sync task
         let sync_manager = self.sync_manager.clone();
         let local_cache = self.local_cache.clone();
+        let cloud_backend = Arc::clone(&self.cloud_backend);
 
         tokio::spawn(async move {
-            let _ = Self::run_sync_process(sync_manager, local_cache).await;
+            let _ = Self::run_sync_process(sync_manager, local_cache, cloud_backend).await;
         });
 
         Ok(())
@@ -435,6 +561,7 @@ impl VoirsCloudStorage {
     async fn run_sync_process(
         sync_manager: Arc<SyncManager>,
         local_cache: Arc<Mutex<LocalCache>>,
+        cloud_backend: Arc<CloudBackend>,
     ) -> Result<()> {
         let operations = {
             let mut queue = sync_manager.sync_queue.lock().await;
@@ -446,7 +573,7 @@ impl VoirsCloudStorage {
         let mut errors = Vec::new();
 
         for operation in operations {
-            match Self::execute_sync_operation(&operation, &local_cache).await {
+            match Self::execute_sync_operation(&operation, &local_cache, &cloud_backend).await {
                 Ok(_) => {}
                 Err(e) => {
                     errors.push(SyncError {
@@ -468,22 +595,38 @@ impl VoirsCloudStorage {
         Ok(())
     }
 
+    /// Resolve the real S3(-compatible) client for `cloud_backend`, or a
+    /// clear `Err` explaining why no real backend is available for `op`.
+    fn require_s3<'a>(
+        cloud_backend: &'a CloudBackend,
+        op: &str,
+        model_id: &str,
+    ) -> Result<&'a S3Client> {
+        match cloud_backend {
+            CloudBackend::S3(client) => Ok(client),
+            CloudBackend::Unsupported(reason) => Err(VoirsError::config_error(format!(
+                "cannot {op} model '{model_id}' to/from cloud storage: {reason}"
+            ))),
+        }
+    }
+
     async fn execute_sync_operation(
         operation: &SyncOperation,
         local_cache: &Arc<Mutex<LocalCache>>,
+        cloud_backend: &CloudBackend,
     ) -> Result<()> {
         match operation {
             SyncOperation::Upload(model_id) => {
                 tracing::info!("Uploading model: {}", model_id);
-                Self::upload_model_to_cloud(model_id, local_cache).await
+                Self::upload_model_to_cloud(model_id, local_cache, cloud_backend).await
             }
             SyncOperation::Download(model_id) => {
                 tracing::info!("Downloading model: {}", model_id);
-                Self::download_model_from_cloud(model_id, local_cache).await
+                Self::download_model_from_cloud(model_id, local_cache, cloud_backend).await
             }
             SyncOperation::Delete(model_id) => {
                 tracing::info!("Deleting model: {}", model_id);
-                Self::delete_model_from_cloud(model_id).await
+                Self::delete_model_from_cloud(model_id, cloud_backend).await
             }
             SyncOperation::Verify(model_id) => {
                 tracing::info!("Verifying model: {}", model_id);
@@ -492,101 +635,72 @@ impl VoirsCloudStorage {
         }
     }
 
+    /// Really upload the model's bytes and metadata to `cloud_backend` as two
+    /// S3 objects (`{model_id}.model`, `{model_id}.metadata`) via a genuine
+    /// SigV4-signed HTTP PUT — no local-file mirroring.
     async fn upload_model_to_cloud(
         model_id: &str,
         local_cache: &Arc<Mutex<LocalCache>>,
+        cloud_backend: &CloudBackend,
     ) -> Result<()> {
-        let cache = local_cache.lock().await;
-        if let Some(model) = cache.models.get(model_id) {
+        let client = Self::require_s3(cloud_backend, "upload", model_id)?;
+
+        let (data, metadata) = {
+            let cache = local_cache.lock().await;
+            let Some(model) = cache.models.get(model_id) else {
+                return Err(VoirsError::config_error(format!(
+                    "Model {model_id} not found in local cache"
+                )));
+            };
             let data = fs::read(&model.local_path).await.map_err(|e| {
                 VoirsError::config_error(format!("Failed to read model file: {}", e))
             })?;
+            (data, model.metadata.clone())
+        };
 
-            // Calculate checksum for verification
-            let checksum = Self::calculate_checksum(&data);
+        let checksum = Self::calculate_checksum(&data);
+        let compressed_data = Self::compress_data(&data)?;
 
-            // Compress data if enabled
-            let compressed_data = Self::compress_data(&data)?;
+        client
+            .put_object(
+                &format!("{model_id}.model"),
+                compressed_data,
+                "application/octet-stream",
+            )
+            .await?;
 
-            // Simulate cloud upload with local storage for now
-            let cloud_path = cache
-                .cache_dir
-                .join("cloud_mirror")
-                .join(format!("{}.cloud", model_id));
+        let metadata_json = serde_json::to_vec(&metadata).map_err(|e| {
+            VoirsError::config_error(format!("Failed to serialize metadata: {}", e))
+        })?;
+        client
+            .put_object(
+                &format!("{model_id}.metadata"),
+                metadata_json,
+                "application/json",
+            )
+            .await?;
 
-            // Create parent directory
-            if let Some(parent_dir) = cloud_path.parent() {
-                fs::create_dir_all(parent_dir).await.map_err(|e| {
-                    VoirsError::config_error(format!(
-                        "Failed to create cloud mirror directory: {}",
-                        e
-                    ))
-                })?;
-            }
-
-            // Write compressed data and metadata
-            fs::write(&cloud_path, &compressed_data)
-                .await
-                .map_err(|e| {
-                    VoirsError::config_error(format!("Failed to write cloud data: {}", e))
-                })?;
-
-            let metadata_path = cloud_path.with_extension("metadata");
-            let metadata_json = serde_json::to_string_pretty(&model.metadata).map_err(|e| {
-                VoirsError::config_error(format!("Failed to serialize metadata: {}", e))
-            })?;
-            fs::write(&metadata_path, metadata_json)
-                .await
-                .map_err(|e| {
-                    VoirsError::config_error(format!("Failed to write metadata: {}", e))
-                })?;
-
-            tracing::info!(
-                "Successfully uploaded model {} to cloud (checksum: {})",
-                model_id,
-                checksum
-            );
-            Ok(())
-        } else {
-            Err(VoirsError::config_error(format!(
-                "Model {} not found in local cache",
-                model_id
-            )))
-        }
+        tracing::info!(
+            "Successfully uploaded model {} to cloud (checksum: {})",
+            model_id,
+            checksum
+        );
+        Ok(())
     }
 
+    /// Really download the model's bytes and metadata from `cloud_backend`
+    /// via genuine SigV4-signed HTTP GET requests, then verify the checksum
+    /// and populate the local cache — no local-file mirroring.
     async fn download_model_from_cloud(
         model_id: &str,
         local_cache: &Arc<Mutex<LocalCache>>,
+        cloud_backend: &CloudBackend,
     ) -> Result<()> {
-        let cache_dir = {
-            let cache = local_cache.lock().await;
-            cache.cache_dir.clone()
-        };
+        let client = Self::require_s3(cloud_backend, "download", model_id)?;
 
-        // Simulate cloud download from local mirror
-        let cloud_path = cache_dir
-            .join("cloud_mirror")
-            .join(format!("{}.cloud", model_id));
-        let metadata_path = cloud_path.with_extension("metadata");
-
-        if !cloud_path.exists() {
-            return Err(VoirsError::config_error(format!(
-                "Model {} not found in cloud storage",
-                model_id
-            )));
-        }
-
-        // Read compressed data and metadata
-        let compressed_data = fs::read(&cloud_path)
-            .await
-            .map_err(|e| VoirsError::config_error(format!("Failed to read cloud data: {}", e)))?;
-
-        let metadata_json = fs::read_to_string(&metadata_path)
-            .await
-            .map_err(|e| VoirsError::config_error(format!("Failed to read metadata: {}", e)))?;
-
-        let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
+        let compressed_data = client.get_object(&format!("{model_id}.model")).await?;
+        let metadata_json = client.get_object(&format!("{model_id}.metadata")).await?;
+        let metadata: ModelMetadata = serde_json::from_slice(&metadata_json)
             .map_err(|e| VoirsError::config_error(format!("Failed to parse metadata: {}", e)))?;
 
         // Decompress data
@@ -602,6 +716,7 @@ impl VoirsCloudStorage {
         }
 
         // Save to local cache
+        let cache_dir = { local_cache.lock().await.cache_dir.clone() };
         let local_path = cache_dir.join(format!("{}.model", model_id));
         fs::write(&local_path, &data)
             .await
@@ -627,19 +742,20 @@ impl VoirsCloudStorage {
         Ok(())
     }
 
-    async fn delete_model_from_cloud(model_id: &str) -> Result<()> {
-        // For the local mirror simulation, we would delete the cloud files
-        // In a real implementation, this would call the cloud provider's delete API
+    /// Really delete both cloud objects for `model_id` via genuine
+    /// SigV4-signed HTTP DELETE requests.
+    async fn delete_model_from_cloud(model_id: &str, cloud_backend: &CloudBackend) -> Result<()> {
+        let client = Self::require_s3(cloud_backend, "delete", model_id)?;
 
-        tracing::info!("Marking model {} for deletion from cloud", model_id);
+        client.delete_object(&format!("{model_id}.model")).await?;
+        client
+            .delete_object(&format!("{model_id}.metadata"))
+            .await?;
 
-        // Simulate deletion by marking as deleted (in real implementation, call cloud API)
-        // For now, we'll just log the operation since it's a placeholder
-        tracing::warn!(
-            "Cloud deletion is simulated - model {} marked for removal",
+        tracing::info!(
+            "Successfully deleted model {} from cloud storage",
             model_id
         );
-
         Ok(())
     }
 
@@ -760,7 +876,9 @@ impl CloudStorage for VoirsCloudStorage {
         );
 
         // Attempt cloud download
-        match Self::download_model_from_cloud(model_id, &self.local_cache).await {
+        match Self::download_model_from_cloud(model_id, &self.local_cache, &self.cloud_backend)
+            .await
+        {
             Ok(()) => {
                 // Successfully downloaded, now retrieve from cache
                 let cache = self.local_cache.lock().await;
@@ -1203,5 +1321,310 @@ mod tests {
 
         #[cfg(not(feature = "cloud"))]
         assert_eq!(storage.get_compression_type(), CompressionType::Gzip);
+    }
+
+    // ---- Real cloud-backend resolution & S3(-compatible) round trips -----
+    //
+    // Direct regression coverage for the fabrication bug: `VoirsCloudStorage`
+    // used to silently mirror "cloud" uploads/downloads/deletes to a local
+    // `cloud_mirror` directory regardless of `CloudConfig`, and
+    // `delete_model_from_cloud` did not delete anything at all. These tests
+    // prove real network requests are attempted and real bytes move over an
+    // actual TCP socket, using a hand-rolled loopback HTTP server (not a
+    // canned-response mock).
+
+    #[test]
+    fn test_resolve_cloud_backend_without_credentials_is_honestly_unsupported() {
+        let config = CloudConfig::default(); // empty access_key/secret_key
+        match resolve_cloud_backend(&config) {
+            CloudBackend::Unsupported(reason) => {
+                assert!(reason.to_lowercase().contains("credentials"));
+            }
+            CloudBackend::S3(_) => panic!("must not resolve to a real backend without credentials"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_cloud_backend_azure_and_gcp_are_honestly_unsupported() {
+        for provider in [CloudProvider::Azure, CloudProvider::GCP] {
+            let mut config = CloudConfig::default();
+            config.provider = provider;
+            config.credentials.access_key = "key".to_string();
+            config.credentials.secret_key = "secret".to_string();
+            match resolve_cloud_backend(&config) {
+                CloudBackend::Unsupported(_) => {}
+                CloudBackend::S3(_) => panic!("Azure/GCP must not fabricate a working S3 backend"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_resolve_cloud_backend_empty_bucket_is_unsupported() {
+        let mut config = CloudConfig::default();
+        config.storage_config.bucket_name = String::new();
+        config.credentials.access_key = "key".to_string();
+        config.credentials.secret_key = "secret".to_string();
+        assert!(matches!(
+            resolve_cloud_backend(&config),
+            CloudBackend::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn test_resolve_cloud_backend_custom_endpoint_with_credentials_resolves_to_real_s3() {
+        let mut config = CloudConfig::default();
+        config.provider = CloudProvider::Custom("minio".to_string());
+        config.credentials.access_key = "key".to_string();
+        config.credentials.secret_key = "secret".to_string();
+        config.credentials.endpoint = Some("http://127.0.0.1:9000".to_string());
+        assert!(matches!(
+            resolve_cloud_backend(&config),
+            CloudBackend::S3(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_upload_download_delete_model_to_cloud_round_trip_real_bytes_over_loopback_http()
+    {
+        let server = spawn_mock_object_server().await;
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut config = CloudConfig::default();
+        config.provider = CloudProvider::Custom("loopback-test".to_string());
+        config.storage_config.bucket_name = "test-bucket".to_string();
+        config.credentials.access_key = "AKIATESTACCESSKEY".to_string();
+        config.credentials.secret_key = "test/secret/access/key".to_string();
+        config.credentials.endpoint = Some(format!("http://{}", server.addr));
+
+        let storage = VoirsCloudStorage::new(config, temp_dir.path().to_path_buf())
+            .await
+            .unwrap();
+        assert!(
+            matches!(*storage.cloud_backend, CloudBackend::S3(_)),
+            "loopback config with real credentials must resolve to a real S3 backend"
+        );
+
+        let model_id = "cloud_round_trip_model";
+        let data = b"real model weight bytes, not a fabricated placeholder".to_vec();
+
+        // Populate the local cache the same way the public API does.
+        storage.upload_model(model_id, &data).await.unwrap();
+
+        // Directly drive the real cloud-upload helper (bypassing the
+        // background sync task purely for test determinism - this is the
+        // exact function `execute_sync_operation` calls in production).
+        VoirsCloudStorage::upload_model_to_cloud(
+            model_id,
+            &storage.local_cache,
+            &storage.cloud_backend,
+        )
+        .await
+        .unwrap();
+
+        // The mock server really received both objects over a real socket.
+        {
+            let store = server.store.lock().unwrap();
+            assert!(store.contains_key(&format!("{model_id}.model")));
+            assert!(store.contains_key(&format!("{model_id}.metadata")));
+        }
+
+        // Evict from the local cache to force `download_model` down the real
+        // cloud-download path rather than serving from local disk.
+        {
+            let mut cache = storage.local_cache.lock().await;
+            cache.models.remove(model_id);
+        }
+        let downloaded = storage.download_model(model_id).await.unwrap();
+        assert_eq!(
+            downloaded, data,
+            "downloaded bytes must match the originally uploaded bytes exactly"
+        );
+
+        VoirsCloudStorage::delete_model_from_cloud(model_id, &storage.cloud_backend)
+            .await
+            .unwrap();
+        {
+            let store = server.store.lock().unwrap();
+            assert!(
+                !store.contains_key(&format!("{model_id}.model")),
+                "delete must really remove the object, unlike the old always-succeeds no-op"
+            );
+            assert!(!store.contains_key(&format!("{model_id}.metadata")));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cloud_upload_without_credentials_fails_closed_not_fabricated_success() {
+        // Direct regression test: the old implementation always returned
+        // `Ok(())` from the cloud-sync helpers regardless of configuration.
+        let temp_dir = TempDir::new().unwrap();
+        let config = CloudConfig::default(); // no credentials configured
+        let storage = VoirsCloudStorage::new(config, temp_dir.path().to_path_buf())
+            .await
+            .unwrap();
+
+        let model_id = "unconfigured_model";
+        storage.upload_model(model_id, b"data").await.unwrap();
+
+        let result = VoirsCloudStorage::upload_model_to_cloud(
+            model_id,
+            &storage.local_cache,
+            &storage.cloud_backend,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "must not report success when no real cloud backend is configured"
+        );
+
+        let result =
+            VoirsCloudStorage::delete_model_from_cloud(model_id, &storage.cloud_backend).await;
+        assert!(
+            result.is_err(),
+            "delete must also fail closed rather than silently no-op-succeeding"
+        );
+    }
+
+    // ---- Minimal real loopback HTTP server for the tests above -----------
+
+    struct MockObjectServer {
+        addr: std::net::SocketAddr,
+        store: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>>,
+    }
+
+    async fn spawn_mock_object_server() -> MockObjectServer {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        crate::ensure_crypto_provider();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock object server listener");
+        let addr = listener.local_addr().expect("local addr");
+        let store: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let store_for_task = store.clone();
+
+        async fn read_request(
+            socket: &mut TcpStream,
+        ) -> (String, String, std::collections::HashMap<String, String>, Vec<u8>) {
+            let mut buf: Vec<u8> = Vec::new();
+            let mut tmp = [0u8; 8192];
+            let header_len = loop {
+                let n = socket.read(&mut tmp).await.expect("socket read failed");
+                assert!(n > 0, "connection closed before headers were complete");
+                buf.extend_from_slice(&tmp[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+            };
+            let header_text = String::from_utf8_lossy(&buf[..header_len]).to_string();
+            let mut lines = header_text.split("\r\n");
+            let request_line = lines.next().unwrap_or_default();
+            let mut parts = request_line.split_whitespace();
+            let method = parts.next().unwrap_or_default().to_string();
+            let path = parts.next().unwrap_or_default().to_string();
+
+            let mut headers = std::collections::HashMap::new();
+            for line in lines {
+                if let Some((k, v)) = line.split_once(':') {
+                    headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
+                }
+            }
+            let content_length: usize = headers
+                .get("content-length")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let mut body = buf[header_len..].to_vec();
+            while body.len() < content_length {
+                let n = socket.read(&mut tmp).await.expect("socket read failed");
+                assert!(n > 0, "connection closed before body was complete");
+                body.extend_from_slice(&tmp[..n]);
+            }
+            body.truncate(content_length);
+            (method, path, headers, body)
+        }
+
+        async fn write_raw(socket: &mut TcpStream, head: &str, body: &[u8]) {
+            socket.write_all(head.as_bytes()).await.expect("write head");
+            socket.write_all(body).await.expect("write body");
+            socket.flush().await.expect("flush");
+        }
+
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => break,
+                };
+                let store = store_for_task.clone();
+                tokio::spawn(async move {
+                    let (method, path, headers, body) = read_request(&mut socket).await;
+                    assert!(
+                        headers
+                            .get("authorization")
+                            .is_some_and(|a| a.starts_with("AWS4-HMAC-SHA256 Credential=")),
+                        "expected a real SigV4 Authorization header, got: {headers:?}"
+                    );
+                    // Path-style: "/{bucket}/{key}".
+                    let key = path
+                        .splitn(3, '/')
+                        .nth(2)
+                        .unwrap_or_default()
+                        .to_string();
+                    match method.as_str() {
+                        "PUT" => {
+                            store.lock().expect("store lock").insert(key, body);
+                            write_raw(
+                                &mut socket,
+                                "HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                                b"",
+                            )
+                            .await;
+                        }
+                        "GET" => {
+                            let found = store.lock().expect("store lock").get(&key).cloned();
+                            match found {
+                                Some(data) => {
+                                    let head = format!(
+                                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                                        data.len()
+                                    );
+                                    write_raw(&mut socket, &head, &data).await;
+                                }
+                                None => {
+                                    write_raw(
+                                        &mut socket,
+                                        "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                                        b"",
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
+                        "DELETE" => {
+                            store.lock().expect("store lock").remove(&key);
+                            write_raw(
+                                &mut socket,
+                                "HTTP/1.1 204 No Content\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                                b"",
+                            )
+                            .await;
+                        }
+                        _ => {
+                            write_raw(
+                                &mut socket,
+                                "HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                                b"",
+                            )
+                            .await;
+                        }
+                    }
+                });
+            }
+        });
+
+        MockObjectServer { addr, store }
     }
 }

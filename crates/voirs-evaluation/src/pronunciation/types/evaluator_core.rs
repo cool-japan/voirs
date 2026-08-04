@@ -208,7 +208,8 @@ impl PronunciationEvaluatorImpl {
                     .iter()
                     .filter(|p| self.get_phonetic_features(&p.phoneme.symbol).is_vowel)
                     .count()
-                    .max(usize::from(!aligned_word_phonemes.is_empty())) as f32;
+                    .max(usize::from(!aligned_word_phonemes.is_empty()))
+                    as f32;
                 if actual_syllables == 0.0 {
                     0.5
                 } else {
@@ -1059,7 +1060,9 @@ impl PronunciationEvaluatorImpl {
                 p.phoneme.duration_ms.map(|expected_ms| {
                     let expected_ms = expected_ms.max(1.0);
                     let actual_ms = ((p.end_time - p.start_time) * 1000.0).max(0.001);
-                    (actual_ms / expected_ms).min(expected_ms / actual_ms).clamp(0.0, 1.0)
+                    (actual_ms / expected_ms)
+                        .min(expected_ms / actual_ms)
+                        .clamp(0.0, 1.0)
                 })
             })
             .collect();

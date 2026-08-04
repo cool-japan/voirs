@@ -23,7 +23,7 @@ use crate::FeedbackSystem;
 /// [`create_schema`]. Every resolver in this module goes through this --
 /// there is no per-resolver mock data path.
 fn persistence<'ctx>(ctx: &Context<'ctx>) -> FieldResult<&'ctx Arc<dyn PersistenceManager>> {
-    Ok(ctx.data::<Arc<dyn PersistenceManager>>()?)
+    ctx.data::<Arc<dyn PersistenceManager>>()
 }
 
 /// GraphQL schema type
