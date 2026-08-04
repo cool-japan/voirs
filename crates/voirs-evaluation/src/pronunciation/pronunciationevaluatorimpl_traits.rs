@@ -16,7 +16,6 @@ use crate::traits::{
 };
 use async_trait::async_trait;
 use scirs2_core::parallel_ops::*;
-use std::time::Instant;
 use voirs_recognizer::traits::{AlignedPhoneme, PhonemeAlignment};
 use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme, SyllablePosition};
 
@@ -31,64 +30,62 @@ impl PronunciationEvaluator for PronunciationEvaluatorImpl {
         config: Option<&PronunciationEvaluationConfig>,
     ) -> EvaluationResult<PronunciationScore> {
         let config = config.unwrap_or(&self.config);
-        let mock_alignment = self.create_mock_alignment(audio, text).await?;
-        self.evaluate_pronunciation_with_alignment(audio, &mock_alignment, Some(config))
+        let alignment = self.align_phonemes_to_audio(audio, text).await?;
+        self.evaluate_pronunciation_with_alignment(audio, &alignment, text, Some(config))
             .await
     }
     async fn evaluate_pronunciation_with_alignment(
         &self,
         _audio: &AudioBuffer,
         alignment: &PhonemeAlignment,
+        reference_text: &str,
         config: Option<&PronunciationEvaluationConfig>,
     ) -> EvaluationResult<PronunciationScore> {
         let config = config.unwrap_or(&self.config);
-        let start_time = Instant::now();
-        let expected_text = "Hello world";
+        // The phoneme/word accuracy aggregates and the prosody scores are all real,
+        // alignment-derived computations (see `align_phonemes_to_audio`,
+        // `calculate_phoneme_accuracy`, `calculate_word_accuracy`); they are always
+        // computed against the caller's actual `reference_text` rather than a
+        // hardcoded placeholder. `phoneme_level_scoring`/`word_level_scoring` only
+        // control whether the detailed per-item breakdown is included in the result;
+        // the aggregates they feed into `overall_score` are never skipped.
+        let phoneme_scores_full = self
+            .calculate_phoneme_accuracy(alignment, reference_text)
+            .await?;
+        let word_scores_full = self
+            .calculate_word_accuracy(alignment, reference_text)
+            .await?;
+        let fluency_score = self.calculate_fluency(alignment, reference_text).await?;
+        let rhythm_score = self.calculate_rhythm(alignment).await?;
+        let stress_accuracy = self
+            .calculate_stress_accuracy(alignment, reference_text)
+            .await?;
+        let intonation_accuracy = self
+            .calculate_intonation_accuracy(alignment, reference_text)
+            .await?;
+        let phoneme_accuracy = if phoneme_scores_full.is_empty() {
+            0.0
+        } else {
+            phoneme_scores_full.iter().map(|s| s.accuracy).sum::<f32>()
+                / phoneme_scores_full.len() as f32
+        };
+        let word_accuracy = if word_scores_full.is_empty() {
+            0.0
+        } else {
+            word_scores_full.iter().map(|s| s.accuracy).sum::<f32>()
+                / word_scores_full.len() as f32
+        };
+        let overall_score = (phoneme_accuracy + word_accuracy + fluency_score + rhythm_score) / 4.0;
         let phoneme_scores = if config.phoneme_level_scoring {
-            self.calculate_phoneme_accuracy(alignment, expected_text)
-                .await?
+            phoneme_scores_full
         } else {
             Vec::new()
         };
         let word_scores = if config.word_level_scoring {
-            self.calculate_word_accuracy(alignment, expected_text)
-                .await?
+            word_scores_full
         } else {
             Vec::new()
         };
-        let fluency_score = if config.prosody_assessment {
-            self.calculate_fluency(alignment, expected_text).await?
-        } else {
-            0.8
-        };
-        let rhythm_score = if config.prosody_assessment {
-            self.calculate_rhythm(alignment).await?
-        } else {
-            0.8
-        };
-        let stress_accuracy = if config.prosody_assessment {
-            self.calculate_stress_accuracy(alignment, expected_text)
-                .await?
-        } else {
-            0.8
-        };
-        let intonation_accuracy = if config.prosody_assessment {
-            self.calculate_intonation_accuracy(alignment, expected_text)
-                .await?
-        } else {
-            0.8
-        };
-        let phoneme_accuracy = if phoneme_scores.is_empty() {
-            0.85
-        } else {
-            phoneme_scores.iter().map(|s| s.accuracy).sum::<f32>() / phoneme_scores.len() as f32
-        };
-        let word_accuracy = if word_scores.is_empty() {
-            0.85
-        } else {
-            word_scores.iter().map(|s| s.accuracy).sum::<f32>() / word_scores.len() as f32
-        };
-        let overall_score = (phoneme_accuracy + word_accuracy + fluency_score + rhythm_score) / 4.0;
         let feedback = self
             .generate_feedback(&phoneme_scores, &word_scores)
             .await?;
@@ -101,7 +98,11 @@ impl PronunciationEvaluator for PronunciationEvaluatorImpl {
             stress_accuracy,
             intonation_accuracy,
             feedback,
-            confidence: 0.80,
+            // The aligner's own confidence: the mean acoustic Goodness-of-Pronunciation
+            // score across all reference phonemes (see `align_phonemes_to_audio`).
+            // Genuinely reflects how much real acoustic evidence backed the alignment
+            // rather than a fixed placeholder.
+            confidence: alignment.alignment_confidence.clamp(0.0, 1.0),
         })
     }
     async fn evaluate_pronunciation_batch(

@@ -279,6 +279,35 @@ fn varmap_param_count(varmap: &VarMap) -> usize {
     varmap.all_vars().iter().map(|var| var.elem_count()).sum()
 }
 
+/// [`ConvolutionalModel`]'s downsampling stages stop shrinking the sequence
+/// once its length is at or below this many frames (matching the
+/// `dims()[2] > 2` guard in [`ConvolutionalModel::forward_tensor`], which
+/// skips the stride-2 `index_select` once the sequence gets this short).
+const CONV_DOWNSAMPLE_MIN_LEN: usize = 2;
+
+/// Predict the exact sequence length [`ConvolutionalModel::forward_tensor`]
+/// produces after `num_stages` "same-padding conv + conditional stride-2
+/// downsample" stages, starting from `input_len`.
+///
+/// Each stage halves the length (rounding up, matching `step_by(2)`) unless
+/// the length is already at or below [`CONV_DOWNSAMPLE_MIN_LEN`], in which
+/// case that stage leaves it unchanged - mirroring `forward_tensor`'s guard
+/// exactly. [`ConvolutionalModel::new`] uses this to size the first `Linear`
+/// layer correctly; previously that size was a hand-derived `input_dim / 4`
+/// formula that assumed a flat 4x downsample regardless of `num_stages`,
+/// which drifted out of sync with the real (up to 8x, for three stages)
+/// downsampling actually performed and made every forward pass fail with a
+/// matmul shape-mismatch error for most `input_dim` values.
+fn conv_output_sequence_length(input_len: usize, num_stages: usize) -> usize {
+    let mut len = input_len;
+    for _ in 0..num_stages {
+        if len > CONV_DOWNSAMPLE_MIN_LEN {
+            len = len.div_ceil(2);
+        }
+    }
+    len
+}
+
 impl FeedforwardModel {
     /// Create a new feedforward neural network model
     pub fn new(config: NeuralSpatialConfig, device: Device) -> Result<Self> {
@@ -611,9 +640,17 @@ impl ConvolutionalModel {
             in_channels = out_channels;
         }
 
-        // Create linear layers after convolutional feature extraction
+        // Create linear layers after convolutional feature extraction. The
+        // flattened size is `final_channels * final_sequence_length`: the
+        // channel count is exactly `in_channels` (the last conv layer's
+        // output channels, tracked above), and the sequence length is the
+        // *real*, exactly-predicted post-downsampling length (see
+        // `conv_output_sequence_length`) - not a hand-derived formula that
+        // can silently drift out of sync with `forward_tensor`'s actual
+        // downsampling and break every forward pass with a shape mismatch.
         let mut linear_layers = Vec::new();
-        let conv_output_size = 64 * (config.input_dim / 4); // Estimated after pooling
+        let final_seq_len = conv_output_sequence_length(config.input_dim, conv_layers.len());
+        let conv_output_size = in_channels * final_seq_len;
         let mut input_dim = conv_output_size;
 
         for &hidden_dim in &config.hidden_dims {
@@ -689,10 +726,15 @@ impl NeuralModel for ConvolutionalModel {
                 .relu()
                 .map_err(|e| Error::LegacyProcessing(format!("ReLU activation failed: {e}")))?;
 
-            // Apply simple stride-based downsampling instead of max pooling
-            // Note: Candle doesn't have max_pool1d, so we use strided convolution approach
+            // Apply simple stride-based downsampling instead of max pooling.
+            // Note: Candle doesn't have max_pool1d, so we use strided
+            // convolution approach. The `> CONV_DOWNSAMPLE_MIN_LEN` guard
+            // must stay in lockstep with `conv_output_sequence_length`
+            // (used by `ConvolutionalModel::new` to size the first `Linear`
+            // layer) - see that function's doc comment.
             let current_shape = x.shape();
-            if current_shape.dims().len() >= 3 && current_shape.dims()[2] > 2 {
+            if current_shape.dims().len() >= 3 && current_shape.dims()[2] > CONV_DOWNSAMPLE_MIN_LEN
+            {
                 // Simple downsampling by taking every 2nd element
                 let indices: Vec<usize> = (0..current_shape.dims()[2]).step_by(2).collect();
                 let indices_tensor = Tensor::from_vec(
@@ -1415,6 +1457,21 @@ mod tests {
         }
     }
 
+    fn tiny_convolutional_config(input_dim: usize) -> NeuralSpatialConfig {
+        NeuralSpatialConfig {
+            model_type: NeuralModelType::Convolutional,
+            hidden_dims: vec![8],
+            input_dim,
+            output_channels: 1,
+            sample_rate: 48000,
+            buffer_size: 4,
+            use_gpu: false,
+            quality: 0.8,
+            realtime_constraints: RealtimeConstraints::default(),
+            training_config: None,
+        }
+    }
+
     fn sample_input() -> NeuralInputFeatures {
         NeuralInputFeatures {
             position: Position3D::new(0.5, -0.3, 0.2),
@@ -1690,5 +1747,125 @@ mod tests {
             * 4;
         assert_eq!(model.memory_usage(), exact);
         assert!(exact > 0);
+    }
+
+    // ---- ConvolutionalModel: real flattened-size prediction, not a
+    // hand-derived `/4` formula that silently drifts out of sync with the
+    // actual conv+downsample stack and breaks every forward pass ----
+
+    #[test]
+    fn test_conv_output_sequence_length_matches_actual_downsampling() {
+        // Three downsampling stages (the fixed `conv_channels = [16, 32, 64]`
+        // in `ConvolutionalModel::new`), covering both the general
+        // ceil-halving case and the "already at the floor" edge case.
+        assert_eq!(conv_output_sequence_length(32, 3), 4); // 32->16->8->4
+        assert_eq!(conv_output_sequence_length(16, 3), 2); // 16->8->4->2
+        assert_eq!(conv_output_sequence_length(8, 3), 2); // 8->4->2->2 (floor)
+        assert_eq!(conv_output_sequence_length(1, 3), 1); // already <= floor
+        assert_eq!(conv_output_sequence_length(100, 3), 13); // 100->50->25->13
+    }
+
+    #[test]
+    fn test_convolutional_forward_succeeds_across_input_dims() {
+        // Regression test: `conv_output_size` used to be a hand-derived
+        // `64 * (input_dim / 4)` formula that assumed a flat 4x downsample,
+        // but the real three-stage stack downsamples by up to 8x - so the
+        // first `Linear` layer was built with the wrong input dimension and
+        // every forward pass failed with a matmul shape-mismatch error for
+        // most `input_dim` values (verified: input_dim=16/32/64 all failed
+        // before this fix; only the coincidental input_dim=8 case happened
+        // to work). This must now succeed across a range of realistic sizes.
+        for input_dim in [8usize, 13, 16, 31, 32, 64, 100] {
+            let model = ConvolutionalModel::new(tiny_convolutional_config(input_dim), Device::Cpu)
+                .unwrap_or_else(|e| {
+                    panic!("model construction failed for input_dim={input_dim}: {e}")
+                });
+            let input = sample_input();
+            let result = model.forward(&input);
+            assert!(
+                result.is_ok(),
+                "forward() failed for input_dim={input_dim}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_convolutional_forward_is_deterministic() {
+        let model = ConvolutionalModel::new(tiny_convolutional_config(32), Device::Cpu)
+            .expect("model construction");
+        let input = sample_input();
+
+        let first = model.forward(&input).expect("first forward pass");
+        let second = model.forward(&input).expect("second forward pass");
+
+        assert_eq!(
+            first.binaural_audio, second.binaural_audio,
+            "ConvolutionalModel::forward must be deterministic for fixed weights and input"
+        );
+    }
+
+    #[test]
+    fn test_convolutional_update_parameters_actually_changes_weights() {
+        let mut model = ConvolutionalModel::new(tiny_convolutional_config(32), Device::Cpu)
+            .expect("model construction");
+        let sum_before: f32 = model
+            .trainable_vars()
+            .iter()
+            .map(|v| v.sum_all().unwrap().to_scalar::<f32>().unwrap())
+            .sum();
+
+        let mut params = HashMap::new();
+        params.insert(
+            "output.bias".to_string(),
+            Tensor::ones(4, candle_core::DType::F32, &Device::Cpu).unwrap(),
+        );
+        model
+            .update_parameters(&params)
+            .expect("update_parameters with a real, correctly-shaped tensor must succeed");
+
+        let sum_after: f32 = model
+            .trainable_vars()
+            .iter()
+            .map(|v| v.sum_all().unwrap().to_scalar::<f32>().unwrap())
+            .sum();
+
+        assert_ne!(
+            sum_before, sum_after,
+            "update_parameters must really write into the model's weights"
+        );
+    }
+
+    #[test]
+    fn test_convolutional_save_load_round_trip_restores_real_weights() {
+        let mut model = ConvolutionalModel::new(tiny_convolutional_config(32), Device::Cpu)
+            .expect("model construction");
+
+        let mut params = HashMap::new();
+        params.insert(
+            "output.bias".to_string(),
+            Tensor::ones(4, candle_core::DType::F32, &Device::Cpu).unwrap(),
+        );
+        model.update_parameters(&params).expect("perturb weights");
+
+        let input = sample_input();
+        let expected = model.forward(&input).expect("forward on trained model");
+
+        let path = temp_model_path("convolutional_roundtrip");
+        model.save(path.to_str().unwrap()).expect("save");
+
+        let mut reloaded = ConvolutionalModel::new(tiny_convolutional_config(32), Device::Cpu)
+            .expect("fresh model construction");
+        reloaded
+            .load(path.to_str().unwrap())
+            .expect("load should restore the real saved weights");
+
+        let actual = reloaded.forward(&input).expect("forward on reloaded model");
+        assert_eq!(
+            expected.binaural_audio, actual.binaural_audio,
+            "loading a saved convolutional model must restore bit-identical weights"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.safetensors", path.to_str().unwrap()));
     }
 }

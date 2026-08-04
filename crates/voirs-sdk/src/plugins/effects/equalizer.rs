@@ -56,34 +56,31 @@ impl EqualizerEffect {
     }
 
     fn update_filters(&self, sample_rate: u32) {
-        let low_gain = *self.low_gain.read().expect("lock should not be poisoned");
-        let mid_gain = *self.mid_gain.read().expect("lock should not be poisoned");
-        let high_gain = *self.high_gain.read().expect("lock should not be poisoned");
-        let low_freq = *self.low_freq.read().expect("lock should not be poisoned");
-        let high_freq = *self.high_freq.read().expect("lock should not be poisoned");
+        let low_gain = *self.low_gain.read().unwrap_or_else(|e| e.into_inner());
+        let mid_gain = *self.mid_gain.read().unwrap_or_else(|e| e.into_inner());
+        let high_gain = *self.high_gain.read().unwrap_or_else(|e| e.into_inner());
+        let low_freq = *self.low_freq.read().unwrap_or_else(|e| e.into_inner());
+        let high_freq = *self.high_freq.read().unwrap_or_else(|e| e.into_inner());
 
         // Update filter coefficients
         self.low_filter
             .write()
-            .expect("value should be present")
+            .unwrap_or_else(|e| e.into_inner())
             .set_low_shelf(low_freq, low_gain, sample_rate as f32);
 
         // Mid frequency is between low and high frequencies
         let mid_freq = (low_freq * high_freq).sqrt(); // Geometric mean
         self.mid_filter
             .write()
-            .expect("value should be present")
+            .unwrap_or_else(|e| e.into_inner())
             .set_peaking(mid_freq, mid_gain, 0.7, sample_rate as f32);
 
         self.high_filter
             .write()
-            .expect("value should be present")
+            .unwrap_or_else(|e| e.into_inner())
             .set_high_shelf(high_freq, high_gain, sample_rate as f32);
 
-        *self
-            .sample_rate
-            .write()
-            .expect("lock should not be poisoned") = Some(sample_rate);
+        *self.sample_rate.write().unwrap_or_else(|e| e.into_inner()) = Some(sample_rate);
     }
 }
 
@@ -122,28 +119,17 @@ impl AudioEffect for EqualizerEffect {
         let current_sample_rate = *self
             .sample_rate
             .read()
-            .expect("lock should not be poisoned");
-        if current_sample_rate.is_none()
-            || current_sample_rate.expect("value should be present") != audio.sample_rate()
-        {
+            .unwrap_or_else(|e| e.into_inner());
+        if current_sample_rate != Some(audio.sample_rate()) {
             self.update_filters(audio.sample_rate());
         }
 
         let mut processed = audio.clone();
         let samples = processed.samples_mut();
 
-        let mut low_filter = self
-            .low_filter
-            .write()
-            .expect("lock should not be poisoned");
-        let mut mid_filter = self
-            .mid_filter
-            .write()
-            .expect("lock should not be poisoned");
-        let mut high_filter = self
-            .high_filter
-            .write()
-            .expect("lock should not be poisoned");
+        let mut low_filter = self.low_filter.write().unwrap_or_else(|e| e.into_inner());
+        let mut mid_filter = self.mid_filter.write().unwrap_or_else(|e| e.into_inner());
+        let mut high_filter = self.high_filter.write().unwrap_or_else(|e| e.into_inner());
 
         for sample in samples.iter_mut() {
             let input = *sample;
@@ -163,23 +149,23 @@ impl AudioEffect for EqualizerEffect {
         let mut params = HashMap::new();
         params.insert(
             "low_gain".to_string(),
-            ParameterValue::Float(*self.low_gain.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.low_gain.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "mid_gain".to_string(),
-            ParameterValue::Float(*self.mid_gain.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.mid_gain.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "high_gain".to_string(),
-            ParameterValue::Float(*self.high_gain.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.high_gain.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "low_freq".to_string(),
-            ParameterValue::Float(*self.low_freq.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.low_freq.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "high_freq".to_string(),
-            ParameterValue::Float(*self.high_freq.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.high_freq.read().unwrap_or_else(|e| e.into_inner())),
         );
         params
     }
@@ -188,7 +174,7 @@ impl AudioEffect for EqualizerEffect {
         match name {
             "low_gain" => {
                 if let Some(v) = value.as_f32() {
-                    *self.low_gain.write().expect("lock should not be poisoned") =
+                    *self.low_gain.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(-20.0, 20.0);
                     Ok(())
                 } else {
@@ -200,7 +186,7 @@ impl AudioEffect for EqualizerEffect {
             }
             "mid_gain" => {
                 if let Some(v) = value.as_f32() {
-                    *self.mid_gain.write().expect("lock should not be poisoned") =
+                    *self.mid_gain.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(-20.0, 20.0);
                     Ok(())
                 } else {
@@ -212,7 +198,7 @@ impl AudioEffect for EqualizerEffect {
             }
             "high_gain" => {
                 if let Some(v) = value.as_f32() {
-                    *self.high_gain.write().expect("lock should not be poisoned") =
+                    *self.high_gain.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(-20.0, 20.0);
                     Ok(())
                 } else {
@@ -224,7 +210,7 @@ impl AudioEffect for EqualizerEffect {
             }
             "low_freq" => {
                 if let Some(v) = value.as_f32() {
-                    *self.low_freq.write().expect("lock should not be poisoned") =
+                    *self.low_freq.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(20.0, 20000.0);
                     Ok(())
                 } else {
@@ -236,7 +222,7 @@ impl AudioEffect for EqualizerEffect {
             }
             "high_freq" => {
                 if let Some(v) = value.as_f32() {
-                    *self.high_freq.write().expect("lock should not be poisoned") =
+                    *self.high_freq.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(20.0, 20000.0);
                     Ok(())
                 } else {

@@ -246,12 +246,17 @@ impl StreamingPipeline {
         let overlap_frames = config.overlap_frames.min(mel.n_frames as usize);
 
         if overlap_frames > 0 {
-            // Apply fade-in to beginning frames
+            // Apply fade-in to beginning frames. Uses `get_mut` rather than direct
+            // indexing so a `MelSpectrogram` with rows shorter than `n_frames` (e.g.
+            // constructed via a direct struct literal that bypasses `MelSpectrogram::new`'s
+            // rectangularity normalization) degrades to "leave that sample alone" instead
+            // of panicking.
             for frame_idx in 0..overlap_frames {
                 let fade_factor = frame_idx as f32 / overlap_frames as f32;
-                #[allow(clippy::needless_range_loop)]
-                for mel_idx in 0..windowed_data.len() {
-                    windowed_data[mel_idx][frame_idx] *= fade_factor;
+                for row in windowed_data.iter_mut() {
+                    if let Some(sample) = row.get_mut(frame_idx) {
+                        *sample *= fade_factor;
+                    }
                 }
             }
 
@@ -260,9 +265,10 @@ impl StreamingPipeline {
             let fade_start = total_frames.saturating_sub(overlap_frames);
             for frame_idx in fade_start..total_frames {
                 let fade_factor = (total_frames - frame_idx) as f32 / overlap_frames as f32;
-                #[allow(clippy::needless_range_loop)]
-                for mel_idx in 0..windowed_data.len() {
-                    windowed_data[mel_idx][frame_idx] *= fade_factor;
+                for row in windowed_data.iter_mut() {
+                    if let Some(sample) = row.get_mut(frame_idx) {
+                        *sample *= fade_factor;
+                    }
                 }
             }
         }
@@ -673,6 +679,39 @@ mod tests {
         // Check that fade-in and fade-out were applied
         assert!(windowed.data[0][0] < mel.data[0][0]); // First frame should be faded
         assert!(windowed.data[0][4] < mel.data[0][4]); // Last frame should be faded
+    }
+
+    #[tokio::test]
+    async fn test_windowing_never_panics_on_ragged_mel() {
+        // `data`/`n_frames` are public fields on `MelSpectrogram`, so a caller (or a
+        // malformed third-party `AcousticModel`) can bypass `MelSpectrogram::new`'s
+        // rectangularity normalization via a direct struct literal. `apply_windowing`
+        // must degrade gracefully (skip out-of-bounds samples) rather than panicking.
+        let mel = MelSpectrogram {
+            data: vec![vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![2.0, 3.0]],
+            sample_rate: 22050,
+            hop_length: 512,
+            n_mels: 2,
+            n_frames: 5, // Lies about row 1's real length (2).
+        };
+
+        let config = StreamingConfig {
+            overlap_frames: 2,
+            ..Default::default()
+        };
+
+        // The old direct-indexing implementation would panic here (row 1 has only 2
+        // elements but the fade-out loop indexes up to n_frames - 1 = 4). Reaching the
+        // assertions below at all is the regression check.
+        let windowed = StreamingPipeline::apply_windowing(&mel, &config);
+
+        // `MelSpectrogram::new` (called internally at the end of `apply_windowing`)
+        // normalizes the still-ragged windowed data down to its shortest row, so every
+        // row in the result is the same, safely-indexable length.
+        assert_eq!(windowed.data[0].len(), windowed.data[1].len());
+        assert_eq!(windowed.n_frames as usize, windowed.data[0].len());
+        // The first frame (present in both rows) is still real, faded data.
+        assert!(windowed.data[0][0] < mel.data[0][0]);
     }
 
     #[tokio::test]

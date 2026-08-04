@@ -1,8 +1,20 @@
-//! Facebook Wav2Vec2 ASR implementation
+//! Facebook `Wav2Vec2` checkpoint container.
 //!
-//! This module provides integration with Facebook's Wav2Vec2 model for automatic speech recognition.
-//! Wav2Vec2 is a self-supervised model that can be fine-tuned for various languages.
+//! This type owns and validates a real `Wav2Vec2` checkpoint but does **not** execute
+//! it: this crate has no hand-written `Wav2Vec2` graph in `candle`, so there is nothing
+//! to feed the parameters to. Rather than fabricate transcripts, it does the honest
+//! subset of the job:
+//!
+//! * [`Wav2Vec2Model::ensure_loaded`] really opens the checkpoint, parses the
+//!   `safetensors` header, checks that the tensors look like a `Wav2Vec2` CTC model,
+//!   and records the real parameter count and file size, and
+//! * every inference entry point returns [`RecognitionError::FeatureNotSupported`].
+//!
+//! The working `Wav2Vec2` backend is [`crate::asr::wav2vec2_onnx::OnnxWav2Vec2`]
+//! (`onnx` feature), which runs a real exported graph through `OxiONNX`. Export one with
+//! `optimum-cli export onnx --model facebook/wav2vec2-base-960h wav2vec2-onnx/`.
 
+use super::weights::SafetensorsHeader;
 use crate::traits::*;
 use crate::RecognitionError;
 use async_trait::async_trait;
@@ -12,6 +24,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use voirs_sdk::{AudioBuffer, LanguageCode};
+
+/// Tensor-name prefixes that a Hugging Face `Wav2Vec2` CTC checkpoint must contain.
+///
+/// Used to tell a genuine `Wav2Vec2` checkpoint apart from an unrelated `safetensors`
+/// file, so that the reported diagnostics are accurate.
+const WAV2VEC2_REQUIRED_PREFIXES: &[&str] = &[
+    "wav2vec2.feature_extractor",
+    "wav2vec2.encoder",
+    "lm_head",
+];
 
 /// Facebook Wav2Vec2 ASR model implementation
 pub struct Wav2Vec2Model {
@@ -78,6 +100,10 @@ struct Wav2Vec2State {
     inference_count: usize,
     /// Total inference time
     total_inference_time: Duration,
+    /// Real parameter count read from the checkpoint header
+    parameter_count: usize,
+    /// Real checkpoint size in mebibytes
+    checkpoint_size_mb: f32,
 }
 
 impl Wav2Vec2State {
@@ -89,6 +115,8 @@ impl Wav2Vec2State {
             load_time: None,
             inference_count: 0,
             total_inference_time: Duration::ZERO,
+            parameter_count: 0,
+            checkpoint_size_mb: 0.0,
         }
     }
 }
@@ -121,18 +149,18 @@ impl Wav2Vec2Model {
         let metadata = ASRMetadata {
             name: format!("Wav2Vec2 ({})", model_id),
             version: "2.0.0".to_string(),
-            description: "Facebook Wav2Vec2 self-supervised speech recognition model".to_string(),
+            description: "Facebook Wav2Vec2 checkpoint container. Inference is unavailable: no \
+                          native Wav2Vec2 graph exists in this crate. Use OnnxWav2Vec2 instead."
+                .to_string(),
             supported_languages: supported_languages.clone(),
             architecture: "Transformer".to_string(),
-            model_size_mb: Self::estimate_model_size(&model_id),
-            inference_speed: Self::estimate_inference_speed(&model_id),
-            wer_benchmarks: Self::create_wer_benchmarks(&model_id),
-            supported_features: vec![
-                ASRFeature::WordTimestamps,
-                ASRFeature::SentenceSegmentation,
-                ASRFeature::NoiseRobustness,
-                ASRFeature::StreamingInference,
-            ],
+            // Real size of the configured checkpoint (0.0 when none is configured).
+            model_size_mb: Self::checkpoint_size_mb(model_path.as_deref()),
+            // 0.0 == no measured value; this backend never runs inference.
+            inference_speed: 0.0,
+            wer_benchmarks: Self::create_wer_benchmarks(),
+            // Inference is unavailable, so no inference-time feature is advertised.
+            supported_features: Vec::new(),
         };
 
         let state = Arc::new(RwLock::new(Wav2Vec2State::new(model_id, model_path)));
@@ -150,35 +178,92 @@ impl Wav2Vec2Model {
         Self::new(config.model_id.clone(), config.model_path.clone()).await
     }
 
-    /// Load the model if not already loaded
+    /// Open and validate the configured checkpoint for real.
+    ///
+    /// Parses the `safetensors` header, verifies that the tensor names match a
+    /// `Wav2Vec2` CTC model, and records the real parameter count and file size.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelLoadError`] when no local checkpoint path is
+    /// configured (VoiRS does not silently download weights), when the file cannot be
+    /// parsed, or when the tensors do not belong to a `Wav2Vec2` model.
     async fn ensure_loaded(&self) -> Result<(), RecognitionError> {
         let mut state = self.state.write().await;
 
-        if !state.loaded {
-            let start_time = Instant::now();
-
-            // Load model (placeholder implementation)
-            tracing::info!("Loading Wav2Vec2 model: {}", state.model_id);
-
-            if state.model_path.is_none() {
-                tracing::info!("Downloading model from HuggingFace Hub...");
-                // Simulate download time
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-
-            // Simulate loading time
-            tokio::time::sleep(Duration::from_millis(150)).await;
-
-            state.loaded = true;
-            state.load_time = Some(start_time.elapsed());
-
-            tracing::info!(
-                "Wav2Vec2 model loaded in {:?}",
-                state.load_time.expect("load_time was just set to Some")
-            );
+        if state.loaded {
+            return Ok(());
         }
 
+        let start_time = Instant::now();
+        let Some(model_path) = state.model_path.clone() else {
+            return Err(RecognitionError::ModelLoadError {
+                message: format!(
+                    "No local checkpoint configured for Wav2Vec2 model '{}'. VoiRS does not \
+                     download weights implicitly: pass a path to a downloaded \
+                     `model.safetensors` (or its directory) via Wav2Vec2Config::model_path.",
+                    state.model_id
+                ),
+                source: None,
+            });
+        };
+
+        tracing::info!(
+            "Inspecting Wav2Vec2 checkpoint for '{}' at {model_path}",
+            state.model_id
+        );
+
+        let header = SafetensorsHeader::read(&model_path)?;
+
+        let missing: Vec<&str> = WAV2VEC2_REQUIRED_PREFIXES
+            .iter()
+            .copied()
+            .filter(|prefix| !header.has_prefix(prefix))
+            .collect();
+        if !missing.is_empty() {
+            return Err(RecognitionError::ModelLoadError {
+                message: format!(
+                    "{} does not look like a Wav2Vec2 CTC checkpoint: no tensors under {}",
+                    header.path.display(),
+                    missing.join(", ")
+                ),
+                source: None,
+            });
+        }
+
+        state.parameter_count = header.parameter_count();
+        state.checkpoint_size_mb = header.size_mb();
+        state.loaded = true;
+        state.load_time = Some(start_time.elapsed());
+
+        tracing::info!(
+            "Wav2Vec2 checkpoint validated in {:?}: {} tensors, {} parameters, {:.1} MiB",
+            start_time.elapsed(),
+            header.tensors.len(),
+            state.parameter_count,
+            state.checkpoint_size_mb
+        );
+
         Ok(())
+    }
+
+    /// Real parameter count read from the checkpoint header.
+    ///
+    /// # Errors
+    /// Propagates any error from validating the checkpoint.
+    pub async fn parameter_count(&self) -> Result<usize, RecognitionError> {
+        self.ensure_loaded().await?;
+        Ok(self.state.read().await.parameter_count)
+    }
+
+    /// The typed error returned by every inference entry point.
+    fn unsupported_backend_error(model_id: &str) -> RecognitionError {
+        RecognitionError::FeatureNotSupported {
+            feature: format!(
+                "Wav2Vec2 inference for '{model_id}': this crate has no native Wav2Vec2 graph to \
+                 run the checkpoint through. Use OnnxWav2Vec2 (`onnx` feature) with a model \
+                 exported via `optimum-cli export onnx`."
+            ),
+        }
     }
 
     /// Get supported languages based on model ID
@@ -206,62 +291,34 @@ impl Wav2Vec2Model {
         }
     }
 
-    /// Estimate model size based on model ID
-    fn estimate_model_size(model_id: &str) -> f32 {
-        match model_id {
-            id if id.contains("base") => 95.0,
-            id if id.contains("large") => 315.0,
-            id if id.contains("xlsr") && id.contains("300m") => 300.0,
-            id if id.contains("xlsr") && id.contains("1b") => 1000.0,
-            id if id.contains("xlsr") && id.contains("2b") => 2000.0,
-            _ => 95.0, // Default to base size
-        }
+    /// Real on-disk size of the configured checkpoint in mebibytes.
+    ///
+    /// Returns `0.0` when no local checkpoint is configured. The previous
+    /// implementation guessed a size from substrings of the model id
+    /// (`"base"` => 95 MB and so on), which described whatever HuggingFace hosts under
+    /// that name rather than any file the caller actually has.
+    fn checkpoint_size_mb(model_path: Option<&str>) -> f32 {
+        let Some(path) = model_path else {
+            return 0.0;
+        };
+        super::weights::resolve_weights_path(Path::new(path))
+            .ok()
+            .and_then(|resolved| std::fs::metadata(resolved).ok())
+            .map_or(0.0, |metadata| {
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    metadata.len() as f32 / (1024.0 * 1024.0)
+                }
+            })
     }
 
-    /// Estimate inference speed based on model ID
-    fn estimate_inference_speed(model_id: &str) -> f32 {
-        match model_id {
-            id if id.contains("base") => 2.5,
-            id if id.contains("large") => 1.0,
-            id if id.contains("xlsr") && id.contains("300m") => 1.2,
-            id if id.contains("xlsr") && id.contains("1b") => 0.6,
-            id if id.contains("xlsr") && id.contains("2b") => 0.3,
-            _ => 2.5, // Default to base speed
-        }
-    }
-
-    /// Create WER benchmarks based on model ID
-    fn create_wer_benchmarks(model_id: &str) -> HashMap<LanguageCode, f32> {
-        let mut benchmarks = HashMap::new();
-
-        match model_id {
-            id if id.contains("base") => {
-                benchmarks.insert(LanguageCode::EnUs, 0.055);
-                benchmarks.insert(LanguageCode::EnGb, 0.06);
-            }
-            id if id.contains("large") => {
-                benchmarks.insert(LanguageCode::EnUs, 0.035);
-                benchmarks.insert(LanguageCode::EnGb, 0.04);
-                benchmarks.insert(LanguageCode::DeDe, 0.05);
-                benchmarks.insert(LanguageCode::FrFr, 0.045);
-                benchmarks.insert(LanguageCode::EsEs, 0.045);
-            }
-            id if id.contains("xlsr") => {
-                benchmarks.insert(LanguageCode::EnUs, 0.04);
-                benchmarks.insert(LanguageCode::EnGb, 0.045);
-                benchmarks.insert(LanguageCode::DeDe, 0.055);
-                benchmarks.insert(LanguageCode::FrFr, 0.05);
-                benchmarks.insert(LanguageCode::EsEs, 0.05);
-                benchmarks.insert(LanguageCode::JaJp, 0.08);
-                benchmarks.insert(LanguageCode::ZhCn, 0.09);
-                benchmarks.insert(LanguageCode::KoKr, 0.085);
-            }
-            _ => {
-                benchmarks.insert(LanguageCode::EnUs, 0.055);
-            }
-        }
-
-        benchmarks
+    /// Word Error Rate benchmarks.
+    ///
+    /// Empty: this backend cannot run inference, so VoiRS has measured no WER for it.
+    /// The previous implementation returned per-model-id constants that were never
+    /// produced by any evaluation in this repository.
+    fn create_wer_benchmarks() -> HashMap<LanguageCode, f32> {
+        HashMap::new()
     }
 
     /// Process audio with Wav2Vec2
@@ -295,77 +352,14 @@ impl Wav2Vec2Model {
             });
         }
 
-        // Perform inference (placeholder implementation)
-        let transcript = self
-            .mock_inference(&processed_audio, language, config)
-            .await?;
-
-        // Update statistics
-        let mut state = self.state.write().await;
-        state.inference_count += 1;
-        state.total_inference_time += start_time.elapsed();
-
-        Ok(transcript)
-    }
-
-    /// Mock inference for demonstration
-    async fn mock_inference(
-        &self,
-        audio: &AudioBuffer,
-        language: LanguageCode,
-        _config: Option<&ASRConfig>,
-    ) -> Result<Transcript, RecognitionError> {
-        // Simulate processing time
-        let processing_time = Duration::from_millis(
-            (audio.samples().len() as f64 / audio.sample_rate() as f64 * 1000.0
-                / self.metadata.inference_speed as f64) as u64,
+        // The checkpoint was really validated and the audio is really preprocessed, but
+        // there is no graph to run. Fail closed rather than invent a transcript.
+        tracing::warn!(
+            "Wav2Vec2 transcription requested for {:.3}s of {language:?} audio, but no native \
+             Wav2Vec2 graph is available",
+            processed_audio.duration()
         );
-        tokio::time::sleep(processing_time).await;
-
-        // Generate mock transcript (Wav2Vec2 style - good punctuation and capitalization)
-        let text = match language {
-            LanguageCode::EnUs | LanguageCode::EnGb => {
-                "Hello, this is a test transcription from Wav2Vec2."
-            }
-            LanguageCode::DeDe => "Hallo, das ist eine Testtranscription von Wav2Vec2.",
-            LanguageCode::FrFr => "Bonjour, ceci est une transcription test de Wav2Vec2.",
-            LanguageCode::EsEs => "Hola, esta es una transcripción de prueba de Wav2Vec2.",
-            LanguageCode::JaJp => "こんにちは、これはWav2Vec2からのテスト転写です。",
-            LanguageCode::ZhCn => "你好，这是来自Wav2Vec2的测试转录。",
-            LanguageCode::KoKr => "안녕하세요, 이것은 Wav2Vec2의 테스트 전사입니다.",
-            _ => "Hello, this is a test transcription from Wav2Vec2.",
-        };
-
-        let words = text.split_whitespace().collect::<Vec<&str>>();
-        let mut word_timestamps = Vec::new();
-        let mut current_time = 0.0;
-
-        for word in &words {
-            let word_duration = word.len() as f32 * 0.09; // Wav2Vec2 timing
-            word_timestamps.push(WordTimestamp {
-                word: word.to_string(),
-                start_time: current_time,
-                end_time: current_time + word_duration,
-                confidence: 0.92, // Good confidence
-            });
-            current_time += word_duration + 0.04; // Add pause between words
-        }
-
-        let sentence_boundaries = vec![SentenceBoundary {
-            start_time: 0.0,
-            end_time: current_time,
-            text: text.to_string(),
-            confidence: 0.92,
-        }];
-
-        Ok(Transcript {
-            text: text.to_string(),
-            language,
-            confidence: 0.92,
-            word_timestamps,
-            sentence_boundaries,
-            processing_duration: Some(processing_time),
-        })
+        Err(Self::unsupported_backend_error(&self.config.model_id))
     }
 
     /// Get model statistics
@@ -459,50 +453,18 @@ impl ASRModel for Wav2Vec2Model {
         .map_err(|e| e.into())
     }
 
+    /// Streaming transcription.
+    ///
+    /// # Errors
+    /// Always returns [`RecognitionError::FeatureNotSupported`]: streaming only chunks
+    /// audio into the unavailable batch path, so it fails for the same reason.
     async fn transcribe_streaming(
         &self,
-        mut audio_stream: AudioStream,
-        config: Option<&ASRConfig>,
+        _audio_stream: AudioStream,
+        _config: Option<&ASRConfig>,
     ) -> RecognitionResult<TranscriptStream> {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        let model = self.clone();
-        let config = config.cloned();
-
-        tokio::spawn(async move {
-            use futures::StreamExt;
-
-            let mut chunk_index = 0;
-            while let Some(audio_chunk) = audio_stream.next().await {
-                let transcript_result = model.process_audio(&audio_chunk, config.as_ref()).await;
-
-                match transcript_result {
-                    Ok(transcript) => {
-                        let chunk = TranscriptChunk {
-                            text: transcript.text,
-                            is_final: true, // Wav2Vec2 typically produces complete results
-                            start_time: chunk_index as f32 * 1.0,
-                            end_time: (chunk_index + 1) as f32 * 1.0,
-                            confidence: transcript.confidence,
-                        };
-
-                        if sender.send(Ok(chunk)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        if sender.send(Err(e.into())).is_err() {
-                            break;
-                        }
-                    }
-                }
-
-                chunk_index += 1;
-            }
-        });
-
-        Ok(Box::pin(
-            tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
-        ))
+        self.ensure_loaded().await?;
+        Err(Self::unsupported_backend_error(&self.config.model_id).into())
     }
 
     fn supported_languages(&self) -> Vec<LanguageCode> {
@@ -517,30 +479,19 @@ impl ASRModel for Wav2Vec2Model {
         self.metadata.supported_features.contains(&feature)
     }
 
-    async fn detect_language(&self, audio: &AudioBuffer) -> RecognitionResult<LanguageCode> {
-        // Wav2Vec2 models typically don't support built-in language detection
-        // We would need a separate language ID model
-        self.ensure_loaded().await?;
-
-        let _ = super::utils::preprocess_audio(audio).map_err(|e| {
-            RecognitionError::AudioProcessingError {
-                message: format!("Failed to preprocess audio for language detection: {}", e),
-                source: Some(Box::new(e)),
-            }
-        })?;
-
-        // Simulate processing time
-        tokio::time::sleep(Duration::from_millis(30)).await;
-
-        // For multilingual models, we could try to detect the language
-        if self.config.model_id.contains("xlsr") {
-            // Mock detection based on audio characteristics
-            // In reality, this would require a language identification model
-            Ok(LanguageCode::EnUs)
-        } else {
-            // Single-language models just return their primary language
-            Ok(self.supported_languages[0])
+    /// Detect the spoken language.
+    ///
+    /// # Errors
+    /// Always returns [`RecognitionError::FeatureNotSupported`]. `Wav2Vec2` CTC models
+    /// have no language-identification head; the previous implementation slept for 30 ms
+    /// and then returned a fixed language without consulting the audio at all.
+    async fn detect_language(&self, _audio: &AudioBuffer) -> RecognitionResult<LanguageCode> {
+        Err(RecognitionError::FeatureNotSupported {
+            feature: "Wav2Vec2 language detection: CTC checkpoints carry no \
+                      language-identification head. Use a dedicated language-ID model."
+                .to_string(),
         }
+        .into())
     }
 }
 
@@ -558,7 +509,54 @@ impl Clone for Wav2Vec2Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::path::PathBuf;
     use voirs_sdk::AudioBuffer;
+
+    /// Write a real safetensors file whose tensor names match a Wav2Vec2 CTC model.
+    fn write_wav2vec2_checkpoint(dir: &Path, extra: &[&str]) -> PathBuf {
+        let mut names: Vec<String> = vec![
+            "wav2vec2.feature_extractor.conv_layers.0.conv.weight".to_string(),
+            "wav2vec2.encoder.layers.0.attention.q_proj.weight".to_string(),
+            "lm_head.weight".to_string(),
+        ];
+        names.extend(extra.iter().map(|n| (*n).to_string()));
+
+        let mut header = serde_json::Map::new();
+        let mut offset = 0_u64;
+        for name in &names {
+            // 4 x 4 F32 tensor == 64 bytes.
+            header.insert(
+                name.clone(),
+                serde_json::json!({
+                    "dtype": "F32",
+                    "shape": [4, 4],
+                    "data_offsets": [offset, offset + 64],
+                }),
+            );
+            offset += 64;
+        }
+
+        let header_bytes = serde_json::to_vec(&header).unwrap();
+        let path = dir.join("model.safetensors");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&(header_bytes.len() as u64).to_le_bytes())
+            .unwrap();
+        file.write_all(&header_bytes).unwrap();
+        file.write_all(&vec![0_u8; offset as usize]).unwrap();
+        file.flush().unwrap();
+        path
+    }
+
+    async fn model_with_checkpoint(dir: &tempfile::TempDir) -> Wav2Vec2Model {
+        let path = write_wav2vec2_checkpoint(dir.path(), &[]);
+        Wav2Vec2Model::new(
+            "facebook/wav2vec2-base-960h".to_string(),
+            Some(path.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap()
+    }
 
     #[tokio::test]
     async fn test_wav2vec2_model_creation() {
@@ -569,16 +567,127 @@ mod tests {
         assert!(model.supported_languages().contains(&LanguageCode::EnUs));
     }
 
+    /// Regression test for the removed `mock_inference`: transcription must fail
+    /// closed instead of returning a canned per-language sentence.
     #[tokio::test]
-    async fn test_wav2vec2_transcribe() {
+    async fn test_wav2vec2_transcribe_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
+        let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
+
+        let err = model
+            .process_audio(&audio, None)
+            .await
+            .expect_err("Wav2Vec2 inference must not fabricate a transcript");
+        match err {
+            RecognitionError::FeatureNotSupported { feature } => {
+                assert!(feature.contains("Wav2Vec2 inference"), "unexpected: {feature}");
+                assert!(feature.contains("OnnxWav2Vec2"), "must name the real backend: {feature}");
+            }
+            other => panic!("expected FeatureNotSupported, got {other:?}"),
+        }
+        assert!(model.transcribe(&audio, None).await.is_err());
+    }
+
+    /// The old code returned a fixed string per requested language. Verify that no
+    /// language selection can produce an `Ok(Transcript)`.
+    #[tokio::test]
+    async fn test_wav2vec2_no_language_yields_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_wav2vec2_checkpoint(dir.path(), &[]);
+        let model = Wav2Vec2Model::new(
+            "facebook/wav2vec2-large-xlsr-53".to_string(),
+            Some(path.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+        let audio = AudioBuffer::new(vec![0.05; 1600], 16000, 1);
+
+        for language in [
+            LanguageCode::EnUs,
+            LanguageCode::DeDe,
+            LanguageCode::FrFr,
+            LanguageCode::JaJp,
+        ] {
+            let config = ASRConfig {
+                language: Some(language),
+                ..Default::default()
+            };
+            assert!(
+                model.transcribe(&audio, Some(&config)).await.is_err(),
+                "transcribe returned Ok for {language:?}"
+            );
+        }
+    }
+
+    /// Without a local checkpoint the model must say so rather than pretend to
+    /// download one from HuggingFace.
+    #[tokio::test]
+    async fn test_wav2vec2_requires_local_checkpoint() {
         let model = Wav2Vec2Model::new("facebook/wav2vec2-base-960h".to_string(), None)
             .await
             .unwrap();
-        let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
 
-        let result = model.transcribe(&audio, None).await.unwrap();
-        assert!(!result.text.is_empty());
-        assert!(result.confidence > 0.0);
+        let err = model.ensure_loaded().await.unwrap_err();
+        match err {
+            RecognitionError::ModelLoadError { message, .. } => {
+                assert!(message.contains("No local checkpoint"), "unexpected: {message}");
+            }
+            other => panic!("expected ModelLoadError, got {other:?}"),
+        }
+    }
+
+    /// Loading really parses the checkpoint: an unrelated safetensors file is rejected.
+    #[tokio::test]
+    async fn test_wav2vec2_rejects_foreign_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut header = serde_json::Map::new();
+        header.insert(
+            "some.other.model.weight".to_string(),
+            serde_json::json!({ "dtype": "F32", "shape": [2, 2], "data_offsets": [0, 16] }),
+        );
+        let header_bytes = serde_json::to_vec(&header).unwrap();
+        let path = dir.path().join("model.safetensors");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&(header_bytes.len() as u64).to_le_bytes())
+            .unwrap();
+        file.write_all(&header_bytes).unwrap();
+        file.write_all(&[0_u8; 16]).unwrap();
+        drop(file);
+
+        let model = Wav2Vec2Model::new(
+            "facebook/wav2vec2-base-960h".to_string(),
+            Some(path.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+
+        let err = model.ensure_loaded().await.unwrap_err();
+        match err {
+            RecognitionError::ModelLoadError { message, .. } => {
+                assert!(message.contains("Wav2Vec2 CTC checkpoint"), "unexpected: {message}");
+            }
+            other => panic!("expected ModelLoadError, got {other:?}"),
+        }
+    }
+
+    /// The parameter count must come from the real header, not a per-model-id guess.
+    #[tokio::test]
+    async fn test_wav2vec2_parameter_count_is_real() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
+        // 3 tensors of shape [4, 4].
+        assert_eq!(model.parameter_count().await.unwrap(), 48);
+
+        let dir2 = tempfile::tempdir().unwrap();
+        let path = write_wav2vec2_checkpoint(dir2.path(), &["wav2vec2.encoder.layers.1.k.weight"]);
+        let bigger = Wav2Vec2Model::new(
+            "facebook/wav2vec2-base-960h".to_string(),
+            Some(path.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(bigger.parameter_count().await.unwrap(), 64);
     }
 
     #[tokio::test]
@@ -597,9 +706,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_wav2vec2_unsupported_language() {
-        let model = Wav2Vec2Model::new("facebook/wav2vec2-base-960h".to_string(), None)
-            .await
-            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
         let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
 
         let config = ASRConfig {
@@ -612,63 +720,97 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_wav2vec2_long_audio() {
-        let model = Wav2Vec2Model::new("facebook/wav2vec2-base-960h".to_string(), None)
-            .await
-            .unwrap();
+    async fn test_wav2vec2_long_audio_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
 
-        // Create long audio (35 seconds at 16kHz)
+        // 35 seconds at 16 kHz exercises the chunking path.
         let samples = vec![0.1; 35 * 16000];
         let audio = AudioBuffer::new(samples, 16000, 1);
 
-        let result = model.transcribe(&audio, None).await.unwrap();
-        assert!(!result.text.is_empty());
+        assert!(model.transcribe(&audio, None).await.is_err());
     }
 
+    /// Metadata must not advertise inference-time features or fabricated WER numbers.
     #[tokio::test]
-    async fn test_wav2vec2_features() {
-        let model = Wav2Vec2Model::new("facebook/wav2vec2-base-960h".to_string(), None)
-            .await
-            .unwrap();
+    async fn test_wav2vec2_metadata_is_honest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_wav2vec2_checkpoint(dir.path(), &[]);
+        let model = Wav2Vec2Model::new(
+            "facebook/wav2vec2-base-960h".to_string(),
+            Some(path.to_string_lossy().to_string()),
+        )
+        .await
+        .unwrap();
+        let metadata = model.metadata();
 
-        assert!(model.supports_feature(ASRFeature::WordTimestamps));
-        assert!(model.supports_feature(ASRFeature::NoiseRobustness));
-        assert!(model.supports_feature(ASRFeature::StreamingInference));
+        assert!(metadata.wer_benchmarks.is_empty(), "WER must not be fabricated");
+        assert!(metadata.supported_features.is_empty());
+        assert!(!model.supports_feature(ASRFeature::WordTimestamps));
+        assert!(!model.supports_feature(ASRFeature::NoiseRobustness));
+        assert!(!model.supports_feature(ASRFeature::StreamingInference));
         assert!(!model.supports_feature(ASRFeature::LanguageDetection));
+
+        // Size must come from the file that really exists on disk.
+        let real_bytes = std::fs::metadata(&path).unwrap().len();
+        #[allow(clippy::cast_precision_loss)]
+        let expected_mb = real_bytes as f32 / (1024.0 * 1024.0);
+        assert!((metadata.model_size_mb - expected_mb).abs() < f32::EPSILON);
+    }
+
+    /// Without a checkpoint the reported size must be 0.0, not a guess from the id.
+    #[tokio::test]
+    async fn test_wav2vec2_size_is_not_guessed_from_id() {
+        for id in [
+            "facebook/wav2vec2-base-960h",
+            "facebook/wav2vec2-large-960h",
+            "facebook/wav2vec2-large-xlsr-53",
+        ] {
+            let model = Wav2Vec2Model::new(id.to_string(), None).await.unwrap();
+            assert_eq!(
+                model.metadata().model_size_mb,
+                0.0,
+                "{id}: size must not be inferred from the model id"
+            );
+        }
     }
 
     #[tokio::test]
-    async fn test_wav2vec2_model_sizes() {
-        // Test different model size estimates
-        assert_eq!(
-            Wav2Vec2Model::estimate_model_size("facebook/wav2vec2-base-960h"),
-            95.0
-        );
-        assert_eq!(
-            Wav2Vec2Model::estimate_model_size("facebook/wav2vec2-large-960h"),
-            315.0
-        );
-        assert_eq!(
-            Wav2Vec2Model::estimate_model_size("facebook/wav2vec2-large-xlsr-53"),
-            315.0
-        );
+    async fn test_wav2vec2_streaming_fails_closed() {
+        use futures::stream;
+
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
+        let audio_stream: AudioStream =
+            Box::pin(stream::iter(vec![AudioBuffer::new(vec![0.0; 160], 16000, 1)]));
+
+        assert!(model.transcribe_streaming(audio_stream, None).await.is_err());
     }
 
     #[tokio::test]
-    async fn test_wav2vec2_stats() {
-        let model = Wav2Vec2Model::new("facebook/wav2vec2-base-960h".to_string(), None)
-            .await
-            .unwrap();
+    async fn test_wav2vec2_detect_language_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
         let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
 
-        // Initial stats
+        assert!(model.detect_language(&audio).await.is_err());
+    }
+
+    /// Inference never succeeds, so the counter must stay at zero rather than
+    /// counting fabricated runs.
+    #[tokio::test]
+    async fn test_wav2vec2_stats() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = model_with_checkpoint(&dir).await;
+        let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
+
         let stats = model.get_stats().await;
         assert_eq!(stats.inference_count, 0);
 
-        // After inference
-        let _result = model.transcribe(&audio, None).await.unwrap();
+        assert!(model.transcribe(&audio, None).await.is_err());
         let stats = model.get_stats().await;
-        assert_eq!(stats.inference_count, 1);
-        assert!(stats.total_inference_time > Duration::ZERO);
+        assert_eq!(stats.inference_count, 0);
+        assert_eq!(stats.total_inference_time, Duration::ZERO);
+        assert!(stats.load_time.is_some(), "checkpoint validation time must be recorded");
     }
 }

@@ -42,9 +42,19 @@ pub struct MetricComparison {
     pub absolute_difference: f32,
     /// Relative difference as percentage
     pub relative_difference: f32,
-    /// Whether the change is statistically significant
+    /// Whether the relative change exceeds `ComparisonConfig::min_meaningful_change`.
+    /// This is a threshold heuristic on the single baseline/current pair, **not** a
+    /// hypothesis test — computing a genuine p-value requires repeated-sample
+    /// variance, which a single before/after comparison does not have. See
+    /// `p_value` and [`Self`]'s doc comment.
     pub is_significant: bool,
-    /// P-value from statistical test
+    /// P-value from a real statistical test, when one could be computed. This
+    /// comparison only has a single baseline value and a single current value (no
+    /// repeated-run variance), so a genuine hypothesis test is not possible here
+    /// and this is always `None`. Callers with repeated-run data for both sides
+    /// should compute a real paired/independent t-test (e.g.
+    /// `crate::statistical::basic_tests::StatisticalAnalyzer`) instead of relying
+    /// on this field.
     pub p_value: Option<f64>,
     /// Whether this represents a regression (worse performance)
     pub is_regression: bool,
@@ -257,14 +267,14 @@ impl MetricsComparator {
             current > baseline && is_meaningful
         };
 
-        // Simple statistical significance test (t-test approximation)
-        // In a real implementation, you would need multiple samples to compute proper p-values
+        // `is_significant` is a threshold heuristic on the relative change of a
+        // *single* baseline/current pair, not a hypothesis test: computing a real
+        // p-value needs repeated-sample variance, which isn't available here (see
+        // the field doc comments on `MetricComparison`). Report `p_value: None`
+        // honestly instead of a fabricated constant that would look like real
+        // statistical evidence.
         let is_significant = is_meaningful;
-        let p_value = if is_meaningful {
-            Some(0.01) // Placeholder
-        } else {
-            Some(0.5) // Placeholder
-        };
+        let p_value = None;
 
         MetricComparison {
             metric_name: metric_name.to_string(),

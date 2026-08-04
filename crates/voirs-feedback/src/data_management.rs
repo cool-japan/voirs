@@ -4,8 +4,10 @@
 //! capabilities for all `VoiRS` feedback system data including user progress,
 //! analytics, settings, and system configurations.
 
+use crate::persistence::PersistenceManager;
 use crate::traits::{
-    AdaptiveConfig, FeedbackConfig, FeedbackProvider, TrainingExercise, UserFeedback, UserProgress,
+    AdaptiveConfig, FeedbackConfig, FeedbackProvider, FeedbackResponse, FeedbackType,
+    ProgressIndicators, TrainingExercise, UserFeedback, UserProgress,
 };
 // Note: We'll define our own export-friendly versions of these types
 use async_trait::async_trait;
@@ -17,6 +19,37 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
+
+/// Compute a real, deterministic checksum over export payload bytes.
+///
+/// Uses SHA-256 (via the `privacy` feature's `sha2` dependency) when
+/// available. When the crate is built without the `privacy` feature, `sha2`
+/// is not in the dependency graph at all, so this falls back to FNV-1a --
+/// still a genuine, deterministic hash of the real bytes (verifiable and
+/// sensitive to any change in content), just not cryptographically strong.
+/// Either way the result is prefixed with the algorithm name so callers can
+/// tell which was used.
+fn compute_checksum(bytes: &[u8]) -> String {
+    #[cfg(feature = "privacy")]
+    {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let digest = hasher.finalize();
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        format!("sha256:{hex}")
+    }
+
+    #[cfg(not(feature = "privacy"))]
+    {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a 64-bit offset basis
+        for &byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a 64-bit prime
+        }
+        format!("fnv1a:{hash:016x}")
+    }
+}
 
 /// Data management errors
 #[derive(Debug, thiserror::Error)]
@@ -542,6 +575,11 @@ pub struct DataManager {
     import_config: ImportOptions,
     /// Encryption key for secure exports
     encryption_key: Option<String>,
+    /// Real data source that export/import operations read from and write
+    /// to. Without one attached (see [`DataManager::with_persistence`]),
+    /// export/import fail closed instead of producing an empty archive with
+    /// a fabricated integrity checksum.
+    persistence: Option<Arc<dyn PersistenceManager>>,
 }
 
 /// Data storage backend trait
@@ -822,6 +860,21 @@ impl DataStorage for FileDataStorage {
             }
         }
 
+        // Verify the real checksum against a fresh recomputation over the
+        // package's actual content, using the same "checksum/data_size
+        // blanked" pre-image `collect_export_data` hashed. A mismatch means
+        // the archive was corrupted or tampered with after export.
+        let checksum_valid = verify_checksum(package);
+        report
+            .integrity_checks
+            .insert("checksum_valid".to_string(), checksum_valid);
+        if !checksum_valid {
+            report
+                .errors
+                .push("Checksum mismatch: exported data may be corrupted".to_string());
+            report.is_valid = false;
+        }
+
         // Check data integrity
         report
             .integrity_checks
@@ -832,6 +885,25 @@ impl DataStorage for FileDataStorage {
 
         Ok(report)
     }
+}
+
+/// Recompute a package's checksum the same way [`DataManager::collect_export_data`]
+/// originally did (over the payload with `metadata.checksum` blanked and
+/// `metadata.data_size` zeroed) and compare it against the checksum actually
+/// stored in the package. Returns `false` for a package whose checksum was
+/// never real to begin with (e.g. hand-built in a test without going
+/// through `collect_export_data`), which is the correct, honest outcome --
+/// there is nothing to verify it against.
+fn verify_checksum(package: &DataExportPackage) -> bool {
+    let mut repro = package.clone();
+    let claimed_checksum = std::mem::take(&mut repro.metadata.checksum);
+    repro.metadata.data_size = 0;
+
+    let Ok(serialized) = serde_json::to_vec(&repro) else {
+        return false;
+    };
+
+    compute_checksum(&serialized) == claimed_checksum
 }
 
 impl FileDataStorage {
@@ -909,7 +981,9 @@ impl FileDataStorage {
 }
 
 impl DataManager {
-    /// Create new data manager
+    /// Create new data manager with no persistence backend attached. Export
+    /// and import operations fail closed until
+    /// [`DataManager::with_persistence`] attaches a real one.
     pub async fn new(
         storage: Arc<RwLock<dyn DataStorage>>,
         export_config: ExportOptions,
@@ -920,16 +994,36 @@ impl DataManager {
             export_config,
             import_config,
             encryption_key: None,
+            persistence: None,
         })
     }
 
-    /// Export all data
+    /// Attach the real persistence backend that export/import operations
+    /// read from and write to.
+    #[must_use]
+    pub fn with_persistence(mut self, persistence: Arc<dyn PersistenceManager>) -> Self {
+        self.persistence = Some(persistence);
+        self
+    }
+
+    fn require_persistence(&self) -> DataManagementResult<&Arc<dyn PersistenceManager>> {
+        self.persistence
+            .as_ref()
+            .ok_or_else(|| DataManagementError::ExportError {
+                message: "no persistence backend configured; call DataManager::with_persistence \
+                          before export/import"
+                    .to_string(),
+            })
+    }
+
+    /// Export a single user's real data.
     pub async fn export_data(
         &self,
+        user_id: &str,
         output_path: &Path,
         format: ExportFormat,
     ) -> DataManagementResult<ExportMetadata> {
-        let package = self.collect_export_data(format.clone()).await?;
+        let package = self.collect_export_data(user_id, format.clone()).await?;
 
         let storage = self.storage.read().await;
         storage.store_package(&package, output_path).await?;
@@ -937,9 +1031,11 @@ impl DataManager {
         Ok(package.metadata)
     }
 
-    /// Import data from file
+    /// Import a user's data from file, writing it back through the real
+    /// persistence backend.
     pub async fn import_data(
         &self,
+        user_id: &str,
         input_path: &Path,
         options: Option<ImportOptions>,
     ) -> DataManagementResult<ImportReport> {
@@ -948,7 +1044,7 @@ impl DataManager {
         // Create backup if requested
         if import_options.create_backup {
             let backup_path = self.generate_backup_path().await?;
-            self.create_backup(&backup_path).await?;
+            self.create_backup(user_id, &backup_path).await?;
         }
 
         let storage = self.storage.read().await;
@@ -974,7 +1070,9 @@ impl DataManager {
         }
 
         // Perform the import
-        let import_result = self.perform_import(&package, &import_options).await?;
+        let import_result = self
+            .perform_import(user_id, &package, &import_options)
+            .await?;
 
         Ok(ImportReport {
             import_metadata: package.metadata,
@@ -984,10 +1082,14 @@ impl DataManager {
         })
     }
 
-    /// Create backup
-    pub async fn create_backup(&self, backup_path: &Path) -> DataManagementResult<BackupInfo> {
+    /// Create a real backup of a single user's data.
+    pub async fn create_backup(
+        &self,
+        user_id: &str,
+        backup_path: &Path,
+    ) -> DataManagementResult<BackupInfo> {
         let package = self
-            .collect_export_data(ExportFormat::CompressedJson)
+            .collect_export_data(user_id, ExportFormat::CompressedJson)
             .await?;
 
         let storage = self.storage.read().await;
@@ -1005,8 +1107,12 @@ impl DataManager {
         })
     }
 
-    /// Restore from backup
-    pub async fn restore_backup(&self, backup_path: &Path) -> DataManagementResult<RestoreReport> {
+    /// Restore a user's data from backup.
+    pub async fn restore_backup(
+        &self,
+        user_id: &str,
+        backup_path: &Path,
+    ) -> DataManagementResult<RestoreReport> {
         let import_options = ImportOptions {
             skip_validation: false,
             merge_mode: false,
@@ -1015,7 +1121,9 @@ impl DataManager {
             transformations: Vec::new(),
         };
 
-        let import_report = self.import_data(backup_path, Some(import_options)).await?;
+        let import_report = self
+            .import_data(user_id, backup_path, Some(import_options))
+            .await?;
 
         Ok(RestoreReport {
             backup_path: backup_path.to_string_lossy().to_string(),
@@ -1033,27 +1141,58 @@ impl DataManager {
         storage.list_backups(backup_directory).await
     }
 
-    /// Collect all data for export
+    /// Collect a single user's real data for export from the configured
+    /// persistence backend.
+    ///
+    /// A user with no stored progress or feedback yields an otherwise-empty
+    /// package (not an error) -- an honest "nothing to export" result,
+    /// distinct from a backend failure.
     async fn collect_export_data(
         &self,
+        user_id: &str,
         format: ExportFormat,
     ) -> DataManagementResult<DataExportPackage> {
-        // In a real implementation, this would collect data from various sources
+        let persistence = self.require_persistence()?;
+
+        let mut user_progress = HashMap::new();
+        if let Ok(progress) = persistence.load_user_progress(user_id).await {
+            user_progress.insert(user_id.to_string(), progress);
+        }
+
+        // The export schema carries individual feedback items rather than
+        // full response envelopes; flatten every response's items for this
+        // user into the real, currently-stored set.
+        let feedback_history: Vec<UserFeedback> = persistence
+            .load_feedback_history(user_id, None, None)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|response| response.feedback_items)
+            .collect();
+
+        let mut record_counts = HashMap::new();
+        record_counts.insert("user_progress".to_string(), user_progress.len() as u64);
+        record_counts.insert("feedback_items".to_string(), feedback_history.len() as u64);
+
         let metadata = ExportMetadata {
             created_at: Utc::now(),
             format,
             voris_version: env!("CARGO_PKG_VERSION").to_string(),
             export_version: "1.0.0".to_string(),
-            exported_by: "system".to_string(),
-            data_size: 0, // Will be calculated
-            record_counts: HashMap::new(),
+            exported_by: user_id.to_string(),
+            data_size: 0, // patched below once the real payload is known
+            record_counts,
             export_options: self.export_config.clone(),
-            checksum: "placeholder_checksum".to_string(),
+            checksum: String::new(), // patched below with the real checksum
         };
 
-        Ok(DataExportPackage {
+        let mut package = DataExportPackage {
             metadata,
-            user_progress: HashMap::new(), // Would be populated from actual data
+            user_progress,
+            // No real data source is wired up for these categories yet
+            // (analytics/config/training/quality/gamification live in other
+            // subsystems not reachable from here) -- left honestly empty
+            // rather than fabricated.
             analytics: AnalyticsExportData {
                 sessions: Vec::new(),
                 performance_metrics: Vec::new(),
@@ -1079,19 +1218,31 @@ impl DataManager {
                     time_spent_minutes: 0,
                 },
             },
-            feedback_history: Vec::new(),
+            feedback_history,
             quality_metrics: QualityMetricsExport {
                 metrics: Vec::new(),
                 alerts: Vec::new(),
                 reports: Vec::new(),
             },
             gamification: None,
-        })
+        };
+
+        // Real checksum/size over the actual serialized payload (computed
+        // with `checksum`/`data_size` at the placeholder values set above,
+        // so the same computation is reproducible by re-hashing a
+        // previously exported file -- see `verify_checksum`).
+        let serialized = serde_json::to_vec(&package)?;
+        package.metadata.checksum = compute_checksum(&serialized);
+        package.metadata.data_size = serialized.len() as u64;
+
+        Ok(package)
     }
 
-    /// Perform the actual import operation
+    /// Perform the actual import operation, writing every record back
+    /// through the real persistence backend.
     async fn perform_import(
         &self,
+        user_id: &str,
         package: &DataExportPackage,
         options: &ImportOptions,
     ) -> DataManagementResult<ImportResult> {
@@ -1103,8 +1254,11 @@ impl DataManager {
         };
 
         // Import user progress
-        for (user_id, progress) in &package.user_progress {
-            match self.import_user_progress(user_id, progress, options).await {
+        for (progress_user_id, progress) in &package.user_progress {
+            match self
+                .import_user_progress(progress_user_id, progress, options)
+                .await
+            {
                 Ok(()) => {
                     *result
                         .records_imported
@@ -1112,9 +1266,9 @@ impl DataManager {
                         .or_insert(0) += 1;
                 }
                 Err(e) => {
-                    result
-                        .errors
-                        .push(format!("Failed to import progress for user {user_id}: {e}"));
+                    result.errors.push(format!(
+                        "Failed to import progress for user {progress_user_id}: {e}"
+                    ));
                     *result
                         .records_skipped
                         .entry("user_progress".to_string())
@@ -1123,9 +1277,11 @@ impl DataManager {
             }
         }
 
-        // Import feedback history
+        // Import feedback history. `UserFeedback` items carry no user_id of
+        // their own (see `collect_export_data`), so they are attributed to
+        // the user this import operation was invoked for.
         for feedback in &package.feedback_history {
-            match self.import_feedback(feedback, options).await {
+            match self.import_feedback(user_id, feedback, options).await {
                 Ok(()) => {
                     *result
                         .records_imported
@@ -1147,30 +1303,63 @@ impl DataManager {
         Ok(result)
     }
 
-    /// Import user progress data
+    /// Import user progress data by writing it through the real persistence
+    /// backend.
     async fn import_user_progress(
         &self,
         user_id: &str,
         progress: &UserProgress,
         _options: &ImportOptions,
     ) -> DataManagementResult<()> {
-        // In a real implementation, this would save to the actual data store
-        log::info!("Importing progress for user: {user_id}");
-        log::debug!(
-            "Progress data: overall_score={}",
-            progress.average_scores.overall_score
-        );
+        let persistence = self.require_persistence()?;
+        persistence
+            .save_user_progress(user_id, progress)
+            .await
+            .map_err(|e| DataManagementError::ImportError {
+                message: format!("failed to save progress for user '{user_id}': {e}"),
+            })?;
+        log::info!("Imported progress for user: {user_id}");
         Ok(())
     }
 
-    /// Import feedback data
+    /// Import feedback data by writing it through the real persistence
+    /// backend.
+    ///
+    /// The export schema only carries the individual [`UserFeedback`] item,
+    /// not the full [`FeedbackResponse`] envelope it originally arrived in
+    /// (see `collect_export_data`), so this synthesizes a minimal real
+    /// response around it -- a genuine, retrievable write, even though the
+    /// original envelope-level fields (timestamp, processing time, overall
+    /// score across multiple items) are not recoverable from this schema.
     async fn import_feedback(
         &self,
+        user_id: &str,
         feedback: &UserFeedback,
         _options: &ImportOptions,
     ) -> DataManagementResult<()> {
-        // In a real implementation, this would save to the actual data store
-        log::info!("Importing feedback: {}", feedback.message);
+        let persistence = self.require_persistence()?;
+
+        let response = FeedbackResponse {
+            feedback_items: vec![feedback.clone()],
+            overall_score: feedback.score,
+            immediate_actions: Vec::new(),
+            long_term_goals: Vec::new(),
+            progress_indicators: ProgressIndicators::default(),
+            timestamp: Utc::now(),
+            processing_time: std::time::Duration::default(),
+            feedback_type: FeedbackType::Quality,
+        };
+
+        persistence
+            .save_feedback(user_id, &response)
+            .await
+            .map_err(|e| DataManagementError::ImportError {
+                message: format!("failed to save feedback for user '{user_id}': {e}"),
+            })?;
+        log::info!(
+            "Imported feedback for user '{user_id}': {}",
+            feedback.message
+        );
         Ok(())
     }
 
@@ -1222,8 +1411,39 @@ pub struct RestoreReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::backends::memory::MemoryPersistenceManager;
+    use crate::persistence::PersistenceConfig;
+    use crate::traits::UserProgress;
     use std::sync::Arc;
     use tokio::sync::RwLock;
+
+    async fn test_persistence() -> Arc<dyn PersistenceManager> {
+        Arc::new(
+            MemoryPersistenceManager::new(PersistenceConfig::default())
+                .await
+                .unwrap(),
+        )
+    }
+
+    async fn manager_without_persistence() -> DataManager {
+        let storage = Arc::new(RwLock::new(FileDataStorage::new(
+            std::env::temp_dir()
+                .join("voirs_data_management_tests")
+                .to_string_lossy()
+                .to_string(),
+        )));
+        DataManager::new(storage, ExportOptions::default(), ImportOptions::default())
+            .await
+            .unwrap()
+    }
+
+    async fn manager_with_persistence() -> (DataManager, Arc<dyn PersistenceManager>) {
+        let persistence = test_persistence().await;
+        let manager = manager_without_persistence()
+            .await
+            .with_persistence(persistence.clone());
+        (manager, persistence)
+    }
 
     #[tokio::test]
     async fn test_data_manager_creation() {
@@ -1235,21 +1455,221 @@ mod tests {
         assert!(manager.is_ok());
     }
 
+    /// Without a persistence backend attached, export must fail closed
+    /// rather than produce an empty archive with a fabricated checksum.
     #[tokio::test]
-    async fn test_export_package_creation() {
-        let storage = Arc::new(RwLock::new(FileDataStorage::new("test_data".to_string())));
-        let export_config = ExportOptions::default();
-        let import_config = ImportOptions::default();
+    async fn test_export_without_persistence_fails_closed() {
+        let manager = manager_without_persistence().await;
+        let package = manager
+            .collect_export_data("user1", ExportFormat::Json)
+            .await;
+        assert!(package.is_err());
+    }
 
-        let manager = DataManager::new(storage, export_config, import_config)
+    /// The export package must contain the user's real, seeded progress
+    /// data (not an empty placeholder), and its checksum must be real --
+    /// i.e. it must actually verify against the payload.
+    #[tokio::test]
+    async fn test_export_package_reflects_real_seeded_data() {
+        let (manager, persistence) = manager_with_persistence().await;
+
+        let progress = UserProgress {
+            user_id: "user1".to_string(),
+            overall_skill_level: 0.65,
+            ..UserProgress::default()
+        };
+        persistence
+            .save_user_progress("user1", &progress)
             .await
             .unwrap();
-        let package = manager.collect_export_data(ExportFormat::Json).await;
-        assert!(package.is_ok());
 
-        let package = package.unwrap();
+        let package = manager
+            .collect_export_data("user1", ExportFormat::Json)
+            .await
+            .unwrap();
+
         assert_eq!(package.metadata.format, ExportFormat::Json);
         assert!(!package.metadata.voris_version.is_empty());
+
+        let exported_progress = package
+            .user_progress
+            .get("user1")
+            .expect("real seeded progress must be present in the export");
+        assert!((exported_progress.overall_skill_level - 0.65).abs() < 1e-6);
+
+        // The checksum must be real: it must actually verify.
+        assert!(!package.metadata.checksum.is_empty());
+        assert!(package.metadata.checksum != "placeholder_checksum");
+        assert!(verify_checksum(&package));
+    }
+
+    /// A checksum computed from fabricated/placeholder text would never
+    /// vary with content. The real implementation must: two exports with
+    /// different underlying data must produce different checksums.
+    #[tokio::test]
+    async fn test_checksum_varies_with_real_content() {
+        let (manager, persistence) = manager_with_persistence().await;
+
+        persistence
+            .save_user_progress(
+                "user1",
+                &UserProgress {
+                    user_id: "user1".to_string(),
+                    overall_skill_level: 0.1,
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
+        let package_a = manager
+            .collect_export_data("user1", ExportFormat::Json)
+            .await
+            .unwrap();
+
+        persistence
+            .save_user_progress(
+                "user1",
+                &UserProgress {
+                    user_id: "user1".to_string(),
+                    overall_skill_level: 0.9,
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
+        let package_b = manager
+            .collect_export_data("user1", ExportFormat::Json)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            package_a.metadata.checksum, package_b.metadata.checksum,
+            "different underlying data must produce different real checksums"
+        );
+    }
+
+    /// Full round trip: export a user's real data, import it into a
+    /// completely separate (initially empty) persistence backend, and
+    /// verify the real data actually arrives there -- proving `restore`
+    /// really restores instead of silently producing an empty archive.
+    #[tokio::test]
+    async fn test_export_import_round_trip_restores_real_data() {
+        let source_persistence = test_persistence().await;
+        let source_storage = Arc::new(RwLock::new(FileDataStorage::new(
+            std::env::temp_dir()
+                .join(format!("voirs_export_src_{}", std::process::id()))
+                .to_string_lossy()
+                .to_string(),
+        )));
+        let export_manager = DataManager::new(
+            source_storage,
+            ExportOptions::default(),
+            ImportOptions::default(),
+        )
+        .await
+        .unwrap()
+        .with_persistence(source_persistence.clone());
+
+        let seeded_progress = UserProgress {
+            user_id: "roundtrip_user".to_string(),
+            overall_skill_level: 0.77,
+            ..UserProgress::default()
+        };
+        source_persistence
+            .save_user_progress("roundtrip_user", &seeded_progress)
+            .await
+            .unwrap();
+        source_persistence
+            .save_feedback(
+                "roundtrip_user",
+                &FeedbackResponse {
+                    feedback_items: vec![UserFeedback {
+                        message: "Great articulation".to_string(),
+                        suggestion: None,
+                        confidence: 0.9,
+                        score: 0.88,
+                        priority: 0.5,
+                        metadata: HashMap::new(),
+                    }],
+                    overall_score: 0.88,
+                    immediate_actions: vec![],
+                    long_term_goals: vec![],
+                    progress_indicators: ProgressIndicators::default(),
+                    timestamp: Utc::now(),
+                    processing_time: std::time::Duration::from_millis(5),
+                    feedback_type: FeedbackType::Quality,
+                },
+            )
+            .await
+            .unwrap();
+
+        let export_path = std::env::temp_dir().join(format!(
+            "voirs_export_roundtrip_{}.json",
+            std::process::id()
+        ));
+        export_manager
+            .export_data("roundtrip_user", &export_path, ExportFormat::Json)
+            .await
+            .unwrap();
+
+        // A completely separate, initially-empty destination backend.
+        let dest_persistence = test_persistence().await;
+        let dest_storage = Arc::new(RwLock::new(FileDataStorage::new(
+            std::env::temp_dir()
+                .join(format!("voirs_export_dst_{}", std::process::id()))
+                .to_string_lossy()
+                .to_string(),
+        )));
+        let import_manager = DataManager::new(
+            dest_storage,
+            ExportOptions::default(),
+            ImportOptions {
+                skip_validation: false,
+                merge_mode: false,
+                create_backup: false,
+                duplicate_strategy: DuplicateStrategy::Overwrite,
+                transformations: Vec::new(),
+            },
+        )
+        .await
+        .unwrap()
+        .with_persistence(dest_persistence.clone());
+
+        // Sanity check: the destination genuinely has nothing yet.
+        assert!(dest_persistence
+            .load_user_progress("roundtrip_user")
+            .await
+            .is_err());
+
+        let report = import_manager
+            .import_data("roundtrip_user", &export_path, None)
+            .await
+            .unwrap();
+        assert!(report.validation_report.is_valid);
+        assert_eq!(
+            report.import_result.records_imported.get("user_progress"),
+            Some(&1)
+        );
+        assert_eq!(
+            report.import_result.records_imported.get("feedback"),
+            Some(&1)
+        );
+
+        // The real data must now genuinely exist in the destination backend.
+        let restored_progress = dest_persistence
+            .load_user_progress("roundtrip_user")
+            .await
+            .unwrap();
+        assert!((restored_progress.overall_skill_level - 0.77).abs() < 1e-6);
+
+        let restored_feedback = dest_persistence
+            .load_feedback_history("roundtrip_user", None, None)
+            .await
+            .unwrap();
+        assert_eq!(restored_feedback.len(), 1);
+        assert!((restored_feedback[0].overall_score - 0.88).abs() < 1e-6);
+
+        let _ = std::fs::remove_file(&export_path);
     }
 
     #[tokio::test]
@@ -1320,6 +1740,69 @@ mod tests {
 
     #[tokio::test]
     async fn test_validation_report() {
+        let mut package = DataExportPackage {
+            metadata: ExportMetadata {
+                created_at: Utc::now(),
+                format: ExportFormat::Json,
+                voris_version: "1.0.0".to_string(),
+                export_version: "1.0.0".to_string(),
+                exported_by: "test".to_string(),
+                data_size: 0,
+                record_counts: HashMap::new(),
+                export_options: ExportOptions::default(),
+                checksum: String::new(),
+            },
+            user_progress: HashMap::new(),
+            analytics: AnalyticsExportData {
+                sessions: Vec::new(),
+                performance_metrics: Vec::new(),
+                interactions: Vec::new(),
+                system_metrics: Vec::new(),
+            },
+            configurations: SystemConfigurations {
+                feedback_configs: HashMap::new(),
+                adaptive_configs: HashMap::new(),
+                realtime_configs: HashMap::new(),
+                ui_preferences: HashMap::new(),
+                privacy_settings: HashMap::new(),
+            },
+            training_data: TrainingExportData {
+                exercises: Vec::new(),
+                sessions: Vec::new(),
+                custom_exercises: Vec::new(),
+                statistics: TrainingStatistics {
+                    total_sessions: 0,
+                    total_exercises: 0,
+                    average_score: 0.0,
+                    improvement_rate: 0.0,
+                    time_spent_minutes: 0,
+                },
+            },
+            feedback_history: Vec::new(),
+            quality_metrics: QualityMetricsExport {
+                metrics: Vec::new(),
+                alerts: Vec::new(),
+                reports: Vec::new(),
+            },
+            gamification: None,
+        };
+        // Give the package a genuine checksum, computed the same way
+        // `collect_export_data` does, rather than a placeholder string --
+        // `validate_data` now really verifies it.
+        let serialized = serde_json::to_vec(&package).unwrap();
+        package.metadata.checksum = compute_checksum(&serialized);
+
+        let storage = FileDataStorage::new("test".to_string());
+        let report = storage.validate_data(&package).await.unwrap();
+
+        assert!(report.is_valid);
+        assert!(report.errors.is_empty());
+        assert_eq!(report.integrity_checks.get("checksum_valid"), Some(&true));
+    }
+
+    /// A tampered/corrupted checksum must be caught, not silently accepted.
+    #[tokio::test]
+    async fn test_validation_report_detects_checksum_mismatch() {
         let package = DataExportPackage {
             metadata: ExportMetadata {
                 created_at: Utc::now(),
@@ -1330,7 +1813,7 @@ mod tests {
                 data_size: 1024,
                 record_counts: HashMap::new(),
                 export_options: ExportOptions::default(),
-                checksum: "test_checksum".to_string(),
+                checksum: "not_a_real_checksum".to_string(),
             },
             user_progress: HashMap::new(),
             analytics: AnalyticsExportData {
@@ -1370,7 +1853,8 @@ mod tests {
         let storage = FileDataStorage::new("test".to_string());
         let report = storage.validate_data(&package).await.unwrap();
 
-        assert!(report.is_valid);
-        assert!(report.errors.is_empty());
+        assert!(!report.is_valid);
+        assert_eq!(report.integrity_checks.get("checksum_valid"), Some(&false));
+        assert!(report.errors.iter().any(|e| e.contains("Checksum")));
     }
 }

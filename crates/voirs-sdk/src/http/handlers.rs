@@ -332,7 +332,25 @@ pub async fn validate_voice_handler(
                 if let Ok(wav_bytes) = audio_buffer.to_wav_bytes() {
                     test_audio = Some(wav_bytes);
                 }
-                quality_score = Some(0.85); // Mock quality score
+
+                // Score the audio that was actually produced, from measured
+                // signal properties. Never report a canned number.
+                if request.quality_check.unwrap_or(false) {
+                    match crate::audio::workflows::analyze_quality(&audio_buffer) {
+                        Ok(metrics) => {
+                            quality_score = Some(score_from_metrics(&metrics));
+                            if metrics.has_clipping {
+                                issues.push(format!(
+                                    "Test synthesis clipped ({} samples)",
+                                    metrics.clipped_samples
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            issues.push(format!("Quality analysis failed: {e}"));
+                        }
+                    }
+                }
             }
             Err(e) => {
                 issues.push(format!("Test synthesis failed: {e}"));
@@ -350,6 +368,52 @@ pub async fn validate_voice_handler(
     };
 
     Ok(Json(response))
+}
+
+/// Derive a 0.0-1.0 quality score from measured audio properties.
+///
+/// The score is a weighted combination of three measurements taken from the
+/// synthesized buffer:
+///
+/// * **SNR** (weight 0.5), mapped linearly over 0-40 dB.
+/// * **Headroom** (weight 0.3): how close the peak sits to 0 dBFS, with the ideal
+///   band being -6 to -1 dBFS; both clipping-adjacent and overly quiet output are
+///   penalized.
+/// * **Crest factor** (weight 0.2), mapped over 1.0-12.0, penalizing both
+///   over-compressed and excessively peaky material.
+///
+/// Every term is computed from the actual samples, so the score varies with the
+/// audio it is given.
+fn score_from_metrics(metrics: &crate::audio::AudioQualityMetrics) -> f32 {
+    let snr_score = (metrics.snr / 40.0).clamp(0.0, 1.0);
+
+    // Peak level: best in [-6, -1] dBFS, falling off on both sides.
+    let peak_score = if metrics.peak_db.is_finite() {
+        if (-6.0..=-1.0).contains(&metrics.peak_db) {
+            1.0
+        } else if metrics.peak_db > -1.0 {
+            // Approaching / exceeding full scale.
+            (1.0 + metrics.peak_db.min(0.0)).clamp(0.0, 1.0)
+        } else {
+            // Too quiet: -6 dBFS scores 1.0, -40 dBFS scores 0.0.
+            ((metrics.peak_db + 40.0) / 34.0).clamp(0.0, 1.0)
+        }
+    } else {
+        0.0
+    };
+
+    let crest_score = if metrics.crest_factor.is_finite() {
+        ((metrics.crest_factor - 1.0) / 11.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let mut score = 0.5 * snr_score + 0.3 * peak_score + 0.2 * crest_score;
+    if metrics.has_clipping {
+        score *= 0.5;
+    }
+
+    score.clamp(0.0, 1.0)
 }
 
 pub async fn model_management_handler(
@@ -565,6 +629,41 @@ mod tests {
             "an unregistered voice ID must not validate as usable"
         );
         assert!(!parsed["issues"].as_array().expect("issues").is_empty());
+    }
+
+    #[test]
+    fn test_quality_score_reflects_measurements() {
+        use crate::audio::AudioQualityMetrics;
+
+        let clean = AudioQualityMetrics {
+            rms_db: -18.0,
+            peak_db: -3.0,
+            crest_factor: 6.0,
+            snr: 38.0,
+            has_clipping: false,
+            clipped_samples: 0,
+        };
+        let noisy = AudioQualityMetrics { snr: 4.0, ..clean };
+        let clipped = AudioQualityMetrics {
+            peak_db: 0.0,
+            has_clipping: true,
+            clipped_samples: 128,
+            ..clean
+        };
+
+        let clean_score = score_from_metrics(&clean);
+        let noisy_score = score_from_metrics(&noisy);
+        let clipped_score = score_from_metrics(&clipped);
+
+        // The score must respond to the measurements, not be a constant.
+        assert!(clean_score > noisy_score, "{clean_score} !> {noisy_score}");
+        assert!(
+            clean_score > clipped_score,
+            "{clean_score} !> {clipped_score}"
+        );
+        for score in [clean_score, noisy_score, clipped_score] {
+            assert!((0.0..=1.0).contains(&score), "score out of range: {score}");
+        }
     }
 
     #[tokio::test]

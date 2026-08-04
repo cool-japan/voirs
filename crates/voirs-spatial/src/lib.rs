@@ -381,7 +381,7 @@ pub use room::{
     adaptive_acoustics::{
         AdaptationAction, AdaptationController, AdaptationMetrics, AdaptationTrigger,
         AdaptiveAcousticEnvironment, AdaptiveAcousticsConfig, EnvironmentSensors,
-        EnvironmentSnapshot, EnvironmentType, SensorConfig, UserFeedback,
+        EnvironmentSnapshot, EnvironmentType, SensorConfig, SensorInputs, UserFeedback,
     },
     ConnectionAcousticProperties, ConnectionState, ConnectionType, GlobalAcousticConfig,
     MultiRoomEnvironment, Room, RoomAcoustics, RoomConnection, RoomSimulator,
@@ -1280,7 +1280,7 @@ pub mod prelude {
             adaptive_acoustics::{
                 AdaptationAction, AdaptationController, AdaptationMetrics, AdaptationTrigger,
                 AdaptiveAcousticEnvironment, AdaptiveAcousticsConfig, EnvironmentSensors,
-                EnvironmentSnapshot, EnvironmentType, SensorConfig, UserFeedback,
+                EnvironmentSnapshot, EnvironmentType, SensorConfig, SensorInputs, UserFeedback,
             },
             ConnectionAcousticProperties, ConnectionState, ConnectionType, GlobalAcousticConfig,
             MultiRoomEnvironment, Room, RoomAcoustics, RoomConnection, RoomSimulator,

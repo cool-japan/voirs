@@ -193,7 +193,7 @@ pub enum VocoderType {
 /// [`DiffSingerModel::load_from_file`] must be called with a real
 /// safetensors file before it can be used; see the module docs for the
 /// (default) non-neural fallback used otherwise.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DiffusionDenoiser {
     n_mel: usize,
     linear1: Linear,
@@ -201,6 +201,25 @@ pub struct DiffusionDenoiser {
     linear3: Linear,
     device: Device,
     varmap: VarMap,
+}
+
+impl std::fmt::Debug for DiffusionDenoiser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `candle_nn::VarMap` doesn't implement `Debug`, so summarize the
+        // real parameter count instead of the raw tensors.
+        f.debug_struct("DiffusionDenoiser")
+            .field("n_mel", &self.n_mel)
+            .field(
+                "parameter_count",
+                &self
+                    .varmap
+                    .all_vars()
+                    .iter()
+                    .map(|v| v.elem_count())
+                    .sum::<usize>(),
+            )
+            .finish()
+    }
 }
 
 impl DiffusionDenoiser {
@@ -289,9 +308,11 @@ impl DiffusionDenoiser {
 
     /// Persist the real weight tensors in safetensors format.
     fn save(&self, path: &str) -> Result<()> {
-        self.varmap
-            .save(path)
-            .map_err(|e| Error::Model(format!("Failed to save DiffusionDenoiser weights to {path}: {e}")))
+        self.varmap.save(path).map_err(|e| {
+            Error::Model(format!(
+                "Failed to save DiffusionDenoiser weights to {path}: {e}"
+            ))
+        })
     }
 
     /// Load real weight tensors from a safetensors file, failing closed
@@ -319,7 +340,10 @@ impl DiffusionDenoiser {
 /// voice), zero-filling any conditioning type that's absent (e.g. disabled
 /// via config) or shorter than expected, rather than failing or fabricating
 /// a nonzero value.
-fn conditioning_frame_vector(conditioning: &HashMap<String, Array2<f32>>, frame: usize) -> Vec<f32> {
+fn conditioning_frame_vector(
+    conditioning: &HashMap<String, Array2<f32>>,
+    frame: usize,
+) -> Vec<f32> {
     let mut vector = Vec::with_capacity(DiffusionDenoiser::conditioning_dim());
     for (key, dim) in [
         ("pitch", DiffusionDenoiser::PITCH_DIM),
@@ -605,12 +629,16 @@ impl DiffSingerModel {
         let mut diffusion_state = DiffusionState::new(target_shape, self.config.n_diffusion_steps);
         diffusion_state.initialize_noise();
 
-        // Prepare conditioning features
-        let conditioning = self.prepare_conditioning(musical_conditioning, voice_type)?;
+        // Prepare conditioning features, spanning the *real* target frame
+        // count computed above - not a fixed placeholder - so a phrase of any
+        // length gets real (non-zero) conditioning across its whole duration.
+        let conditioning = self.prepare_conditioning(musical_conditioning, voice_type, n_frames)?;
 
         // Iterative denoising process
         for step in 0..self.config.n_diffusion_steps {
-            // Predict noise/clean signal (placeholder implementation)
+            // Predict noise via the real noise-prediction step (neural
+            // denoiser if loaded and enabled, analytical fallback otherwise -
+            // see `predict_noise`).
             let noise_prediction = self.predict_noise(&diffusion_state, &conditioning, step)?;
 
             // Update diffusion state
@@ -620,41 +648,55 @@ impl DiffSingerModel {
         Ok(diffusion_state.noisy_spec)
     }
 
-    /// Prepare conditioning features for synthesis
+    /// Prepare conditioning features for synthesis.
+    ///
+    /// `n_frames` is the real target frame count (matching the mel
+    /// spectrogram being generated, see [`Self::generate_mel_spectrogram`]),
+    /// threaded through to every `extract_*_features` call so conditioning
+    /// spans the entire requested duration instead of a fixed-size window.
     fn prepare_conditioning(
         &self,
         musical_conditioning: &MusicalConditioning,
         voice_type: VoiceType,
+        n_frames: usize,
     ) -> Result<HashMap<String, Array2<f32>>> {
         let mut conditioning = HashMap::new();
 
         // Phoneme conditioning (simplified)
         if self.config.use_phoneme_conditioning {
             let phoneme_features =
-                self.extract_phoneme_features(&musical_conditioning.lyrics_alignment)?;
+                self.extract_phoneme_features(&musical_conditioning.lyrics_alignment, n_frames)?;
             conditioning.insert("phoneme".to_string(), phoneme_features);
         }
 
         // Musical conditioning
         if self.config.use_musical_conditioning {
-            let musical_features = self.extract_musical_features(musical_conditioning)?;
+            let musical_features = self.extract_musical_features(musical_conditioning, n_frames)?;
             conditioning.insert("musical".to_string(), musical_features);
         }
 
         // Pitch conditioning
-        let pitch_features = self.extract_pitch_features(&musical_conditioning.notes)?;
+        let pitch_features = self.extract_pitch_features(&musical_conditioning.notes, n_frames)?;
         conditioning.insert("pitch".to_string(), pitch_features);
 
         // Voice type conditioning
-        let voice_features = self.extract_voice_features(voice_type)?;
+        let voice_features = self.extract_voice_features(voice_type, n_frames)?;
         conditioning.insert("voice".to_string(), voice_features);
 
         Ok(conditioning)
     }
 
-    /// Extract phoneme features from lyrics
-    fn extract_phoneme_features(&self, lyrics: &[(String, f32, f32)]) -> Result<Array2<f32>> {
-        let n_frames = 100; // Placeholder
+    /// Extract phoneme features from lyrics.
+    ///
+    /// `n_frames` is the real target frame count for the phrase being
+    /// synthesized (see [`Self::prepare_conditioning`]) - previously this was
+    /// a fixed 100-frame window (~0.58s at 44.1kHz/hop 256), silently zeroing
+    /// out conditioning for anything longer.
+    fn extract_phoneme_features(
+        &self,
+        lyrics: &[(String, f32, f32)],
+        n_frames: usize,
+    ) -> Result<Array2<f32>> {
         let phoneme_dim = 64; // Typical phoneme embedding dimension
 
         let mut features = Array2::zeros((phoneme_dim, n_frames));
@@ -680,12 +722,15 @@ impl DiffSingerModel {
         Ok(features)
     }
 
-    /// Extract musical features
+    /// Extract musical features.
+    ///
+    /// `n_frames` is the real target frame count, see
+    /// [`Self::extract_phoneme_features`].
     fn extract_musical_features(
         &self,
         musical_conditioning: &MusicalConditioning,
+        n_frames: usize,
     ) -> Result<Array2<f32>> {
-        let n_frames = 100; // Placeholder
         let musical_dim = 32; // Musical feature dimension
 
         let mut features = Array2::zeros((musical_dim, n_frames));
@@ -721,9 +766,15 @@ impl DiffSingerModel {
         Ok(features)
     }
 
-    /// Extract pitch features from notes
-    fn extract_pitch_features(&self, notes: &[MusicalNote]) -> Result<Array2<f32>> {
-        let n_frames = 100; // Placeholder
+    /// Extract pitch features from notes.
+    ///
+    /// `n_frames` is the real target frame count, see
+    /// [`Self::extract_phoneme_features`].
+    fn extract_pitch_features(
+        &self,
+        notes: &[MusicalNote],
+        n_frames: usize,
+    ) -> Result<Array2<f32>> {
         let pitch_dim = 1; // F0 values
 
         let mut features = Array2::zeros((pitch_dim, n_frames));
@@ -748,9 +799,15 @@ impl DiffSingerModel {
         Ok(features)
     }
 
-    /// Extract voice type features
-    fn extract_voice_features(&self, voice_type: VoiceType) -> Result<Array2<f32>> {
-        let n_frames = 100; // Placeholder
+    /// Extract voice type features.
+    ///
+    /// `n_frames` is the real target frame count, see
+    /// [`Self::extract_phoneme_features`].
+    fn extract_voice_features(
+        &self,
+        voice_type: VoiceType,
+        n_frames: usize,
+    ) -> Result<Array2<f32>> {
         let voice_dim = 16; // Voice embedding dimension
 
         let mut features = Array2::zeros((voice_dim, n_frames));
@@ -1338,5 +1395,239 @@ mod tests {
             any_different,
             "predict_noise returned identical outputs for different conditioning inputs"
         );
+    }
+
+    /// Regression test for the fixed-100-frame conditioning bug: every
+    /// `extract_*_features` used to hardcode `n_frames = 100`
+    /// (~0.58s at 44.1kHz/hop 256), silently zeroing conditioning for any
+    /// phrase longer than that - regardless of the real target frame count
+    /// `generate_mel_spectrogram` computed. This asserts conditioning arrays
+    /// now span the real requested duration and carry real, non-zero values
+    /// (and thus a non-degenerate noise estimate) well past the old cutoff.
+    #[test]
+    fn test_conditioning_spans_real_frame_count_not_fixed_100() {
+        let model = DiffSingerModel::default();
+
+        // A single 2-second note: at the default sample_rate=44100/hop_size=256
+        // that's ~344 frames, comfortably past the old fixed 100-frame window.
+        let note = MusicalNote::new(midi_to_note_event(60, 2.0, 0.8), 0.0, 2.0);
+        let musical_conditioning =
+            MusicalConditioning::new(vec![note]).with_lyrics(vec![("la".to_string(), 0.0, 2.0)]);
+
+        let n_frames_expected =
+            (2.0 * model.config.sample_rate / model.config.hop_size as f32) as usize;
+        assert!(
+            n_frames_expected > 100,
+            "test setup must exceed the old fixed 100-frame window, got {n_frames_expected}"
+        );
+
+        let conditioning = model
+            .prepare_conditioning(&musical_conditioning, VoiceType::Soprano, n_frames_expected)
+            .expect("prepare_conditioning should succeed");
+
+        for (name, array) in &conditioning {
+            assert_eq!(
+                array.ncols(),
+                n_frames_expected,
+                "{name} conditioning must span the real target frame count ({n_frames_expected}), \
+                 not a fixed placeholder"
+            );
+        }
+
+        // Pitch conditioning is filled directly from the note's real duration,
+        // so it must carry non-zero values well past the old 100-frame cutoff.
+        let pitch = &conditioning["pitch"];
+        assert!(
+            (100..n_frames_expected).any(|frame| pitch[[0, frame]] != 0.0),
+            "pitch conditioning must be non-zero past frame 100 for a 2-second note"
+        );
+
+        // The analytical noise-prediction fallback is built directly from this
+        // conditioning, so it must also be non-degenerate (non-zero) past
+        // frame 100 - with the old fixed-100 bug every frame past 100 was
+        // driven from all-zero conditioning.
+        let state = DiffusionState::new(
+            (model.config.n_mel, n_frames_expected),
+            model.config.n_diffusion_steps,
+        );
+        let noise_estimate = model
+            .predict_noise_analytical_fallback(&state, &conditioning, 10)
+            .expect("predict_noise_analytical_fallback should succeed");
+        assert!(
+            (100..n_frames_expected).any(|frame| noise_estimate[[0, frame]] != 0.0),
+            "noise estimate must be non-zero past frame 100, not silently degenerate to the old \
+             fixed window"
+        );
+    }
+
+    // ── DiffusionDenoiser: real neural noise-prediction network ────────────
+
+    fn unique_temp_path(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "voirs_singing_diffsinger_test_{tag}_{}_{}.safetensors",
+            std::process::id(),
+            fastrand::u64(..)
+        ))
+    }
+
+    #[test]
+    fn test_neural_denoiser_forward_produces_real_shape_and_finite_values() {
+        let n_mel = 16;
+        let n_frames = 10;
+        let denoiser = DiffusionDenoiser::new(n_mel, Device::Cpu).expect("denoiser construction");
+
+        let noisy_mel = Array2::<f32>::from_elem((n_mel, n_frames), 0.2);
+        let mut conditioning: HashMap<String, Array2<f32>> = HashMap::new();
+        conditioning.insert("pitch".to_string(), Array2::<f32>::ones((1, n_frames)));
+
+        let result = denoiser
+            .forward(&noisy_mel, &conditioning, 5, 50)
+            .expect("neural forward pass");
+
+        assert_eq!(result.dim(), (n_mel, n_frames));
+        assert!(result.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn test_neural_denoiser_output_depends_on_conditioning() {
+        let n_mel = 12;
+        let n_frames = 8;
+        let denoiser = DiffusionDenoiser::new(n_mel, Device::Cpu).expect("denoiser construction");
+        let noisy_mel = Array2::<f32>::from_elem((n_mel, n_frames), 0.1);
+
+        let mut cond_a: HashMap<String, Array2<f32>> = HashMap::new();
+        cond_a.insert("pitch".to_string(), Array2::<f32>::zeros((1, n_frames)));
+        let mut cond_b: HashMap<String, Array2<f32>> = HashMap::new();
+        cond_b.insert(
+            "pitch".to_string(),
+            Array2::<f32>::from_elem((1, n_frames), 5.0),
+        );
+
+        let result_a = denoiser.forward(&noisy_mel, &cond_a, 10, 50).unwrap();
+        let result_b = denoiser.forward(&noisy_mel, &cond_b, 10, 50).unwrap();
+
+        assert!(
+            result_a
+                .iter()
+                .zip(result_b.iter())
+                .any(|(a, b)| (a - b).abs() > 1e-6),
+            "a real neural network must produce different output for different conditioning"
+        );
+    }
+
+    #[test]
+    fn test_neural_denoiser_save_load_round_trip_restores_real_weights() {
+        let n_mel = 10;
+        let n_frames = 6;
+        let denoiser = DiffusionDenoiser::new(n_mel, Device::Cpu).expect("denoiser construction");
+
+        let noisy_mel = Array2::<f32>::from_elem((n_mel, n_frames), 0.3);
+        let conditioning: HashMap<String, Array2<f32>> = HashMap::new();
+        let expected = denoiser.forward(&noisy_mel, &conditioning, 3, 50).unwrap();
+
+        let path = unique_temp_path("denoiser_roundtrip");
+        denoiser.save(path.to_str().unwrap()).expect("save");
+
+        let reloaded = DiffusionDenoiser::load(n_mel, Device::Cpu, path.to_str().unwrap())
+            .expect("load should restore the real saved weights");
+        let actual = reloaded.forward(&noisy_mel, &conditioning, 3, 50).unwrap();
+
+        assert_eq!(
+            expected, actual,
+            "loading a saved denoiser must restore bit-identical weights"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_load_from_file_missing_weights_fails_closed() {
+        let mut model = DiffSingerModel::default();
+        let missing_path = unique_temp_path("does_not_exist");
+        let result = model.load_from_file(missing_path.to_str().unwrap());
+        assert!(
+            result.is_err(),
+            "loading nonexistent DiffSinger denoiser weights must fail, not silently succeed"
+        );
+    }
+
+    #[test]
+    fn test_save_to_file_without_denoiser_fails_closed() {
+        let model = DiffSingerModel::default();
+        let path = unique_temp_path("save_without_denoiser");
+        let result = model.save_to_file(path.to_str().unwrap());
+        assert!(
+            result.is_err(),
+            "saving with no loaded neural denoiser must fail, not report a fake success"
+        );
+    }
+
+    #[test]
+    fn test_predict_noise_requires_loaded_denoiser_when_neural_enabled() {
+        let config = DiffSingerConfig {
+            use_neural_denoiser: true,
+            n_mel: 8,
+            ..DiffSingerConfig::default()
+        };
+        let model = DiffSingerModel::new(config);
+
+        let state = DiffusionState::new((8, 4), 10);
+        let conditioning: HashMap<String, Array2<f32>> = HashMap::new();
+
+        assert!(
+            model.predict_noise(&state, &conditioning, 0).is_err(),
+            "use_neural_denoiser=true with no loaded weights must fail closed"
+        );
+    }
+
+    #[test]
+    fn test_predict_noise_uses_loaded_neural_denoiser_when_enabled() {
+        let n_mel = 8;
+        // Save a real (freshly-initialized) denoiser, then load it through
+        // the public `DiffSingerModel::load_from_file` API end to end.
+        let denoiser = DiffusionDenoiser::new(n_mel, Device::Cpu).unwrap();
+        let path = unique_temp_path("model_predict_with_neural");
+        denoiser.save(path.to_str().unwrap()).unwrap();
+
+        let config = DiffSingerConfig {
+            use_neural_denoiser: true,
+            n_mel,
+            ..DiffSingerConfig::default()
+        };
+        let mut model = DiffSingerModel::new(config);
+        model.load_from_file(path.to_str().unwrap()).unwrap();
+
+        let state = DiffusionState::new((n_mel, 5), 10);
+        let conditioning: HashMap<String, Array2<f32>> = HashMap::new();
+        let result = model
+            .predict_noise(&state, &conditioning, 2)
+            .expect("real neural denoiser path should succeed once weights are loaded");
+        assert_eq!(result.dim(), (n_mel, 5));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_vocoder_synthesis_neural_mode_fails_closed() {
+        let config = DiffSingerConfig {
+            use_neural_vocoder: true,
+            ..DiffSingerConfig::default()
+        };
+        let model = DiffSingerModel::new(config);
+        let mel = Array2::<f32>::zeros((8, 4));
+        assert!(
+            model.vocoder_synthesis(&mel).is_err(),
+            "use_neural_vocoder=true must fail closed rather than silently using the DSP fallback"
+        );
+    }
+
+    #[test]
+    fn test_vocoder_synthesis_default_fallback_still_produces_audio() {
+        let model = DiffSingerModel::default();
+        let mel = Array2::<f32>::from_elem((8, 4), 0.5);
+        let audio = model
+            .vocoder_synthesis(&mel)
+            .expect("default (non-neural) vocoder path should still produce audio");
+        assert!(audio.iter().any(|&x| x != 0.0));
     }
 }

@@ -349,11 +349,21 @@ impl Default for ConflictResolver {
 }
 
 impl ConflictResolver {
-    /// Create a new conflict resolver
+    /// Create a new conflict resolver using the default `LastWriteWins` strategy
     #[must_use]
     pub fn new() -> Self {
         Self {
             resolution_strategy: ConflictResolutionStrategy::LastWriteWins,
+        }
+    }
+
+    /// Create a conflict resolver using a specific resolution strategy (e.g.
+    /// [`ConflictResolutionStrategy::Merge`] for field-level merging instead
+    /// of whole-record last-write-wins).
+    #[must_use]
+    pub fn with_strategy(resolution_strategy: ConflictResolutionStrategy) -> Self {
+        Self {
+            resolution_strategy,
         }
     }
 
@@ -405,34 +415,96 @@ impl ConflictResolver {
     /// Resolve conflict for a specific entity
     fn resolve_entity_conflict(
         &self,
-        _entity_id: &str,
+        entity_id: &str,
         changes: Vec<DataChange>,
     ) -> Result<DataChange, SyncError> {
+        if changes.is_empty() {
+            return Err(SyncError::ConflictError {
+                message: format!("no changes to resolve for entity {entity_id}"),
+            });
+        }
+
         match self.resolution_strategy {
             ConflictResolutionStrategy::LastWriteWins => {
                 // Use the change with the latest timestamp
-                Ok(changes
+                changes
                     .into_iter()
                     .max_by_key(|c| c.timestamp)
-                    .expect("value should be present"))
+                    .ok_or_else(|| SyncError::ConflictError {
+                        message: format!("no changes to resolve for entity {entity_id}"),
+                    })
             }
             ConflictResolutionStrategy::FirstWriteWins => {
                 // Use the change with the earliest timestamp
-                Ok(changes
+                changes
                     .into_iter()
                     .min_by_key(|c| c.timestamp)
-                    .expect("value should be present"))
+                    .ok_or_else(|| SyncError::ConflictError {
+                        message: format!("no changes to resolve for entity {entity_id}"),
+                    })
             }
-            ConflictResolutionStrategy::Merge => {
-                // Merge changes (simplified implementation)
-                let mut merged = changes[0].clone();
-                for change in changes.iter().skip(1) {
-                    // Merge logic would go here
-                    merged.timestamp = std::cmp::max(merged.timestamp, change.timestamp);
+            ConflictResolutionStrategy::Merge => self.merge_changes(entity_id, changes),
+        }
+    }
+
+    /// Merge a set of conflicting changes for a single entity at the JSON
+    /// field level.
+    ///
+    /// Whole-record last-write-wins (as used by [`ConflictResolutionStrategy::LastWriteWins`])
+    /// is too coarse when two devices edited *different* fields of the same
+    /// entity concurrently: picking "the latest change" outright discards
+    /// every field the losing change touched, even fields the winner never
+    /// set. This merges per JSON field instead: for each key that appears in
+    /// any change's `data` object, the value from whichever change carries
+    /// the newest timestamp *for that key* wins, so edits to disjoint fields
+    /// are all preserved and only genuinely conflicting fields fall back to
+    /// last-write-wins.
+    fn merge_changes(
+        &self,
+        entity_id: &str,
+        mut changes: Vec<DataChange>,
+    ) -> Result<DataChange, SyncError> {
+        // Oldest first, so that when two changes touch the same field the
+        // later loop iteration (by definition, the later timestamp) is the
+        // one that ends up applied last.
+        changes.sort_by_key(|c| c.timestamp);
+
+        let latest = changes
+            .last()
+            .cloned()
+            .ok_or_else(|| SyncError::ConflictError {
+                message: format!("no changes to merge for entity {entity_id}"),
+            })?;
+
+        let mut merged_fields = serde_json::Map::new();
+        let mut field_timestamps: HashMap<String, DateTime<Utc>> = HashMap::new();
+
+        for change in &changes {
+            let Some(fields) = change.data.as_object() else {
+                continue;
+            };
+
+            for (key, value) in fields {
+                let should_apply = field_timestamps
+                    .get(key)
+                    .is_none_or(|existing| change.timestamp >= *existing);
+
+                if should_apply {
+                    merged_fields.insert(key.clone(), value.clone());
+                    field_timestamps.insert(key.clone(), change.timestamp);
                 }
-                Ok(merged)
             }
         }
+
+        Ok(DataChange {
+            id: latest.id,
+            change_type: latest.change_type,
+            entity_type: latest.entity_type,
+            entity_id: latest.entity_id,
+            data: serde_json::Value::Object(merged_fields),
+            timestamp: latest.timestamp,
+            device_id: latest.device_id,
+        })
     }
 }
 
@@ -759,6 +831,63 @@ mod tests {
         assert_eq!(strategy, ConflictResolutionStrategy::LastWriteWins);
         assert_ne!(strategy, ConflictResolutionStrategy::FirstWriteWins);
         assert_ne!(strategy, ConflictResolutionStrategy::Merge);
+    }
+
+    /// Real field-level merge: two devices concurrently edit *different*
+    /// fields of the same entity. A whole-record last-write-wins strategy
+    /// would silently drop the loser's field entirely; the Merge strategy
+    /// must preserve both edits and, for a field touched by both changes,
+    /// resolve it using the newer of the two per-field timestamps.
+    #[test]
+    fn test_merge_strategy_combines_disjoint_and_conflicting_fields() {
+        let resolver = ConflictResolver::with_strategy(ConflictResolutionStrategy::Merge);
+
+        let t0 = chrono::Utc::now();
+        let changes = vec![
+            DataChange {
+                id: "device_a_change".to_string(),
+                change_type: ChangeType::Update,
+                entity_type: "user_progress".to_string(),
+                entity_id: "user_1".to_string(),
+                // Sets `score` (later overwritten by device B) and `streak`
+                // (unique to this change; must survive the merge).
+                data: serde_json::json!({"score": 80, "streak": 5}),
+                timestamp: t0,
+                device_id: "device_a".to_string(),
+            },
+            DataChange {
+                id: "device_b_change".to_string(),
+                change_type: ChangeType::Update,
+                entity_type: "user_progress".to_string(),
+                entity_id: "user_1".to_string(),
+                // Sets `score` (should win, later timestamp) and `name`
+                // (unique to this change; must survive the merge).
+                data: serde_json::json!({"score": 95, "name": "Alice"}),
+                timestamp: t0 + chrono::Duration::seconds(10),
+                device_id: "device_b".to_string(),
+            },
+        ];
+
+        let merged = resolver.resolve_entity_conflict("user_1", changes).unwrap();
+        let fields = merged.data.as_object().expect("merged data is an object");
+
+        // The later change's value wins for the field both changes touched.
+        assert_eq!(fields["score"], serde_json::json!(95));
+        // Fields unique to each change must both be preserved, not dropped.
+        assert_eq!(fields["streak"], serde_json::json!(5));
+        assert_eq!(fields["name"], serde_json::json!("Alice"));
+        assert_eq!(fields.len(), 3, "no field should be lost or duplicated");
+    }
+
+    #[test]
+    fn test_resolve_entity_conflict_empty_changes_is_an_honest_error() {
+        let resolver = ConflictResolver::new();
+        assert!(resolver.resolve_entity_conflict("user_1", vec![]).is_err());
+
+        let merge_resolver = ConflictResolver::with_strategy(ConflictResolutionStrategy::Merge);
+        assert!(merge_resolver
+            .resolve_entity_conflict("user_1", vec![])
+            .is_err());
     }
 
     #[tokio::test]

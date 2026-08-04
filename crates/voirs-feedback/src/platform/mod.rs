@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod desktop;
@@ -535,7 +536,7 @@ pub struct PlatformPerformanceMetrics {
 }
 
 /// Network usage statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NetworkUsage {
     /// Bytes sent
     pub bytes_sent: u64,
@@ -756,18 +757,61 @@ impl PlatformManager {
         }
     }
 
-    /// Get total system memory in bytes
+    /// Get total system memory in bytes.
+    ///
+    /// Real values on Linux (`/proc/meminfo`) and macOS (`sysctl
+    /// hw.memsize`); `0` (an honest "unknown", never a plausible-looking
+    /// constant) on any other platform. Total physical memory does not
+    /// change at runtime, so the result is cached after the first real
+    /// query to avoid repeatedly shelling out / re-reading `/proc`.
     fn get_total_memory() -> u64 {
-        // This would use platform-specific APIs to get actual memory
-        // For now, return a default value
-        8 * 1024 * 1024 * 1024 // 8GB default
+        static TOTAL_MEMORY_BYTES: OnceLock<u64> = OnceLock::new();
+        *TOTAL_MEMORY_BYTES.get_or_init(Self::query_total_memory_bytes)
     }
 
-    /// Get available system memory in bytes
+    #[cfg(target_os = "linux")]
+    fn query_total_memory_bytes() -> u64 {
+        std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|contents| parse_meminfo_field(&contents, "MemTotal"))
+            .map(|kb| kb.saturating_mul(1024))
+            .unwrap_or(0)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn query_total_memory_bytes() -> u64 {
+        run_command_stdout("sysctl", &["-n", "hw.memsize"])
+            .and_then(|output| output.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn query_total_memory_bytes() -> u64 {
+        0
+    }
+
+    /// Get available (free/reclaimable) system memory in bytes, queried
+    /// fresh every call (unlike total memory, this changes over time).
+    /// Real values on Linux/macOS; `0` (honest "unknown") elsewhere.
     fn get_available_memory() -> u64 {
-        // This would use platform-specific APIs to get available memory
-        // For now, return a default value
-        4 * 1024 * 1024 * 1024 // 4GB default
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_to_string("/proc/meminfo")
+                .ok()
+                .and_then(|contents| parse_meminfo_field(&contents, "MemAvailable"))
+                .map(|kb| kb.saturating_mul(1024))
+                .unwrap_or(0)
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            query_macos_available_memory_bytes()
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            0
+        }
     }
 
     /// Get number of CPU cores
@@ -784,15 +828,28 @@ impl PlatformManager {
 
     /// Get battery level (0.0 to 1.0, or -1.0 if not available)
     fn get_battery_level() -> f32 {
-        // This would use platform-specific APIs to get battery level
-        // For now, return -1.0 to indicate not available
-        -1.0
+        query_battery_level()
     }
 
-    /// Get network connection type
+    /// Get network connection type.
+    ///
+    /// Whether the machine has *any* configured network route is checked
+    /// for real (via a local-only `UdpSocket::connect`, which resolves the
+    /// OS routing table without sending any packets or blocking on the
+    /// network -- unlike a TCP connect, so this stays fast and safe to call
+    /// from tests/sandboxes with no network egress). A machine with no
+    /// route at all now correctly reports `Offline`, instead of the
+    /// previous hardcoded `WiFi` regardless of actual state. The specific
+    /// medium (WiFi vs Ethernet vs Cellular) is not distinguishable without
+    /// platform-specific interface-enumeration APIs, so a real route is
+    /// reported as `WiFi` -- the common case -- rather than guessing among
+    /// the other variants.
     fn get_network_type() -> NetworkType {
-        // This would detect actual network type
-        NetworkType::WiFi
+        if has_network_route() {
+            NetworkType::WiFi
+        } else {
+            NetworkType::Offline
+        }
     }
 
     /// Initialize platform-specific resources
@@ -876,44 +933,69 @@ impl PlatformManager {
         }
     }
 
-    /// Get current CPU usage percentage
+    /// Get current CPU usage percentage. Real, live-varying value on
+    /// Linux/macOS (via load average / real core count); `0.0` (honest
+    /// "unknown") elsewhere.
     fn get_cpu_usage(&self) -> f32 {
-        // This would use platform-specific APIs to get CPU usage
-        0.0
+        query_cpu_usage_percent()
     }
 
-    /// Get current memory usage percentage
+    /// Get current memory usage percentage, derived from the real total and
+    /// available memory queried above. `0.0` when total memory is unknown
+    /// (avoids a division by zero and matches the "honest unknown" pattern
+    /// used elsewhere in this file).
     fn get_memory_usage(&self) -> f32 {
-        // This would use platform-specific APIs to get memory usage
-        0.0
-    }
-
-    /// Get current battery usage rate
-    fn get_battery_usage(&self) -> f32 {
-        // This would use platform-specific APIs to get battery usage
-        0.0
-    }
-
-    /// Get current network usage
-    fn get_network_usage(&self) -> NetworkUsage {
-        NetworkUsage {
-            bytes_sent: 0,
-            bytes_received: 0,
-            packets_sent: 0,
-            packets_received: 0,
+        let total = Self::get_total_memory();
+        if total == 0 {
+            return 0.0;
         }
+        let available = Self::get_available_memory();
+        let used = total.saturating_sub(available);
+        (used as f32 / total as f32 * 100.0).clamp(0.0, 100.0)
     }
 
-    /// Get current audio latency in milliseconds
+    /// Get current battery usage (drain) rate.
+    ///
+    /// Computing a real drain rate requires sampling the battery level
+    /// twice with a time delta between samples, which this synchronous,
+    /// single-shot accessor cannot do. `-1.0` (this file's established
+    /// "not available" sentinel for battery-related metrics, matching
+    /// [`PlatformManager::get_battery_level`]) is reported honestly instead
+    /// of a fabricated plausible-looking rate.
+    fn get_battery_usage(&self) -> f32 {
+        -1.0
+    }
+
+    /// Get current network usage. Real cumulative totals on Linux (summed
+    /// from `/proc/net/dev`); an honest all-zero [`NetworkUsage`] on
+    /// platforms with no real query path implemented here.
+    fn get_network_usage(&self) -> NetworkUsage {
+        query_network_usage()
+    }
+
+    /// Get current audio latency in milliseconds.
+    ///
+    /// Computed for real from this platform's own configured audio buffer
+    /// size and sample rate (`buffer_frames / sample_rate`), rather than a
+    /// hardcoded constant -- so it genuinely varies across platform
+    /// configurations (e.g. embedded's smaller buffer at a lower sample
+    /// rate reports a different latency than desktop's).
     fn get_audio_latency(&self) -> f32 {
-        // This would measure actual audio latency
-        10.0 // Default 10ms
+        let caps = &self.config.capabilities;
+        if caps.preferred_sample_rate == 0 {
+            return 0.0;
+        }
+        (caps.max_audio_buffer_size as f32 / caps.preferred_sample_rate as f32) * 1000.0
     }
 
-    /// Get current render FPS
+    /// Get current render FPS.
+    ///
+    /// This is a headless library with no rendering subsystem of its own to
+    /// measure, so `0.0` is reported honestly instead of a fabricated
+    /// constant (the previous hardcoded `60.0`, which was reported even
+    /// when nothing was rendering at all).
     fn get_render_fps(&self) -> f32 {
-        // This would measure actual render FPS
-        60.0 // Default 60 FPS
+        0.0
     }
 
     /// Check if platform supports specific feature with detailed information
@@ -1151,6 +1233,207 @@ impl PlatformManager {
 
         recommendations
     }
+}
+
+/// Parse a `key: value kB` line out of `/proc/meminfo`-formatted text (also
+/// used for `/proc/meminfo`-style fields more generally), returning the
+/// value in kilobytes. Used by [`PlatformManager::get_total_memory`] /
+/// [`PlatformManager::get_available_memory`] on Linux.
+#[cfg(target_os = "linux")]
+fn parse_meminfo_field(contents: &str, field: &str) -> Option<u64> {
+    contents.lines().find_map(|line| {
+        let rest = line.strip_prefix(field)?;
+        let rest = rest.strip_prefix(':')?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    })
+}
+
+/// Run an external command and return its captured stdout as a `String`, or
+/// `None` if it could not be spawned or exited non-zero. Used for the
+/// handful of real macOS system-info queries (`sysctl`, `vm_stat`, `pmset`)
+/// that have no stable Rust syscall equivalent available without new FFI
+/// dependencies.
+#[cfg(target_os = "macos")]
+fn run_command_stdout(command: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(command)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+/// Real available memory on macOS: `vm_stat`'s free + inactive pages
+/// (reclaimable without swapping) times the real page size it reports.
+#[cfg(target_os = "macos")]
+fn query_macos_available_memory_bytes() -> u64 {
+    let Some(output) = run_command_stdout("vm_stat", &[]) else {
+        return 0;
+    };
+
+    let page_size = output
+        .lines()
+        .next()
+        .and_then(|line| line.split("page size of").nth(1))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|n| n.parse::<u64>().ok())
+        .unwrap_or(4096);
+
+    let page_count = |label: &str| -> u64 {
+        output
+            .lines()
+            .find(|line| line.starts_with(label))
+            .and_then(|line| line.split(':').nth(1))
+            .and_then(|rest| rest.trim().trim_end_matches('.').parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+
+    let free_pages = page_count("Pages free");
+    let inactive_pages = page_count("Pages inactive");
+
+    (free_pages + inactive_pages).saturating_mul(page_size)
+}
+
+/// Real, instantaneous-ish CPU load as a percentage, derived from the
+/// system's 1-minute load average divided by the real core count. This is a
+/// genuine, live-varying measurement (unlike a hardcoded constant), even
+/// though load-average is a smoothed/lagging proxy for true instantaneous
+/// CPU utilization rather than a two-sample `/proc/stat` delta. `0.0`
+/// (honest "unknown") on platforms with no real load-average source.
+fn query_cpu_usage_percent() -> f32 {
+    #[cfg(target_os = "linux")]
+    {
+        let Some(load_avg) = std::fs::read_to_string("/proc/loadavg")
+            .ok()
+            .and_then(|contents| contents.split_whitespace().next().map(str::to_string))
+            .and_then(|s| s.parse::<f32>().ok())
+        else {
+            return 0.0;
+        };
+        let cpu_count = PlatformManager::get_cpu_count().max(1) as f32;
+        (load_avg / cpu_count * 100.0).clamp(0.0, 100.0)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let Some(output) = run_command_stdout("sysctl", &["-n", "vm.loadavg"]) else {
+            return 0.0;
+        };
+        // Format: "{ 1.23 1.45 1.67 }"
+        let Some(load_avg) = output
+            .trim()
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse::<f32>().ok())
+        else {
+            return 0.0;
+        };
+        let cpu_count = PlatformManager::get_cpu_count().max(1) as f32;
+        (load_avg / cpu_count * 100.0).clamp(0.0, 100.0)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        0.0
+    }
+}
+
+/// Real battery charge level in `[0.0, 1.0]`, or `-1.0` (this module's
+/// established "not available" sentinel -- see [`PlatformManager::get_battery_level`]'s
+/// pre-existing convention) when no battery is present or the platform has
+/// no real query path implemented here.
+fn query_battery_level() -> f32 {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/sys/class/power_supply/BAT0/capacity")
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .map(|percent| (percent / 100.0).clamp(0.0, 1.0))
+            .unwrap_or(-1.0)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let Some(output) = run_command_stdout("pmset", &["-g", "batt"]) else {
+            return -1.0;
+        };
+        output
+            .lines()
+            .find_map(|line| {
+                let percent_idx = line.find('%')?;
+                let digits_start = line[..percent_idx]
+                    .rfind(|c: char| !c.is_ascii_digit())
+                    .map(|i| i + 1)
+                    .unwrap_or(0);
+                line[digits_start..percent_idx].parse::<f32>().ok()
+            })
+            .map(|percent| (percent / 100.0).clamp(0.0, 1.0))
+            .unwrap_or(-1.0)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        -1.0
+    }
+}
+
+/// Real cumulative network I/O totals on Linux, summed across every
+/// non-loopback interface listed in `/proc/net/dev`. All-zero (honest
+/// "unknown", not fabricated) on platforms with no real query path
+/// implemented here.
+fn query_network_usage() -> NetworkUsage {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(contents) = std::fs::read_to_string("/proc/net/dev") else {
+            return NetworkUsage::default();
+        };
+
+        let mut usage = NetworkUsage::default();
+        for line in contents.lines().skip(2) {
+            let Some((iface, rest)) = line.split_once(':') else {
+                continue;
+            };
+            if iface.trim() == "lo" {
+                continue;
+            }
+            let fields: Vec<u64> = rest
+                .split_whitespace()
+                .filter_map(|f| f.parse::<u64>().ok())
+                .collect();
+            // /proc/net/dev columns: rx_bytes rx_packets ... tx_bytes tx_packets ...
+            if fields.len() >= 10 {
+                usage.bytes_received = usage.bytes_received.saturating_add(fields[0]);
+                usage.packets_received = usage.packets_received.saturating_add(fields[1]);
+                usage.bytes_sent = usage.bytes_sent.saturating_add(fields[8]);
+                usage.packets_sent = usage.packets_sent.saturating_add(fields[9]);
+            }
+        }
+        usage
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        NetworkUsage::default()
+    }
+}
+
+/// Real, fast, network-free check for whether the OS believes it has a
+/// route to the wider internet: asks the kernel to resolve the outbound
+/// interface for a well-known public address via `UdpSocket::connect`.
+/// This is purely local (a UDP "connect" only sets a default peer address
+/// via the routing table; unlike TCP it never sends a packet or blocks on
+/// the network), so it is safe to call from tests and sandboxes with no
+/// network egress -- it will simply report `false` when there is truly no
+/// configured route, rather than hanging or timing out.
+fn has_network_route() -> bool {
+    let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") else {
+        return false;
+    };
+    socket.connect("1.1.1.1:443").is_ok()
 }
 
 /// Platform adapter trait for platform-specific implementations
@@ -1674,5 +1957,99 @@ mod tests {
         assert_eq!(normal_status, ResourceStatus::Normal);
         assert_eq!(warning_status, ResourceStatus::Warning);
         assert_eq!(exceeded_status, ResourceStatus::Exceeded);
+    }
+
+    /// `get_audio_latency` must be computed from the platform's own real
+    /// configuration, not a hardcoded constant -- so a config with a
+    /// smaller buffer at a lower sample rate must report a genuinely
+    /// different latency than one with a larger buffer at a higher rate.
+    #[test]
+    fn test_audio_latency_varies_with_real_config() {
+        let desktop_manager = PlatformManager::new(PlatformConfig::desktop());
+        let embedded_manager = PlatformManager::new(PlatformConfig::embedded());
+
+        let desktop_metrics = desktop_manager.get_performance_metrics();
+        let embedded_metrics = embedded_manager.get_performance_metrics();
+
+        assert!(desktop_metrics.audio_latency > 0.0);
+        assert!(embedded_metrics.audio_latency > 0.0);
+        assert_ne!(
+            desktop_metrics.audio_latency, embedded_metrics.audio_latency,
+            "different real buffer_size/sample_rate configs must yield different latencies"
+        );
+
+        // Sanity check the actual formula against desktop's real config
+        // (8192 frames / 44100 Hz).
+        let expected_desktop_ms = 8192.0_f32 / 44100.0 * 1000.0;
+        assert!((desktop_metrics.audio_latency - expected_desktop_ms).abs() < 0.01);
+    }
+
+    /// Total memory must be a real, cached, non-zero measurement on the
+    /// platforms this implementation actually supports, and available
+    /// memory (a genuinely fresh measurement) must never exceed it.
+    #[test]
+    fn test_real_memory_metrics_are_internally_consistent() {
+        let total = PlatformManager::get_total_memory();
+        let available = PlatformManager::get_available_memory();
+
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            assert!(
+                total > 0,
+                "a real total-memory query must succeed on Linux/macOS"
+            );
+        }
+
+        if total > 0 {
+            assert!(
+                available <= total,
+                "available memory ({available}) must never exceed total ({total})"
+            );
+        }
+
+        // Calling twice must return the identical (cached) total.
+        assert_eq!(total, PlatformManager::get_total_memory());
+    }
+
+    /// CPU usage must be a real percentage in a valid range, not a
+    /// hardcoded value outside it.
+    #[test]
+    fn test_cpu_usage_is_a_valid_percentage() {
+        let manager = PlatformManager::new(PlatformConfig::desktop());
+        let metrics = manager.get_performance_metrics();
+        assert!((0.0..=100.0).contains(&metrics.cpu_usage));
+    }
+
+    /// `render_fps` must be the honest "not measured" sentinel (`0.0`) in
+    /// this headless library, never the old hardcoded `60.0`.
+    #[test]
+    fn test_render_fps_is_honest_zero_not_fabricated_sixty() {
+        let manager = PlatformManager::new(PlatformConfig::desktop());
+        let metrics = manager.get_performance_metrics();
+        assert_eq!(metrics.render_fps, 0.0);
+    }
+
+    /// `battery_usage` reports the established "not available" sentinel
+    /// rather than a fabricated rate, consistent with `battery_level`'s
+    /// existing convention.
+    #[test]
+    fn test_battery_usage_is_honest_sentinel() {
+        let manager = PlatformManager::new(PlatformConfig::desktop());
+        let metrics = manager.get_performance_metrics();
+        assert_eq!(metrics.battery_usage, -1.0);
+    }
+
+    /// The network-route check must be a real, fast (non-network-blocking)
+    /// local determination, and `get_network_type` must reflect it: no
+    /// route means `Offline`, not a hardcoded `WiFi`.
+    #[test]
+    fn test_network_type_reflects_real_route_check() {
+        let has_route = has_network_route();
+        let network_type = PlatformManager::get_network_type();
+
+        match network_type {
+            NetworkType::Offline => assert!(!has_route),
+            NetworkType::WiFi => assert!(has_route),
+            other => panic!("unexpected network type from real check: {other:?}"),
+        }
     }
 }

@@ -371,18 +371,27 @@ impl LoadBalancer {
         // Select the best worker
         let worker_id = self.select_worker(&request).await?;
 
-        // Add to queue
-        let mut queue = self.request_queue.write().await;
-        if queue.len() >= self.config.max_queue_size {
-            return Err("Request queue is full".to_string());
+        // Add to queue. Scoped so the write guard is dropped before
+        // `update_stats()` below, which itself takes a read lock on
+        // `request_queue` -- tokio's `RwLock` is not reentrant, so holding
+        // this guard across that call would deadlock the current task
+        // against itself.
+        {
+            let mut queue = self.request_queue.write().await;
+            if queue.len() >= self.config.max_queue_size {
+                return Err("Request queue is full".to_string());
+            }
+
+            queue.push_back(request.clone());
         }
 
-        queue.push_back(request.clone());
-
-        // Update worker active requests
-        let mut workers = self.workers.write().await;
-        if let Some(worker) = workers.get_mut(&worker_id) {
-            worker.active_requests += 1;
+        // Update worker active requests. Scoped for the same reason:
+        // `update_stats()` also takes a read lock on `workers`.
+        {
+            let mut workers = self.workers.write().await;
+            if let Some(worker) = workers.get_mut(&worker_id) {
+                worker.active_requests += 1;
+            }
         }
 
         // Update statistics
@@ -393,32 +402,42 @@ impl LoadBalancer {
 
     /// Process a response from a worker
     pub async fn process_response(&self, response: WorkerResponse) -> Result<(), String> {
-        // Update worker statistics
-        let mut workers = self.workers.write().await;
-        if let Some(worker) = workers.get_mut(&response.worker_id) {
-            worker.active_requests = worker.active_requests.saturating_sub(1);
-            worker.total_requests += 1;
+        // Update worker statistics. Scoped so the write guard is dropped
+        // before `update_stats()` below, which itself takes a read lock on
+        // `workers` -- tokio's `RwLock` is not reentrant, so holding this
+        // guard across that call would deadlock the current task against
+        // itself (the read would wait forever for a write guard that only
+        // this same task holds and can never release while awaiting).
+        {
+            let mut workers = self.workers.write().await;
+            if let Some(worker) = workers.get_mut(&response.worker_id) {
+                worker.active_requests = worker.active_requests.saturating_sub(1);
+                worker.total_requests += 1;
 
-            if response.result.is_err() {
-                worker.failed_requests += 1;
+                if response.result.is_err() {
+                    worker.failed_requests += 1;
+                }
+
+                // Update average response time (exponential moving average)
+                let alpha = 0.1; // Smoothing factor
+                worker.avg_response_time_ms = alpha * f64::from(response.processing_time_ms)
+                    + (1.0 - alpha) * worker.avg_response_time_ms;
+
+                // Update current load
+                worker.current_load = worker.active_requests as f64 / worker.max_concurrent as f64;
             }
-
-            // Update average response time (exponential moving average)
-            let alpha = 0.1; // Smoothing factor
-            worker.avg_response_time_ms = alpha * f64::from(response.processing_time_ms)
-                + (1.0 - alpha) * worker.avg_response_time_ms;
-
-            // Update current load
-            worker.current_load = worker.active_requests as f64 / worker.max_concurrent as f64;
         }
 
-        // Store response for metrics
-        let mut history = self.response_history.write().await;
-        history.push(response);
+        // Store response for metrics. Scoped for the same reason:
+        // `update_stats()` also takes a read lock on `response_history`.
+        {
+            let mut history = self.response_history.write().await;
+            history.push(response);
 
-        // Keep only recent responses (last 1000)
-        if history.len() > 1000 {
-            history.drain(0..500);
+            // Keep only recent responses (last 1000)
+            if history.len() > 1000 {
+                history.drain(0..500);
+            }
         }
 
         // Update statistics
@@ -457,8 +476,17 @@ impl LoadBalancer {
             stats.worker_utilization = total_utilization / workers.len() as f64;
         }
 
-        // Calculate requests per second - simplified to avoid potential deadlock
-        stats.requests_per_second = 0.0; // Simplified for now
+        // Calculate requests per second from the real response timestamps
+        // recorded in `response_history` over a trailing 60-second window.
+        // `history` is already read-locked above, so this needs no
+        // additional lock acquisition.
+        let window = chrono::Duration::seconds(60);
+        let window_start = Utc::now() - window;
+        let recent_responses = history
+            .iter()
+            .filter(|response| response.timestamp > window_start)
+            .count();
+        stats.requests_per_second = recent_responses as f64 / window.num_seconds() as f64;
     }
 
     /// Get current statistics
@@ -631,5 +659,135 @@ mod tests {
         let stats = lb.get_stats().await;
         assert_eq!(stats.total_workers, 1);
         assert_eq!(stats.active_workers, 1);
+    }
+
+    fn create_test_worker(id: &str) -> WorkerNode {
+        WorkerNode {
+            id: id.to_string(),
+            endpoint: "http://localhost:8080".to_string(),
+            current_load: 0.0,
+            max_concurrent: 10,
+            active_requests: 0,
+            health_status: WorkerHealth::Healthy,
+            avg_response_time_ms: 100.0,
+            total_requests: 0,
+            failed_requests: 0,
+            last_health_check: Utc::now(),
+            weight: 1.0,
+        }
+    }
+
+    /// Regression test: `process_response` used to hold a write lock on
+    /// `workers` (and `response_history`) all the way through its call to
+    /// `update_stats()`, which itself takes a read lock on the same `RwLock`s.
+    /// Tokio's `RwLock` is not reentrant, so that self-deadlocked the calling
+    /// task forever. This test bounds the call with a timeout so a
+    /// regression shows up as a clear failure instead of an indefinite hang.
+    #[tokio::test]
+    async fn test_process_response_does_not_deadlock() {
+        let lb = LoadBalancer::new(LoadBalancerConfig::default());
+        lb.add_worker(create_test_worker("worker1")).await.unwrap();
+
+        let response = WorkerResponse {
+            request_id: "req1".to_string(),
+            worker_id: "worker1".to_string(),
+            result: Ok(FeedbackResponse::default()),
+            processing_time_ms: 42,
+            timestamp: Utc::now(),
+        };
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            lb.process_response(response),
+        )
+        .await;
+
+        assert!(
+            outcome.is_ok(),
+            "process_response did not return within 5s -- likely deadlocked"
+        );
+        assert!(outcome.unwrap().is_ok());
+
+        let stats = lb.get_stats().await;
+        assert_eq!(stats.total_requests, 1);
+        assert_eq!(stats.successful_requests, 1);
+
+        // The worker's own counters should also have been updated for real.
+        let workers = lb.get_workers().await;
+        assert_eq!(workers[0].total_requests, 1);
+    }
+
+    /// Regression test for the analogous self-deadlock hazard in
+    /// `submit_request` (write locks on `request_queue` and `workers` held
+    /// across the `update_stats()` call).
+    #[tokio::test]
+    async fn test_submit_request_does_not_deadlock() {
+        let lb = LoadBalancer::new(LoadBalancerConfig::default());
+        lb.add_worker(create_test_worker("worker1")).await.unwrap();
+
+        let request = WorkerRequest {
+            id: "test_request".to_string(),
+            session: create_test_session_state(),
+            timestamp: Utc::now(),
+            priority: 5,
+            estimated_time_ms: 100,
+        };
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            lb.submit_request(request),
+        )
+        .await;
+
+        assert!(
+            outcome.is_ok(),
+            "submit_request did not return within 5s -- likely deadlocked"
+        );
+        assert!(outcome.unwrap().is_ok());
+    }
+
+    /// `requests_per_second` must be computed from the real timestamps on
+    /// recorded responses, not hardcoded to zero: a response inside the
+    /// trailing window should raise it above zero, while a response from an
+    /// hour ago should not contribute to the rate even though it still
+    /// counts toward `total_requests`.
+    #[tokio::test]
+    async fn test_requests_per_second_reflects_real_response_timestamps() {
+        let lb = LoadBalancer::new(LoadBalancerConfig::default());
+        lb.add_worker(create_test_worker("worker1")).await.unwrap();
+
+        let recent = WorkerResponse {
+            request_id: "1".to_string(),
+            worker_id: "worker1".to_string(),
+            result: Ok(FeedbackResponse::default()),
+            processing_time_ms: 10,
+            timestamp: Utc::now(),
+        };
+        lb.process_response(recent).await.unwrap();
+
+        let stats_with_one_recent = lb.get_stats().await;
+        assert!(
+            stats_with_one_recent.requests_per_second > 0.0,
+            "a response inside the trailing window must yield a positive rate"
+        );
+
+        let stale = WorkerResponse {
+            request_id: "2".to_string(),
+            worker_id: "worker1".to_string(),
+            result: Ok(FeedbackResponse::default()),
+            processing_time_ms: 10,
+            timestamp: Utc::now() - chrono::Duration::hours(1),
+        };
+        lb.process_response(stale).await.unwrap();
+
+        let stats_with_stale_added = lb.get_stats().await;
+        assert_eq!(
+            stats_with_stale_added.total_requests, 2,
+            "total_requests counts all history regardless of age"
+        );
+        assert_eq!(
+            stats_with_stale_added.requests_per_second, stats_with_one_recent.requests_per_second,
+            "a response from an hour ago must not inflate the trailing-window rate"
+        );
     }
 }

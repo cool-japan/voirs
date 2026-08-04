@@ -95,59 +95,52 @@ impl AudioBuffer {
         self.save_wav(path.as_ref().with_extension("wav"))
     }
 
-    /// Save audio as MP3 file
+    /// Save audio as MP3 file using the LAME encoder.
+    ///
+    /// Requires the `ffi-codecs` feature (there is no mature pure-Rust MP3 encoder to
+    /// depend on instead). Without the feature this returns a clear error rather than
+    /// silently writing WAV data at a different path — use [`Self::save_wav`] or
+    /// [`Self::save_flac`] (lossless) for a Pure-Rust alternative.
+    #[cfg(feature = "ffi-codecs")]
     pub fn save_mp3(&self, path: impl AsRef<Path>) -> Result<()> {
-        // MP3 encoding with current available crates needs more complex setup
-        // For now, use WAV fallback with a note about MP3 support
-        tracing::warn!(
-            "MP3 encoding temporarily using WAV fallback - proper MP3 encoding support coming soon"
-        );
-        self.save_wav(path.as_ref().with_extension("wav"))
+        let bytes = self.to_mp3_bytes()?;
+        std::fs::write(path.as_ref(), &bytes)
+            .map_err(|e| VoirsError::audio_error(format!("Failed to write MP3 file: {e}")))
     }
 
-    /// Save audio as OGG file
-    pub fn save_ogg(&self, path: impl AsRef<Path>) -> Result<()> {
-        // Use a simple OGG container with PCM data for now
-        // This is a basic implementation - proper Vorbis encoding would require additional dependencies
-        use std::fs::File;
-        use std::io::Write;
+    /// Save audio as MP3 file (Pure-Rust default build: `ffi-codecs` disabled).
+    ///
+    /// MP3 encoding requires the `ffi-codecs` feature (LAME C library); no pure-Rust MP3
+    /// encoder currently exists to encode with instead, so this fails closed rather than
+    /// silently substituting WAV data at a different path.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn save_mp3(&self, _path: impl AsRef<Path>) -> Result<()> {
+        Err(VoirsError::audio_error(
+            "MP3 encoding requires the 'ffi-codecs' feature (LAME C library); no pure-Rust \
+             MP3 encoder is available. Use save_wav or save_flac (lossless; FLAC also needs \
+             'ffi-codecs') instead.",
+        ))
+    }
 
-        tracing::info!("Saving OGG file with PCM data (basic implementation)");
-
-        // For now, we'll create a simple OGG container with uncompressed PCM
-        // A full implementation would use libvorbis or similar for proper compression
-        let mut file = File::create(path.as_ref())
-            .map_err(|e| VoirsError::audio_error(format!("Failed to create OGG file: {e}")))?;
-
-        // Write a simple OGG header (this is a minimal implementation)
-        let ogg_header = b"OggS"; // OGG signature
-        file.write_all(ogg_header)
-            .map_err(|e| VoirsError::audio_error(format!("Failed to write OGG header: {e}")))?;
-
-        // Write basic metadata
-        let metadata = format!(
-            "channels={}\nsample_rate={}\nsamples={}\n",
-            self.channels,
-            self.sample_rate,
-            self.samples.len()
-        );
-        let metadata_bytes = metadata.as_bytes();
-        file.write_all(&(metadata_bytes.len() as u32).to_le_bytes())
-            .map_err(|e| {
-                VoirsError::audio_error(format!("Failed to write metadata length: {e}"))
-            })?;
-        file.write_all(metadata_bytes)
-            .map_err(|e| VoirsError::audio_error(format!("Failed to write metadata: {e}")))?;
-
-        // Write PCM data as 16-bit signed integers
-        for &sample in &self.samples {
-            let sample_i16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
-            file.write_all(&sample_i16.to_le_bytes())
-                .map_err(|e| VoirsError::audio_error(format!("Failed to write sample: {e}")))?;
-        }
-
-        tracing::info!("OGG file saved successfully: {}", path.as_ref().display());
-        Ok(())
+    /// Save audio as an Ogg Vorbis file.
+    ///
+    /// No pure-Rust Ogg Vorbis **encoder** exists in this workspace's dependency tree
+    /// (decoding uses `lewton`, which does not implement encoding). Previously this
+    /// method wrote a homebrew byte layout — a bare `b"OggS"` tag followed by
+    /// length-prefixed plaintext metadata and raw PCM — which is not a valid Ogg
+    /// bitstream: [`Self::load_ogg`]/[`Self::get_ogg_info`] (real `lewton`-based Ogg
+    /// Vorbis parsers) could not read it back, and any real Ogg tool would reject it too
+    /// despite the genuine magic bytes at the front. Rather than keep producing a file
+    /// that lies about its own format, this fails closed with a clear error. Use
+    /// [`Self::save_wav`] or [`Self::save_flac`] (lossless) for a Pure-Rust alternative,
+    /// or [`Self::save_opus`] (lossy, requires the `ffi-codecs` feature) for a real
+    /// compressed format this crate can actually encode.
+    pub fn save_ogg(&self, _path: impl AsRef<Path>) -> Result<()> {
+        Err(VoirsError::audio_error(
+            "OGG Vorbis encoding is not available: no pure-Rust Vorbis encoder exists in this \
+             build (decoding uses 'lewton', which is decode-only). Use save_wav/save_flac \
+             (lossless) or save_opus (lossy, requires the 'ffi-codecs' feature) instead.",
+        ))
     }
 
     /// Save audio as Opus file
@@ -263,7 +256,7 @@ impl AudioBuffer {
                 SampleFormat::F32 => device.build_output_stream(
                     *config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
+                        let mut samples_lock = samples.lock().unwrap_or_else(|e| e.into_inner());
                         for frame in data.chunks_mut(channels as usize) {
                             let sample = samples_lock.next().unwrap_or(0.0);
                             for channel_sample in frame.iter_mut() {
@@ -277,7 +270,7 @@ impl AudioBuffer {
                 SampleFormat::I16 => device.build_output_stream(
                     *config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
+                        let mut samples_lock = samples.lock().unwrap_or_else(|e| e.into_inner());
                         for frame in data.chunks_mut(channels as usize) {
                             let sample = samples_lock.next().unwrap_or(0.0);
                             let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
@@ -292,7 +285,7 @@ impl AudioBuffer {
                 SampleFormat::U16 => device.build_output_stream(
                     *config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
+                        let mut samples_lock = samples.lock().unwrap_or_else(|e| e.into_inner());
                         for frame in data.chunks_mut(channels as usize) {
                             let sample = samples_lock.next().unwrap_or(0.0);
                             let sample_u16 =
@@ -383,7 +376,7 @@ impl AudioBuffer {
                 SampleFormat::F32 => device.build_output_stream(
                     *config,
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
+                        let mut samples_lock = samples.lock().unwrap_or_else(|e| e.into_inner());
                         for frame in data.chunks_mut(channels as usize) {
                             if let Some((index, sample)) = samples_lock.next() {
                                 for channel_sample in frame.iter_mut() {
@@ -393,7 +386,7 @@ impl AudioBuffer {
                                 // Update progress every 100ms
                                 let mut last_update = last_progress_update
                                     .lock()
-                                    .expect("lock should not be poisoned");
+                                    .unwrap_or_else(|e| e.into_inner());
                                 let now = Instant::now();
                                 if now.duration_since(*last_update) >= Duration::from_millis(100) {
                                     let progress = (index as f32) / (total_samples as f32);
@@ -416,7 +409,7 @@ impl AudioBuffer {
                 SampleFormat::I16 => device.build_output_stream(
                     *config,
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
+                        let mut samples_lock = samples.lock().unwrap_or_else(|e| e.into_inner());
                         for frame in data.chunks_mut(channels as usize) {
                             if let Some((index, sample)) = samples_lock.next() {
                                 let sample_i16 = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
@@ -427,7 +420,7 @@ impl AudioBuffer {
                                 // Update progress every 100ms
                                 let mut last_update = last_progress_update
                                     .lock()
-                                    .expect("lock should not be poisoned");
+                                    .unwrap_or_else(|e| e.into_inner());
                                 let now = Instant::now();
                                 if now.duration_since(*last_update) >= Duration::from_millis(100) {
                                     let progress = (index as f32) / (total_samples as f32);
@@ -450,7 +443,7 @@ impl AudioBuffer {
                 SampleFormat::U16 => device.build_output_stream(
                     *config,
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
-                        let mut samples_lock = samples.lock().expect("lock should not be poisoned");
+                        let mut samples_lock = samples.lock().unwrap_or_else(|e| e.into_inner());
                         for frame in data.chunks_mut(channels as usize) {
                             if let Some((index, sample)) = samples_lock.next() {
                                 let sample_u16 = ((sample.clamp(-1.0, 1.0) + 1.0) * u16::MAX as f32
@@ -462,7 +455,7 @@ impl AudioBuffer {
                                 // Update progress every 100ms
                                 let mut last_update = last_progress_update
                                     .lock()
-                                    .expect("lock should not be poisoned");
+                                    .unwrap_or_else(|e| e.into_inner());
                                 let now = Instant::now();
                                 if now.duration_since(*last_update) >= Duration::from_millis(100) {
                                     let progress = (index as f32) / (total_samples as f32);
@@ -602,58 +595,108 @@ impl AudioBuffer {
         self.to_wav_bytes()
     }
 
-    /// Convert to MP3 bytes
+    /// Convert to MP3 bytes using the LAME encoder.
+    ///
+    /// Requires the `ffi-codecs` feature; see [`Self::save_mp3`] for details.
+    #[cfg(feature = "ffi-codecs")]
     pub fn to_mp3_bytes(&self) -> Result<Vec<u8>> {
-        // MP3 encoding with current available crates needs more complex setup
-        // For now, use WAV fallback with a note about MP3 support
-        tracing::warn!(
-            "MP3 encoding temporarily using WAV fallback - proper MP3 encoding support coming soon"
-        );
-        self.to_wav_bytes()
-    }
+        use mp3lame_encoder::{Bitrate, Builder, FlushNoGap, InterleavedPcm, MonoPcm, Quality};
 
-    /// Convert to OGG bytes
-    pub fn to_ogg_bytes(&self) -> Result<Vec<u8>> {
-        // Use a simple OGG container with PCM data for now
-        // This is a basic implementation - proper Vorbis encoding would require additional dependencies
-        use std::io::Write;
-
-        tracing::info!("Converting to OGG bytes with PCM data (basic implementation)");
-
-        let mut ogg_data = Vec::new();
-
-        // Write a simple OGG header (this is a minimal implementation)
-        let ogg_header = b"OggS"; // OGG signature
-        ogg_data
-            .write_all(ogg_header)
-            .map_err(|e| VoirsError::audio_error(format!("Failed to write OGG header: {e}")))?;
-
-        // Write basic metadata
-        let metadata = format!(
-            "channels={}\nsample_rate={}\nsamples={}\n",
-            self.channels,
-            self.sample_rate,
-            self.samples.len()
-        );
-        let metadata_bytes = metadata.as_bytes();
-        ogg_data
-            .write_all(&(metadata_bytes.len() as u32).to_le_bytes())
-            .map_err(|e| {
-                VoirsError::audio_error(format!("Failed to write metadata length: {e}"))
-            })?;
-        ogg_data
-            .write_all(metadata_bytes)
-            .map_err(|e| VoirsError::audio_error(format!("Failed to write metadata: {e}")))?;
-
-        // Write PCM data as 16-bit signed integers
-        for &sample in &self.samples {
-            let sample_i16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
-            ogg_data
-                .write_all(&sample_i16.to_le_bytes())
-                .map_err(|e| VoirsError::audio_error(format!("Failed to write sample: {e}")))?;
+        if self.channels == 0 || self.channels > 2 {
+            return Err(VoirsError::audio_error(
+                "MP3 encoding only supports mono or stereo audio",
+            ));
+        }
+        if self.sample_rate > 48_000 {
+            return Err(VoirsError::audio_error(
+                "MP3 does not support sample rates above 48kHz",
+            ));
         }
 
-        Ok(ogg_data)
+        // Convert f32 samples to i16 PCM (interleaved for stereo, matching self.samples'
+        // existing layout).
+        let pcm: Vec<i16> = self
+            .samples
+            .iter()
+            .map(|&sample| (sample.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .collect();
+
+        let mut builder = Builder::new()
+            .ok_or_else(|| VoirsError::audio_error("Failed to create MP3 encoder"))?;
+        builder
+            .set_sample_rate(self.sample_rate)
+            .map_err(|e| VoirsError::audio_error(format!("Failed to set MP3 sample rate: {e}")))?;
+        builder
+            .set_num_channels(self.channels as u8)
+            .map_err(|e| VoirsError::audio_error(format!("Failed to set MP3 channels: {e}")))?;
+        builder
+            .set_brate(Bitrate::Kbps128)
+            .map_err(|e| VoirsError::audio_error(format!("Failed to set MP3 bitrate: {e}")))?;
+        builder
+            .set_quality(Quality::Good)
+            .map_err(|e| VoirsError::audio_error(format!("Failed to set MP3 quality: {e}")))?;
+        let mut encoder = builder
+            .build()
+            .map_err(|e| VoirsError::audio_error(format!("Failed to build MP3 encoder: {e}")))?;
+
+        let samples_per_channel = pcm.len() / self.channels as usize;
+        let required_size = mp3lame_encoder::max_required_buffer_size(samples_per_channel);
+        let mut mp3_buffer: Vec<u8> = Vec::with_capacity(required_size);
+
+        // Safety: `encode` writes at most `spare_capacity_mut().len()` initialized bytes
+        // and returns exactly how many it wrote; `set_len` below only accounts for that
+        // many newly-initialized bytes.
+        let encoded_size = if self.channels == 1 {
+            encoder
+                .encode(MonoPcm(&pcm), mp3_buffer.spare_capacity_mut())
+                .map_err(|e| VoirsError::audio_error(format!("MP3 encoding failed: {e}")))?
+        } else {
+            encoder
+                .encode(InterleavedPcm(&pcm), mp3_buffer.spare_capacity_mut())
+                .map_err(|e| VoirsError::audio_error(format!("MP3 encoding failed: {e}")))?
+        };
+        unsafe {
+            mp3_buffer.set_len(mp3_buffer.len().wrapping_add(encoded_size));
+        }
+
+        // Reserve room for the trailing flush frame (LAME's documented max single-frame
+        // size) regardless of how much of `required_size` the main encode pass consumed.
+        mp3_buffer.reserve(7200);
+        let flushed_size = encoder
+            .flush::<FlushNoGap>(mp3_buffer.spare_capacity_mut())
+            .map_err(|e| VoirsError::audio_error(format!("MP3 flush failed: {e}")))?;
+        unsafe {
+            mp3_buffer.set_len(mp3_buffer.len().wrapping_add(flushed_size));
+        }
+
+        Ok(mp3_buffer)
+    }
+
+    /// Convert to MP3 bytes (Pure-Rust default build: `ffi-codecs` disabled).
+    ///
+    /// MP3 encoding requires the `ffi-codecs` feature (LAME C library); no pure-Rust MP3
+    /// encoder is available to encode with instead, so this fails closed rather than
+    /// silently returning WAV bytes mislabeled as MP3.
+    #[cfg(not(feature = "ffi-codecs"))]
+    pub fn to_mp3_bytes(&self) -> Result<Vec<u8>> {
+        Err(VoirsError::audio_error(
+            "MP3 encoding requires the 'ffi-codecs' feature (LAME C library); no pure-Rust \
+             MP3 encoder is available. Use to_wav_bytes or to_flac_bytes (lossless; FLAC also \
+             needs 'ffi-codecs') instead.",
+        ))
+    }
+
+    /// Convert to Ogg Vorbis bytes.
+    ///
+    /// See [`Self::save_ogg`] — no pure-Rust Vorbis encoder is available, so this fails
+    /// closed rather than returning bytes that claim to be Ogg Vorbis but are not a valid
+    /// Ogg bitstream.
+    pub fn to_ogg_bytes(&self) -> Result<Vec<u8>> {
+        Err(VoirsError::audio_error(
+            "OGG Vorbis encoding is not available: no pure-Rust Vorbis encoder exists in this \
+             build (decoding uses 'lewton', which is decode-only). Use to_wav_bytes/to_flac_bytes \
+             (lossless) or to_opus_bytes (lossy, requires the 'ffi-codecs' feature) instead.",
+        ))
     }
 
     /// Convert to Opus bytes
@@ -1363,6 +1406,93 @@ mod tests {
     use super::*;
     use crate::audio::buffer::AudioBuffer;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_ogg_save_fails_closed_and_never_writes_a_corrupt_file() {
+        let buffer = AudioBuffer::sine_wave(440.0, 0.5, 44100, 0.5);
+        let temp_file = NamedTempFile::new().unwrap();
+        // Use a path that does not exist yet so we can tell whether save_ogg created it.
+        let target = temp_file.path().with_extension("ogg_target_does_not_exist");
+        assert!(!target.exists());
+
+        let result = buffer.save_ogg(&target);
+        assert!(
+            result.is_err(),
+            "save_ogg must fail closed: no pure-Rust Vorbis encoder is available"
+        );
+        assert!(
+            !target.exists(),
+            "save_ogg must never write a file (corrupt or otherwise) when it cannot really encode"
+        );
+    }
+
+    #[test]
+    fn test_to_ogg_bytes_fails_closed() {
+        let buffer = AudioBuffer::sine_wave(440.0, 0.1, 44100, 0.5);
+        assert!(buffer.to_ogg_bytes().is_err());
+    }
+
+    #[test]
+    fn test_load_ogg_rejects_non_ogg_data_with_real_parser() {
+        // A real Ogg Vorbis parser (lewton) must honestly reject arbitrary bytes rather
+        // than accept anything that merely starts with the "OggS" magic - this is what
+        // makes the fail-closed `save_ogg` above safe (there is no way to construct a file
+        // this crate will silently mis-parse as valid Ogg Vorbis).
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(temp_file.path(), b"OggSnot a real ogg page at all, just noise").unwrap();
+
+        assert!(AudioBuffer::load_ogg(temp_file.path()).is_err());
+        assert!(AudioBuffer::get_ogg_info(temp_file.path()).is_err());
+    }
+
+    #[cfg(feature = "ffi-codecs")]
+    #[test]
+    fn test_mp3_round_trip_writes_real_data_at_the_exact_requested_path() {
+        let buffer = AudioBuffer::sine_wave(440.0, 1.0, 22050, 0.5);
+        let temp_file = NamedTempFile::new().unwrap();
+        let target = temp_file.path().with_extension("mp3");
+
+        buffer.save_mp3(&target).unwrap();
+
+        // Must exist at the exact path requested - never silently redirected to a
+        // differently-named .wav file.
+        assert!(target.exists());
+        let written = std::fs::read(&target).unwrap();
+        // Real MP3 data starts with the frame sync word (0xFF Ex), not a RIFF/WAVE header.
+        assert_eq!(written[0], 0xFF);
+        assert_ne!(&written[0..4], b"RIFF");
+
+        let _ = std::fs::remove_file(&target);
+    }
+
+    #[cfg(feature = "ffi-codecs")]
+    #[test]
+    fn test_mp3_bytes_length_varies_with_audio_duration() {
+        // Direct regression test for the fabrication bug: the old implementation always
+        // emitted a WAV byte-for-byte proportional only to sample count, mislabeled as
+        // MP3; a real encoder must still produce output whose size scales with input.
+        let short = AudioBuffer::sine_wave(440.0, 0.2, 22050, 0.5);
+        let long = AudioBuffer::sine_wave(440.0, 2.0, 22050, 0.5);
+
+        let short_bytes = short.to_mp3_bytes().unwrap();
+        let long_bytes = long.to_mp3_bytes().unwrap();
+
+        assert!(!short_bytes.is_empty());
+        assert!(long_bytes.len() > short_bytes.len());
+    }
+
+    #[cfg(not(feature = "ffi-codecs"))]
+    #[test]
+    fn test_mp3_without_ffi_codecs_fails_closed_not_silent_wav() {
+        let buffer = AudioBuffer::sine_wave(440.0, 0.1, 44100, 0.5);
+        let temp_file = NamedTempFile::new().unwrap();
+        let target = temp_file.path().with_extension("mp3_target_does_not_exist");
+        assert!(!target.exists());
+
+        assert!(buffer.save_mp3(&target).is_err());
+        assert!(!target.exists());
+        assert!(buffer.to_mp3_bytes().is_err());
+    }
 
     #[test]
     fn test_wav_save_load() {

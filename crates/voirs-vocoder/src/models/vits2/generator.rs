@@ -26,8 +26,8 @@ pub use super::blocks::{
     UpsampleBlockConfig,
 };
 use super::params::{
-    count_parameters, load_safetensors_into_varmap, seed_varmap, split_indexed_prefix,
-    strip_checkpoint_prefixes, WeightLoadReport,
+    count_parameters, load_safetensors_into_varmap_with_mode, seed_varmap, split_indexed_prefix,
+    strip_checkpoint_prefixes, LoadMode, WeightLoadReport,
 };
 use crate::{Result, VocoderError};
 use candle_core::{DType, Device, Tensor};
@@ -598,17 +598,48 @@ impl Vits2Generator {
     /// ...). PyTorch `weight_norm` parameter pairs (`weight_g` / `weight_v`) are
     /// fused into plain weights.
     ///
+    /// Fail-closed: the checkpoint must supply **every** generator parameter.
+    /// A partial checkpoint is rejected rather than leaving some layers at their
+    /// pseudo-random initialization while `is_pretrained()` reports success; use
+    /// [`Vits2Generator::load_weights_partial`] when a partial load is intended.
+    ///
     /// # Errors
-    /// Returns [`VocoderError::ModelError`] when the file cannot be read/parsed
-    /// or when no tensor matched a model parameter (fail-closed).
+    /// Returns [`VocoderError::ModelError`] when the file cannot be read/parsed,
+    /// when no tensor matched a model parameter, or when the checkpoint left any
+    /// parameter unset.
     pub fn load_weights<P: AsRef<Path>>(&mut self, path: P) -> Result<WeightLoadReport> {
-        let report = load_safetensors_into_varmap(
+        let report = load_safetensors_into_varmap_with_mode(
             &mut self.varmap,
             path.as_ref(),
             &self.device,
             map_generator_weight_name,
+            LoadMode::Strict,
         )?;
         self.weights_loaded = true;
+        Ok(report)
+    }
+
+    /// Load whatever the checkpoint supplies, tolerating uncovered parameters.
+    ///
+    /// Parameters the checkpoint does not cover keep their pseudo-random
+    /// initialization, so the generator is **not** marked pretrained and
+    /// [`Vits2Generator::generate_pretrained`] keeps failing closed. Inspect
+    /// [`WeightLoadReport::missing_parameters`] to see what is still missing.
+    ///
+    /// # Errors
+    /// Returns [`VocoderError::ModelError`] when the file cannot be read/parsed
+    /// or when no tensor matched a model parameter.
+    pub fn load_weights_partial<P: AsRef<Path>>(&mut self, path: P) -> Result<WeightLoadReport> {
+        let report = load_safetensors_into_varmap_with_mode(
+            &mut self.varmap,
+            path.as_ref(),
+            &self.device,
+            map_generator_weight_name,
+            LoadMode::Partial,
+        )?;
+        if report.is_complete() {
+            self.weights_loaded = true;
+        }
         Ok(report)
     }
 
@@ -1196,6 +1227,60 @@ mod tests {
             assert!((a - b).abs() < 1e-5, "loaded model must reproduce source");
         }
         assert!(target.generate_pretrained(&latent, None).is_ok());
+    }
+
+    #[test]
+    fn test_load_weights_rejects_partial_checkpoint() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("partial.safetensors");
+
+        // A checkpoint holding only conv_pre: every other layer would keep its
+        // pseudo-random initialization.
+        let device = Device::Cpu;
+        let source = Vits2Generator::new_seeded(tiny_config(), device.clone(), 31).expect("src");
+        let full = dir.path().join("full.safetensors");
+        source.save_weights(&full).expect("save");
+
+        let data = std::fs::read(&full).expect("read");
+        let st = safetensors::SafeTensors::deserialize(&data).expect("parse");
+        let subset: Vec<(String, Vec<usize>, Vec<u8>)> = st
+            .tensors()
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("conv_pre."))
+            .map(|(name, view)| (name, view.shape().to_vec(), view.data().to_vec()))
+            .collect();
+        assert!(!subset.is_empty());
+
+        let mut varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+        for (name, shape, bytes) in &subset {
+            let values: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            let tensor = Tensor::from_vec(values, shape.clone(), &device).expect("tensor");
+            let _ = vb
+                .get_with_hints(shape.clone(), name, candle_nn::Init::Const(0.0))
+                .expect("register");
+            varmap.set_one(name, &tensor).expect("set");
+        }
+        varmap.save(&path).expect("save subset");
+
+        let mut target = Vits2Generator::new_seeded(tiny_config(), device, 1).expect("target");
+        let err = target
+            .load_weights(&path)
+            .expect_err("a partial checkpoint must be rejected");
+        assert!(err.to_string().contains("Incomplete VITS2 checkpoint"));
+        assert!(!target.is_pretrained());
+
+        // Partial mode reports the gap and still refuses pretrained inference.
+        let report = target.load_weights_partial(&path).expect("partial load");
+        assert!(report.loaded > 0);
+        assert!(report.missing_parameters > 0);
+        assert!(!report.is_complete());
+        assert!(!target.is_pretrained());
+        let latent = ramp(8 * 4, 0.1);
+        assert!(target.generate_pretrained(&latent, None).is_err());
     }
 
     #[test]

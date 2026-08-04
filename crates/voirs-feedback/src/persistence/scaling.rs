@@ -768,6 +768,7 @@ mod tests {
                     auto_rebalancing: true,
                     shards: vec![],
                     consistency_level: crate::persistence::sharding::ConsistencyLevel::Eventual,
+                    user_region_overrides: HashMap::new(),
                 },
                 HashMap::new(),
             )

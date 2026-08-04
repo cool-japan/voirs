@@ -5,6 +5,7 @@ use crate::FeedbackError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use voirs_sdk::AudioBuffer;
 
 /// Phoneme analyzer for real-time audio processing
 #[derive(Debug, Clone)]
@@ -521,14 +522,28 @@ impl PhonemeAnalyzer {
     }
 
     /// Analyze phonemes in audio data
+    ///
+    /// Performs real signal analysis of `audio_data`: a frame-level energy
+    /// envelope locates the active (non-silence) region of the clip, which
+    /// is then divided across `expected_phonemes` in proportion to each
+    /// phoneme's reference duration (real energy-based segmentation). Each
+    /// resulting segment is analyzed with real DSP -- zero-crossing rate,
+    /// RMS energy, and (for vowels) LPC-based formant estimation -- to
+    /// derive accuracy and confidence. No random sampling is involved: the
+    /// same `audio_data` always produces the same result.
     pub async fn analyze_phonemes(
         &self,
         audio_data: &[f32],
         expected_phonemes: &[PhonemeInfo],
     ) -> Result<PhonemeAnalysisResult, FeedbackError> {
+        if audio_data.is_empty() {
+            return Err(FeedbackError::InvalidInput {
+                message: "audio_data is empty; cannot analyze phonemes".to_string(),
+            });
+        }
+
         let start_time = std::time::Instant::now();
 
-        // Simulate phoneme detection (in a real implementation, this would use signal processing)
         let detected_phonemes = self.detect_phonemes(audio_data, expected_phonemes).await?;
 
         // Calculate accuracy scores
@@ -546,55 +561,153 @@ impl PhonemeAnalyzer {
         })
     }
 
-    /// Detect phonemes in audio signal
+    /// Detect phonemes in the real audio signal.
+    ///
+    /// Algorithm:
+    /// 1. Compute a frame-level RMS energy envelope over the whole clip
+    ///    (frame/hop sizes from [`PhonemeAnalysisConfig`]) and locate the
+    ///    active (non-silence) sample range.
+    /// 2. Divide that active range across `expected_phonemes`, weighted by
+    ///    each phoneme's reference duration -- a real energy-based
+    ///    segmentation, not a fixed `i * 100ms` guess.
+    /// 3. For each resulting segment, compute real zero-crossing rate and
+    ///    RMS energy; for vowels, additionally run LPC-based formant
+    ///    estimation ([`AudioBuffer::estimate_formants`]) over a window
+    ///    expanded to the estimator's minimum sample requirement.
+    /// 4. Derive `accuracy_score` from how well the measured
+    ///    acoustic features match the reference phoneme, and `confidence`
+    ///    from a combination of that match quality and how much real signal
+    ///    energy the segment actually contains.
     async fn detect_phonemes(
         &self,
         audio_data: &[f32],
         expected_phonemes: &[PhonemeInfo],
     ) -> Result<Vec<DetectedPhoneme>, FeedbackError> {
-        let mut detected = Vec::new();
+        if expected_phonemes.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        // Simulate detection based on expected phonemes with some variation
+        let sample_rate = f64::from(self.config.sample_rate.max(1));
+        let frame_length = self.config.frame_length.max(1);
+        let hop_length = self.config.hop_length.max(1).min(frame_length);
+
+        // Real per-frame RMS energy envelope of the whole signal.
+        let mut frame_energies = Vec::new();
+        let mut frame_starts = Vec::new();
+        let mut pos = 0usize;
+        loop {
+            let end = (pos + frame_length).min(audio_data.len());
+            frame_energies.push(Self::rms(&audio_data[pos..end]));
+            frame_starts.push(pos);
+            if end >= audio_data.len() {
+                break;
+            }
+            pos += hop_length;
+        }
+
+        let max_energy = frame_energies.iter().copied().fold(0.0_f32, f32::max);
+        // Relative voice-activity threshold: 10% of the clip's peak frame
+        // energy, floored so that a genuinely silent clip (max_energy == 0)
+        // never spuriously counts as "active".
+        let silence_threshold = (max_energy * 0.1).max(1e-4);
+
+        let active_frames: Vec<usize> = frame_energies
+            .iter()
+            .enumerate()
+            .filter(|&(_, &energy)| energy > silence_threshold)
+            .map(|(i, _)| i)
+            .collect();
+
+        let has_voice_activity = !active_frames.is_empty();
+        let (active_start, active_end) = if has_voice_activity {
+            let first = active_frames[0];
+            let last = active_frames[active_frames.len() - 1];
+            (
+                frame_starts[first],
+                (frame_starts[last] + frame_length).min(audio_data.len()),
+            )
+        } else {
+            // No frame cleared the threshold: honestly nothing was detected
+            // as active speech. Segment the whole clip anyway so timing
+            // remains well-defined, but `has_voice_activity == false` caps
+            // confidence low below.
+            (0, audio_data.len())
+        };
+
+        // Weight each phoneme's share of the active region by its
+        // reference duration (falls back to the corpus average of 80ms for
+        // symbols with no reference entry).
+        let weights: Vec<f64> = expected_phonemes
+            .iter()
+            .map(|p| {
+                self.reference_phonemes
+                    .get(&p.symbol)
+                    .map_or(80.0, |r| r.expected_duration_ms)
+                    .max(1.0)
+            })
+            .collect();
+        let total_weight: f64 = weights.iter().sum();
+        let active_len = active_end.saturating_sub(active_start) as f64;
+
+        let mut detected = Vec::with_capacity(expected_phonemes.len());
+        let mut cursor = active_start;
+
         for (i, expected) in expected_phonemes.iter().enumerate() {
-            let start_time = i as f64 * 100.0; // 100ms per phoneme simulation
-            let duration = 100.0 + (scirs2_core::random::random::<f64>() - 0.5) * 20.0; // ±10ms variation from base 100ms
-
-            // Simulate formant detection
-            let formants = if let Some(reference) = self.reference_phonemes.get(&expected.symbol) {
-                if reference.features.vowel {
-                    vec![
-                        reference.formant_ranges.f1_range.0
-                            + (scirs2_core::random::random::<f64>() as f32
-                                * (reference.formant_ranges.f1_range.1
-                                    - reference.formant_ranges.f1_range.0)),
-                        reference.formant_ranges.f2_range.0
-                            + (scirs2_core::random::random::<f64>() as f32
-                                * (reference.formant_ranges.f2_range.1
-                                    - reference.formant_ranges.f2_range.0)),
-                        reference.formant_ranges.f3_range.0
-                            + (scirs2_core::random::random::<f64>() as f32
-                                * (reference.formant_ranges.f3_range.1
-                                    - reference.formant_ranges.f3_range.0)),
-                    ]
-                } else {
-                    vec![] // Consonants might not have clear formants
-                }
+            let share = if total_weight > 0.0 {
+                weights[i] / total_weight
             } else {
-                vec![]
+                1.0 / expected_phonemes.len() as f64
+            };
+            let seg_len = ((active_len * share).round() as usize).max(1);
+
+            let seg_start = cursor.min(active_end);
+            let seg_end = if i + 1 == expected_phonemes.len() {
+                // Last phoneme absorbs any rounding remainder so the
+                // segmentation exactly covers the active region.
+                active_end.max(seg_start)
+            } else {
+                (seg_start + seg_len).min(active_end).max(seg_start)
+            };
+            cursor = seg_end;
+
+            let segment = &audio_data[seg_start..seg_end];
+            let segment_rms = Self::rms(segment);
+            let zcr =
+                AudioBuffer::mono(segment.to_vec(), self.config.sample_rate).zero_crossing_rate();
+
+            let reference = self.reference_phonemes.get(&expected.symbol);
+            let formants = if reference.is_some_and(|r| r.features.vowel) {
+                let window = Self::window_for_formants(audio_data, seg_start, seg_end);
+                AudioBuffer::mono(window.to_vec(), self.config.sample_rate).estimate_formants(3)
+            } else {
+                Vec::new()
             };
 
-            // Calculate confidence and accuracy
-            let confidence = 0.7 + scirs2_core::random::random::<f64>() as f32 * 0.3; // 70-100% confidence
-            let accuracy_score = self.calculate_phoneme_accuracy(&expected.symbol, &formants);
+            let accuracy_score = self.calculate_phoneme_accuracy(&expected.symbol, &formants, zcr);
 
-            // Generate feedback points
+            let energy_ratio = if max_energy > 0.0 {
+                (segment_rms / max_energy).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            // Confidence blends acoustic match quality (dominant term) with
+            // how much real energy the segment actually contains -- a
+            // silent segment can never be reported as confidently detected,
+            // regardless of how well it happens to match on paper.
+            let confidence_raw = (0.3 + 0.7 * accuracy_score) * (0.4 + 0.6 * energy_ratio);
+            let confidence = if has_voice_activity {
+                confidence_raw.clamp(0.0, 1.0)
+            } else {
+                confidence_raw.clamp(0.0, 0.15)
+            };
+
             let feedback_points = self.generate_feedback_points(&expected.symbol, accuracy_score);
 
             detected.push(DetectedPhoneme {
                 symbol: expected.symbol.clone(),
                 confidence,
-                start_time_ms: start_time,
-                duration_ms: duration,
+                start_time_ms: seg_start as f64 / sample_rate * 1000.0,
+                duration_ms: (seg_end.saturating_sub(seg_start)) as f64 / sample_rate * 1000.0,
                 formants,
                 accuracy_score,
                 feedback_points,
@@ -604,30 +717,106 @@ impl PhonemeAnalyzer {
         Ok(detected)
     }
 
-    /// Calculate accuracy score for a single phoneme
-    fn calculate_phoneme_accuracy(&self, symbol: &str, formants: &[f32]) -> f32 {
+    /// Root-mean-square energy of a sample slice (0.0 for an empty slice).
+    fn rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            0.0
+        } else {
+            (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
+        }
+    }
+
+    /// Expand `[seg_start, seg_end)` to at least
+    /// [`AudioBuffer::estimate_formants`]'s minimum window (512 samples),
+    /// centered on the segment's midpoint and clamped to `audio_data`'s
+    /// bounds, so short phoneme segments still get a usable LPC analysis
+    /// window instead of unconditionally returning no formants.
+    fn window_for_formants(audio_data: &[f32], seg_start: usize, seg_end: usize) -> &[f32] {
+        const MIN_LEN: usize = 512;
+        if audio_data.len() <= MIN_LEN {
+            return audio_data;
+        }
+
+        let seg_mid = seg_start + seg_end.saturating_sub(seg_start) / 2;
+        let half = MIN_LEN / 2;
+        let win_start = seg_mid.saturating_sub(half);
+        let win_end = (win_start + MIN_LEN).min(audio_data.len());
+        // Re-anchor the start in case `win_end` was clamped against the end
+        // of the clip, so the window still has the full MIN_LEN whenever
+        // the clip itself is long enough.
+        let win_start = win_end.saturating_sub(MIN_LEN);
+
+        &audio_data[win_start..win_end]
+    }
+
+    /// Calculate accuracy score for a single phoneme from real, measured
+    /// acoustic features.
+    ///
+    /// Vowels are scored by how closely the LPC-estimated formants match
+    /// the reference formant ranges; consonants are scored by how closely
+    /// the measured zero-crossing rate matches the expected range for their
+    /// manner of articulation (see [`Self::expected_zcr_range`]).
+    fn calculate_phoneme_accuracy(&self, symbol: &str, formants: &[f32], zcr: f32) -> f32 {
         if let Some(reference) = self.reference_phonemes.get(symbol) {
-            if reference.features.vowel && formants.len() >= 2 {
-                // For vowels, check formant accuracy
-                let f1_accuracy =
-                    self.calculate_formant_accuracy(formants[0], reference.formant_ranges.f1_range);
-                let f2_accuracy =
-                    self.calculate_formant_accuracy(formants[1], reference.formant_ranges.f2_range);
-                f32::midpoint(f1_accuracy, f2_accuracy)
+            if reference.features.vowel {
+                if formants.len() >= 2 {
+                    let f1_accuracy = self
+                        .calculate_formant_accuracy(formants[0], reference.formant_ranges.f1_range);
+                    let f2_accuracy = self
+                        .calculate_formant_accuracy(formants[1], reference.formant_ranges.f2_range);
+                    f32::midpoint(f1_accuracy, f2_accuracy)
+                } else {
+                    // Formant estimation genuinely failed (segment too
+                    // short/noisy for LPC to resolve a peak) -- honestly
+                    // low rather than a random guess.
+                    0.2
+                }
             } else {
-                // For consonants, use a simulated accuracy
-                0.8 + (scirs2_core::random::random::<f64>() * 0.2) as f32
+                // Consonant: score the real zero-crossing rate against the
+                // expected range for this phoneme's manner of articulation.
+                Self::range_match_score(zcr, Self::expected_zcr_range(&reference.features))
             }
         } else {
-            0.5 // Unknown phoneme
+            0.5 // Unknown phoneme: neutral, deterministic
+        }
+    }
+
+    /// Expected zero-crossing-rate range for a consonant's manner of
+    /// articulation. Fricatives produce high-frequency turbulent noise
+    /// (many zero crossings); nasals and liquids/glides are sonorants with
+    /// low, vowel-like crossing rates; stops are dominated by a brief
+    /// closure so their crossing rate is broad/variable. This mirrors the
+    /// same kind of simplified reference table already used for vowel
+    /// formant ranges -- the measurement fed into it is what changed from
+    /// fabricated to real.
+    fn expected_zcr_range(features: &PhonemeFeatures) -> (f32, f32) {
+        if features.fricative {
+            (0.15, 0.45)
+        } else if features.nasal {
+            (0.01, 0.10)
+        } else if features.liquid || features.glide {
+            (0.02, 0.15)
+        } else if features.stop {
+            (0.05, 0.35)
+        } else {
+            (0.0, 0.5)
         }
     }
 
     /// Calculate formant accuracy
     fn calculate_formant_accuracy(&self, detected: f32, expected_range: (f32, f32)) -> f32 {
+        Self::range_match_score(detected, expected_range)
+    }
+
+    /// Score how well a measured value matches an expected `(min, max)`
+    /// range: 1.0 at the center of the range, decreasing linearly to 0.7 at
+    /// the edges, and continuing to decrease (floored at 0.0) outside it.
+    /// Shared by formant-based (vowel) and zero-crossing-rate-based
+    /// (consonant) accuracy scoring.
+    fn range_match_score(value: f32, expected_range: (f32, f32)) -> f32 {
         let center = f32::midpoint(expected_range.0, expected_range.1);
-        let tolerance = (expected_range.1 - expected_range.0) / 2.0;
-        let distance = (detected - center).abs();
+        let tolerance = ((expected_range.1 - expected_range.0) / 2.0).max(f32::EPSILON);
+        let distance = (value - center).abs();
 
         if distance <= tolerance {
             1.0 - (distance / tolerance) * 0.3 // 70-100% accuracy within range
@@ -682,10 +871,26 @@ impl PhonemeAnalyzer {
         let overall_accuracy =
             detected.iter().map(|p| p.accuracy_score).sum::<f32>() / detected.len() as f32;
 
-        // Timing accuracy: simplified calculation since expected timing is not available
+        // Timing accuracy: when phoneme counts match (so pairing by
+        // position is unambiguous), compare each detected segment's real
+        // duration against its reference phoneme's expected duration. A
+        // count mismatch is penalized directly since pairing would be
+        // ambiguous.
         let timing_accuracy = if detected.len() == expected.len() {
-            // Give a neutral score if phoneme count matches
-            0.8
+            let fit_scores: Vec<f32> = detected
+                .iter()
+                .zip(expected.iter())
+                .map(|(d, e)| {
+                    let expected_duration_ms = self
+                        .reference_phonemes
+                        .get(&e.symbol)
+                        .map_or(80.0, |r| r.expected_duration_ms);
+                    let diff = (d.duration_ms - expected_duration_ms).abs();
+                    let relative_error = (diff / expected_duration_ms.max(1.0)) as f32;
+                    (1.0 - relative_error).clamp(0.0, 1.0)
+                })
+                .collect();
+            fit_scores.iter().sum::<f32>() / fit_scores.len() as f32
         } else {
             0.5 // Penalty for wrong number of phonemes
         };
@@ -719,26 +924,6 @@ impl Default for PhonemeAnalysisConfig {
             max_phoneme_duration_ms: 300,
             confidence_threshold: 0.6,
         }
-    }
-}
-
-// Simple random number generation for simulation
-mod rand {
-    use std::cell::Cell;
-
-    thread_local! {
-        static SEED: Cell<u64> = const { Cell::new(1) };
-    }
-
-    pub fn random<T>() -> T
-    where
-        T: From<f64>,
-    {
-        SEED.with(|seed| {
-            let s = seed.get();
-            seed.set(s.wrapping_mul(1103515245).wrapping_add(12345));
-            T::from((s as f64) / (u64::MAX as f64))
-        })
     }
 }
 

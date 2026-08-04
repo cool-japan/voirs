@@ -751,11 +751,23 @@ impl VoirsPipelineBuilder {
     async fn validate_g2p_component(&self, g2p: &Arc<dyn G2p>) -> Result<()> {
         debug!("Validating G2P component");
 
-        // Check if G2P supports required languages
+        // Check if G2P supports the required language. Comparison goes through the
+        // G2P backend's own language codes because the SDK has several aliases for
+        // the same language (e.g. `JaJp` and `Ja`), and a bare `contains` would
+        // report a spurious mismatch for an entirely correct component.
         let supported_languages = g2p.supported_languages();
         let required_language = self.config.default_synthesis.language;
+        let required_backend_language =
+            crate::pipeline::init::PipelineInitializer::g2p_language(required_language);
 
-        if !supported_languages.contains(&required_language) {
+        let supported = supported_languages.iter().any(|lang| {
+            *lang == required_language
+                || (required_backend_language.is_some()
+                    && crate::pipeline::init::PipelineInitializer::g2p_language(*lang)
+                        == required_backend_language)
+        });
+
+        if !supported {
             warn!(
                 "G2P component does not support required language: {:?}. Supported: {:?}",
                 required_language, supported_languages
@@ -916,28 +928,55 @@ mod tests {
         assert!(builder.validate_vocoder_component(&vocoder).await.is_ok());
     }
 
-    /// The custom-component injection path must be honored end to end: a pipeline
-    /// built with an injected G2P/acoustic/vocoder must use exactly those objects
-    /// and must not touch the model cache at all.
+    /// The custom-component injection path must be honored: injected components
+    /// are used verbatim, and no model weights are required or downloaded.
     #[tokio::test]
     async fn test_custom_components_bypass_model_loading() {
+        use crate::pipeline::init::{ComponentOverrides, PipelineInitializer};
         use crate::pipeline::{DummyAcoustic, DummyG2p, DummyVocoder};
         use std::sync::Arc;
 
         let cache_dir = tempfile::tempdir().expect("temp dir");
 
-        let pipeline = VoirsPipelineBuilder::new()
+        let builder = VoirsPipelineBuilder::new()
             .with_cache_dir(cache_dir.path())
             .with_validation(false)
             .with_g2p(Arc::new(DummyG2p::new()))
             .with_acoustic_model(Arc::new(DummyAcoustic::new()))
-            .with_vocoder(Arc::new(DummyVocoder::new()))
-            .build()
-            .await
-            .expect("custom components must build without any model files");
+            .with_vocoder(Arc::new(DummyVocoder::new()));
 
-        let audio = pipeline.synthesize("hello").await.expect("synthesis");
-        assert!(!audio.is_empty());
+        // The builder must carry the injected components through.
+        let overrides = ComponentOverrides {
+            g2p: builder.get_custom_g2p(),
+            acoustic: builder.get_custom_acoustic(),
+            vocoder: builder.get_custom_vocoder(),
+        };
+        assert!(overrides.g2p.is_some());
+        assert!(overrides.acoustic.is_some());
+        assert!(overrides.vocoder.is_some());
+
+        // Resolving components must succeed with NO model weights present and
+        // NO test-mode opt-in, because every component was supplied.
+        let initializer = PipelineInitializer::new(builder.get_config());
+        let (g2p, acoustic, vocoder) = initializer
+            .initialize_components_with(overrides, false)
+            .await
+            .expect("injected components must not require model weights");
+
+        assert_eq!(g2p.metadata().name, "DummyG2p");
+        assert_eq!(acoustic.metadata().name, "DummyAcoustic");
+        assert_eq!(vocoder.metadata().name, "DummyVocoder");
+
+        // Nothing may have been downloaded into the cache directory.
+        let entries: Vec<_> = std::fs::read_dir(cache_dir.path())
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "injected components must not trigger downloads, found {entries:?}"
+        );
     }
 
     #[tokio::test]

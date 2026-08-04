@@ -524,25 +524,48 @@ impl AdvancedQualityEvaluator {
         }))
     }
 
-    // Simplified implementations for metric calculations
+    // Real DSP-based implementations for metric calculations. Each analyzer
+    // measures `audio`'s actual samples (via `crate::audio_dsp` /
+    // `crate::quality::voice_quality_dsp`, the same real FFT/autocorrelation/LPC
+    // primitives used elsewhere in this crate) rather than returning a fixed
+    // constant, so the resulting score genuinely varies with the input.
     fn analyze_loudness_perception(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        // Simplified loudness analysis
         let rms = self.calculate_rms(audio.samples());
         Ok((rms * 10.0).min(1.0).max(0.0) as f64)
     }
 
+    /// Spectral balance: how closely the low(<1kHz)/mid(1-4kHz)/high(>4kHz) energy
+    /// distribution ([`crate::audio_dsp::band_energy_fractions`]) matches a
+    /// natural-speech-like reference profile. Scores drop as the spectrum skews
+    /// toward being dominated by a single band (muffled/low-pass or
+    /// harsh/high-pass audio).
     fn analyze_spectral_balance(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        // Simplified spectral balance analysis
-        Ok(0.8) // Placeholder
+        let (low, mid, high) =
+            crate::audio_dsp::band_energy_fractions(audio.samples(), audio.sample_rate());
+        let total = low + mid + high;
+        if total <= 0.0 {
+            return Ok(0.0);
+        }
+        // Reference speech-like band distribution.
+        let target = (0.5f64, 0.35f64, 0.15f64);
+        let deviation = ((low as f64 - target.0).abs()
+            + (mid as f64 - target.1).abs()
+            + (high as f64 - target.2).abs())
+            / 2.0; // maximum possible summed deviation is 2.0
+        Ok((1.0 - deviation).clamp(0.0, 1.0))
     }
 
+    /// Temporal coherence: mean frame-to-frame spectral similarity
+    /// ([`crate::audio_dsp::spectral_temporal_coherence`]). A smoothly evolving
+    /// spectrum scores high; abrupt discontinuities or broadband noise score low.
     fn analyze_temporal_coherence(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        // Simplified temporal coherence analysis
-        Ok(0.75) // Placeholder
+        Ok(
+            crate::audio_dsp::spectral_temporal_coherence(audio.samples(), audio.sample_rate())
+                as f64,
+        )
     }
 
     fn analyze_dynamic_range(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        // Simplified dynamic range analysis
         let max_val = audio
             .samples()
             .iter()
@@ -557,60 +580,232 @@ impl AdvancedQualityEvaluator {
         Ok(dynamic_range.min(1.0).max(0.0) as f64)
     }
 
+    /// Phoneme clarity: how prominently formant peaks stand out from the LPC
+    /// spectral envelope
+    /// ([`crate::quality::voice_quality_dsp::compute_formant_clarity`]), already a
+    /// real, audio-dependent `[0, 1]` score.
     fn analyze_phoneme_clarity(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.85) // Placeholder
+        Ok(crate::quality::voice_quality_dsp::compute_formant_clarity(
+            audio.samples(),
+            audio.sample_rate(),
+        ) as f64)
     }
 
+    /// Word-boundary definition: the coefficient of variation of the frame RMS
+    /// envelope ([`crate::audio_dsp::frame_rms_envelope`]). Clear pauses between
+    /// words/phrases produce pronounced energy dips (high CV); a flat envelope
+    /// (constant tone, noise, or silence) produces none.
     fn analyze_word_boundaries(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.80) // Placeholder
+        let envelope = crate::audio_dsp::frame_rms_envelope(audio.samples(), audio.sample_rate());
+        if envelope.len() < 2 {
+            return Ok(0.0);
+        }
+        let mean = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        if mean <= 1e-8 {
+            return Ok(0.0);
+        }
+        let variance =
+            envelope.iter().map(|&e| (e - mean).powi(2)).sum::<f32>() / envelope.len() as f32;
+        let cv = variance.sqrt() / mean;
+        // A coefficient of variation around 0.8 is typical for speech with clear
+        // pauses between words; normalize so that range maps near 1.0.
+        Ok((cv / 0.8).clamp(0.0, 1.0) as f64)
     }
 
+    /// Prosodic clarity: the fraction of analysis frames carrying a confidently
+    /// trackable pitch ([`crate::audio_dsp::windowed_f0_track`]). A clear prosodic
+    /// pattern requires sustained voiced regions the pitch tracker can lock onto;
+    /// noise or silence leaves most frames unvoiced (`F0 == 0`).
     fn analyze_prosodic_clarity(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.78) // Placeholder
+        let track = crate::audio_dsp::windowed_f0_track(audio.samples(), audio.sample_rate());
+        if track.is_empty() {
+            return Ok(0.0);
+        }
+        let voiced = track.iter().filter(|&&f0| f0 > 0.0).count();
+        Ok(voiced as f64 / track.len() as f64)
     }
 
+    /// Articulation precision: inverse of the average −3 dB formant bandwidth
+    /// ([`crate::quality::voice_quality_dsp::compute_formant_bandwidths`]).
+    /// Narrower, more sharply defined formants indicate more precise articulation.
     fn analyze_articulation(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.82) // Placeholder
+        let bandwidths = crate::quality::voice_quality_dsp::compute_formant_bandwidths(
+            audio.samples(),
+            audio.sample_rate(),
+        );
+        if bandwidths.is_empty() {
+            return Ok(0.0);
+        }
+        let avg_bw = bandwidths.iter().sum::<f32>() / bandwidths.len() as f32;
+        // Typical natural formant bandwidths span roughly 50-300 Hz; map onto
+        // [1, 0] (narrower = clearer articulation).
+        Ok((1.0 - (avg_bw - 50.0) / 250.0).clamp(0.0, 1.0) as f64)
     }
 
+    /// Voice-quality naturalness from real jitter/shimmer/HNR
+    /// ([`crate::quality::voice_quality_dsp`]): natural voices have low
+    /// cycle-to-cycle pitch/amplitude perturbation and a strong harmonic
+    /// structure. Returns `0.0` when no pitch period can be found (e.g. unvoiced
+    /// or silent audio).
     fn analyze_voice_naturalness(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.77) // Placeholder
+        let samples = audio.samples();
+        let sample_rate = audio.sample_rate();
+        let Some((period, correlation)) =
+            crate::quality::voice_quality_dsp::estimate_pitch_period(samples, sample_rate)
+        else {
+            return Ok(0.0);
+        };
+        let (jitter, shimmer) =
+            crate::quality::voice_quality_dsp::compute_jitter_shimmer(samples, period);
+        let hnr_db = crate::quality::voice_quality_dsp::hnr_from_correlation(correlation);
+        // Reference ranges for a naturally-voiced signal: jitter < ~5%, shimmer <
+        // ~20%, HNR ~0-20 dB.
+        let jitter_score = (1.0 - f64::from(jitter) / 0.05).clamp(0.0, 1.0);
+        let shimmer_score = (1.0 - f64::from(shimmer) / 0.2).clamp(0.0, 1.0);
+        let hnr_score = (f64::from(hnr_db) / 20.0).clamp(0.0, 1.0);
+        Ok(jitter_score * 0.35 + shimmer_score * 0.35 + hnr_score * 0.30)
     }
 
+    /// Expressive prosodic variation, from the energy envelope's range relative to
+    /// its mean. There is no ground-truth "target emotion" available to this
+    /// reference-free evaluator, so this is honestly a proxy for expressive
+    /// delivery rather than literal semantic appropriateness: moderate loudness
+    /// variation across the utterance (neither perfectly flat/monotone nor wildly
+    /// erratic) scores highest.
     fn analyze_emotional_appropriateness(
         &self,
         audio: &AudioBuffer,
     ) -> Result<f64, EvaluationError> {
-        Ok(0.85) // Placeholder
+        let envelope = crate::audio_dsp::frame_rms_envelope(audio.samples(), audio.sample_rate());
+        if envelope.len() < 2 {
+            return Ok(0.5);
+        }
+        let mean = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        if mean <= 1e-8 {
+            return Ok(0.0);
+        }
+        let max = envelope.iter().cloned().fold(0.0f32, f32::max);
+        let range_ratio = f64::from((max - mean) / mean);
+        // Target a moderate range ratio (~1.0); score falls off symmetrically for
+        // flatter (monotone) or more erratic deliveries.
+        Ok((1.0 - (range_ratio - 1.0).abs() / 1.5).clamp(0.0, 1.0))
     }
 
+    /// Speaking-rate naturalness: energy-peak rate (a syllable-nucleus proxy, via
+    /// [`crate::audio_dsp::frame_rms_envelope`]) compared against a natural range
+    /// centered on ~4 peaks/second.
     fn analyze_speaking_rate_naturalness(
         &self,
         audio: &AudioBuffer,
     ) -> Result<f64, EvaluationError> {
-        Ok(0.83) // Placeholder
+        let sample_rate = audio.sample_rate();
+        if sample_rate == 0 {
+            return Ok(0.0);
+        }
+        let envelope = crate::audio_dsp::frame_rms_envelope(audio.samples(), sample_rate);
+        let duration = audio.samples().len() as f64 / f64::from(sample_rate);
+        if envelope.len() < 3 || duration <= 0.0 {
+            return Ok(0.0);
+        }
+        let mean = envelope.iter().sum::<f32>() / envelope.len() as f32;
+        let peak_count = envelope
+            .windows(3)
+            .filter(|w| w[1] > w[0] && w[1] > w[2] && w[1] > mean)
+            .count();
+        let rate = peak_count as f64 / duration;
+        let ideal = 4.0;
+        let deviation = (rate - ideal).abs();
+        Ok((1.0 - deviation / 4.0).clamp(0.0, 1.0))
     }
 
+    /// Intonation naturalness: smoothness and range of the F0 contour
+    /// ([`crate::audio_dsp::windowed_f0_track`]). Natural intonation has *some*
+    /// pitch movement (unlike a flat monotone) but changes gradually rather than
+    /// jumping erratically frame to frame.
     fn analyze_intonation_naturalness(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.79) // Placeholder
+        let track = crate::audio_dsp::windowed_f0_track(audio.samples(), audio.sample_rate());
+        let voiced: Vec<f32> = track.into_iter().filter(|&f0| f0 > 0.0).collect();
+        if voiced.len() < 2 {
+            return Ok(0.0);
+        }
+        let mean = (voiced.iter().sum::<f32>() / voiced.len() as f32).max(1.0);
+        let range = voiced.iter().cloned().fold(f32::MIN, f32::max)
+            - voiced.iter().cloned().fold(f32::MAX, f32::min);
+        let range_score = f64::from(range / (mean * 0.6)).clamp(0.0, 1.0);
+        let jumps: Vec<f32> = voiced
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs() / mean)
+            .collect();
+        let mean_jump = jumps.iter().sum::<f32>() / jumps.len() as f32;
+        let smoothness_score = f64::from(1.0 - mean_jump / 0.3).clamp(0.0, 1.0);
+        Ok(range_score * 0.5 + smoothness_score * 0.5)
     }
 
+    /// Signal-to-noise ratio quality. When a clean `reference` of matching length
+    /// is available, computes a real SNR (dB, normalized to `[0, 1]` over a 0-40
+    /// dB practical range) from the direct difference signal (`audio - reference`
+    /// as the noise estimate). Otherwise falls back to a harmonics-to-noise-ratio
+    /// (HNR) based proxy
+    /// ([`crate::quality::voice_quality_dsp::hnr_from_correlation`]), a standard
+    /// reference-free voice-quality indicator (not a literal decibel SNR).
     fn calculate_snr(
         &self,
         audio: &AudioBuffer,
         reference: Option<&AudioBuffer>,
     ) -> Result<f64, EvaluationError> {
-        // Simplified SNR calculation
-        Ok(0.88) // Placeholder
+        let samples = audio.samples();
+        if let Some(reference) = reference {
+            let ref_samples = reference.samples();
+            if !samples.is_empty() && ref_samples.len() == samples.len() {
+                let signal_power: f64 = ref_samples.iter().map(|&x| f64::from(x).powi(2)).sum();
+                let noise_power: f64 = samples
+                    .iter()
+                    .zip(ref_samples.iter())
+                    .map(|(&a, &b)| f64::from(a - b).powi(2))
+                    .sum();
+                if signal_power > 0.0 && noise_power > 0.0 {
+                    let snr_db = 10.0 * (signal_power / noise_power).log10();
+                    return Ok((snr_db / 40.0).clamp(0.0, 1.0));
+                } else if signal_power > 0.0 {
+                    // Noise power is (numerically) zero: identical signals.
+                    return Ok(1.0);
+                }
+            }
+        }
+        let Some((_, correlation)) =
+            crate::quality::voice_quality_dsp::estimate_pitch_period(samples, audio.sample_rate())
+        else {
+            return Ok(0.0);
+        };
+        let hnr_db = crate::quality::voice_quality_dsp::hnr_from_correlation(correlation);
+        Ok((f64::from(hnr_db) / 20.0).clamp(0.0, 1.0))
     }
 
+    /// Total harmonic distortion quality (inverted: high = clean). Reuses the
+    /// crate's real FFT-based THD+N estimator
+    /// ([`crate::advanced_preprocessing::AdvancedPreprocessor::estimate_thd_n`]).
     fn calculate_thd(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        // Simplified THD calculation
-        Ok(0.92) // Placeholder - inverted (high value = low distortion)
+        let thd_n = crate::advanced_preprocessing::AdvancedPreprocessor::estimate_thd_n(
+            audio.samples(),
+        );
+        Ok((1.0 - f64::from(thd_n)).clamp(0.0, 1.0))
     }
 
+    /// Frequency-response flatness: the coefficient of variation across the
+    /// low/mid/high energy bands ([`crate::audio_dsp::band_energy_fractions`]) — a
+    /// flatter (more evenly distributed) response scores higher.
     fn analyze_frequency_response(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
-        Ok(0.86) // Placeholder
+        let (low, mid, high) =
+            crate::audio_dsp::band_energy_fractions(audio.samples(), audio.sample_rate());
+        let bands = [f64::from(low), f64::from(mid), f64::from(high)];
+        let total: f64 = bands.iter().sum();
+        if total <= 0.0 {
+            return Ok(0.0);
+        }
+        let mean = total / 3.0;
+        let variance = bands.iter().map(|b| (b - mean).powi(2)).sum::<f64>() / 3.0;
+        let cv = variance.sqrt() / mean;
+        Ok((1.0 - cv / 1.5).clamp(0.0, 1.0))
     }
 
     fn calculate_dynamic_range(&self, audio: &AudioBuffer) -> Result<f64, EvaluationError> {
@@ -618,21 +813,75 @@ impl AdvancedQualityEvaluator {
         self.analyze_dynamic_range(audio)
     }
 
+    /// Real speech/music/noise content-type heuristic combining spectral
+    /// flatness ([`crate::audio_dsp::spectral_flatness`]) with zero-crossing-rate
+    /// variability across 20 ms windows: speech alternates between low-ZCR voiced
+    /// segments and high-ZCR unvoiced/fricative segments (high ZCR variance),
+    /// tonal/music content tends toward a more stable ZCR with low spectral
+    /// flatness, and broadband noise has high flatness with little structure.
+    /// This is a documented DSP heuristic, not a trained classifier.
     fn estimate_content_type(&self, audio: &AudioBuffer) -> Result<String, EvaluationError> {
-        // Simplified content type estimation
-        Ok("speech".to_string())
+        let samples = audio.samples();
+        let sample_rate = audio.sample_rate();
+        if samples.len() < 256 || sample_rate == 0 {
+            return Ok("unknown".to_string());
+        }
+        let flatness = crate::audio_dsp::spectral_flatness(samples, sample_rate);
+
+        let window = (((f64::from(sample_rate)) * 0.02) as usize).max(64);
+        let mut zcrs = Vec::new();
+        let mut start = 0usize;
+        while start < samples.len() {
+            let end = (start + window).min(samples.len());
+            zcrs.push(crate::audio_dsp::zero_crossing_rate(&samples[start..end]));
+            start = end;
+        }
+        let zcr_mean = zcrs.iter().sum::<f32>() / zcrs.len().max(1) as f32;
+        let zcr_variance = if zcrs.len() < 2 {
+            0.0
+        } else {
+            zcrs.iter().map(|&z| (z - zcr_mean).powi(2)).sum::<f32>() / zcrs.len() as f32
+        };
+
+        if flatness > 0.6 {
+            Ok("noise".to_string())
+        } else if zcr_variance > 0.01 {
+            Ok("speech".to_string())
+        } else {
+            Ok("music".to_string())
+        }
     }
 
+    /// Speaker characteristics. Only `gender` is estimated, via a coarse, real
+    /// mean-F0 heuristic ([`crate::audio_dsp::windowed_f0_track`]) — a documented,
+    /// audio-dependent DSP proxy, not a validated or ethically-endorsed
+    /// classifier. `age_group`/`accent`/`style` have no reliable acoustic proxy
+    /// available from pure signal processing alone and are honestly reported as
+    /// `"unknown"` rather than a specific-sounding but unmeasured constant.
     fn estimate_speaker_characteristics(
         &self,
         audio: &AudioBuffer,
     ) -> Result<SpeakerCharacteristics, EvaluationError> {
-        // Simplified speaker characteristic estimation
+        let track = crate::audio_dsp::windowed_f0_track(audio.samples(), audio.sample_rate());
+        let voiced: Vec<f32> = track.into_iter().filter(|&f0| f0 > 0.0).collect();
+        let gender = if voiced.len() < 3 {
+            "unknown".to_string()
+        } else {
+            let mean_f0 = voiced.iter().sum::<f32>() / voiced.len() as f32;
+            // Coarse phonetic convention: adult male speech typically averages
+            // ~85-180 Hz, adult female ~165-255 Hz, with substantial overlap; this
+            // is a crude midpoint split, not a validated classifier.
+            if mean_f0 < 165.0 {
+                "likely_male".to_string()
+            } else {
+                "likely_female".to_string()
+            }
+        };
         Ok(SpeakerCharacteristics {
-            age_group: "adult".to_string(),
-            gender: "unknown".to_string(),
-            accent: "neutral".to_string(),
-            style: "conversational".to_string(),
+            age_group: "unknown".to_string(),
+            gender,
+            accent: "unknown".to_string(),
+            style: "unknown".to_string(),
         })
     }
 

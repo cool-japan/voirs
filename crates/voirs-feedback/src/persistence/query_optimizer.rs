@@ -861,15 +861,13 @@ impl QueryOptimizer {
             let mut statements = self.prepared_statements.write().await;
             let info = statements
                 .entry(statement_signature.clone())
-                .or_insert_with(|| {
-                    PreparedStatementInfo {
-                        statement_id: statement_signature.clone(),
-                        query_template,
-                        parameter_count: 0, // Simplified for now
-                        last_used: Instant::now(),
-                        usage_count: 0,
-                        average_execution_time: Duration::from_millis(0),
-                    }
+                .or_insert_with(|| PreparedStatementInfo {
+                    statement_id: statement_signature.clone(),
+                    query_template,
+                    parameter_count: Self::count_query_parameters(query_template),
+                    last_used: Instant::now(),
+                    usage_count: 0,
+                    average_execution_time: Duration::from_millis(0),
                 });
 
             info.last_used = Instant::now();
@@ -915,6 +913,44 @@ impl QueryOptimizer {
         }
 
         Ok(result)
+    }
+
+    /// Count the number of distinct positional bind parameters (`$1`, `$2`, ...)
+    /// referenced in a Postgres query template.
+    ///
+    /// This is computed directly from the real query text rather than being a
+    /// caller-asserted guess: [`execute_prepared_statement`] does not support
+    /// dynamic `.bind()` calls (the query text must be a compile-time
+    /// `&'static str` literal), so the only trustworthy source of truth for
+    /// how many parameters a statement expects is the highest `$N` index that
+    /// actually appears in its text.
+    ///
+    /// [`execute_prepared_statement`]: Self::execute_prepared_statement
+    fn count_query_parameters(query_template: &str) -> usize {
+        let bytes = query_template.as_bytes();
+        let mut max_param = 0usize;
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i] == b'$' {
+                let digits_start = i + 1;
+                let mut digits_end = digits_start;
+                while digits_end < bytes.len() && bytes[digits_end].is_ascii_digit() {
+                    digits_end += 1;
+                }
+
+                if digits_end > digits_start {
+                    if let Ok(index) = query_template[digits_start..digits_end].parse::<usize>() {
+                        max_param = max_param.max(index);
+                    }
+                    i = digits_end;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        max_param
     }
 
     /// Generate automatic index recommendations based on query patterns
@@ -1787,6 +1823,43 @@ mod tests {
         // Should have performance baseline data
         let baselines = optimizer.get_performance_baselines().await;
         assert!(baselines.contains_key(&statement_signature));
+    }
+
+    /// `parameter_count` must reflect the real query text (the highest `$N`
+    /// placeholder actually referenced), not a hardcoded stand-in -- so it
+    /// must vary across templates with different real parameter counts.
+    #[test]
+    fn test_count_query_parameters_reflects_real_query_text() {
+        assert_eq!(
+            QueryOptimizer::count_query_parameters("SELECT * FROM t"),
+            0,
+            "a query with no placeholders has zero parameters"
+        );
+        assert_eq!(
+            QueryOptimizer::count_query_parameters("SELECT * FROM users WHERE id = $1"),
+            1
+        );
+        assert_eq!(
+            QueryOptimizer::count_query_parameters(
+                "SELECT * FROM t WHERE a = $1 AND b = $2 OR a = $1"
+            ),
+            2,
+            "repeated references to the same placeholder must not double count"
+        );
+        assert_eq!(
+            QueryOptimizer::count_query_parameters("INSERT INTO t (a, b, c) VALUES ($1, $2, $3)"),
+            3
+        );
+        // Highest index wins even if placeholders are referenced out of order.
+        assert_eq!(
+            QueryOptimizer::count_query_parameters("SELECT * FROM t WHERE b = $3 AND a = $1"),
+            3
+        );
+        assert_eq!(
+            QueryOptimizer::count_query_parameters("SELECT price_$1_tag FROM t"),
+            1,
+            "a bare '$' followed by digits is still counted even mid-identifier"
+        );
     }
 
     #[tokio::test]

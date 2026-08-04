@@ -24,6 +24,23 @@ pub enum VoiceControlError {
     #[error("Command not recognized: {input}")]
     CommandNotRecognized { input: String },
 
+    /// The command was recognized but no real handler has been registered
+    /// for it, so there is no action to actually dispatch.
+    #[error("No handler registered for command '{command_id}'")]
+    HandlerNotRegistered {
+        /// The command ID that has no registered handler.
+        command_id: String,
+    },
+
+    /// A registered handler ran but reported a real failure.
+    #[error("Handler for command '{command_id}' failed: {message}")]
+    HandlerFailed {
+        /// The command ID whose handler failed.
+        command_id: String,
+        /// The real failure reason reported by the handler.
+        message: String,
+    },
+
     /// Ambiguous command
     #[error("Ambiguous command: {input} - matches: {matches:?}")]
     AmbiguousCommand { input: String, matches: Vec<String> },
@@ -176,6 +193,12 @@ impl Default for VoiceControlConfig {
     }
 }
 
+/// A real, callable action a command dispatches to. Handlers receive the
+/// recognized [`VoiceIntent`] (including its extracted parameters) and
+/// report their own genuine success or failure -- there is no synthetic
+/// "always succeeds" fallback anywhere in the dispatch path.
+pub type CommandHandler = dyn Fn(&VoiceIntent) -> VoiceControlResult<String> + Send + Sync;
+
 /// Voice control manager
 pub struct VoiceControlManager {
     /// Configuration
@@ -188,6 +211,12 @@ pub struct VoiceControlManager {
     executions: Arc<RwLock<Vec<CommandExecution>>>,
     /// Command statistics
     stats: Arc<RwLock<VoiceControlStats>>,
+    /// Real handlers dispatched to by [`VoiceControlManager::execute_command`],
+    /// keyed by [`VoiceCommand::command_id`]. A command with no registered
+    /// handler here has nothing wired up to actually run, and
+    /// `execute_command` reports that honestly instead of a fabricated
+    /// success.
+    handlers: Arc<RwLock<HashMap<String, Arc<CommandHandler>>>>,
 }
 
 /// Voice control statistics
@@ -236,7 +265,32 @@ impl VoiceControlManager {
             history: Arc::new(RwLock::new(Vec::new())),
             executions: Arc::new(RwLock::new(Vec::new())),
             stats: Arc::new(RwLock::new(VoiceControlStats::default())),
+            handlers: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Register a real handler that `execute_command` will invoke whenever a
+    /// recognized intent's `command_id` matches. The handler receives the
+    /// full [`VoiceIntent`] and returns either `Ok(message)` describing what
+    /// it really did, or `Err` if the action genuinely failed -- both are
+    /// propagated into the resulting [`CommandExecution`] as-is.
+    ///
+    /// Registering a handler for a `command_id` that has no corresponding
+    /// [`VoiceCommand`] is allowed (the handler simply will never be
+    /// reached, since `recognize_intent` can never produce that
+    /// `command_id`), but is not an error here.
+    pub async fn register_handler<F>(&self, command_id: impl Into<String>, handler: F)
+    where
+        F: Fn(&VoiceIntent) -> VoiceControlResult<String> + Send + Sync + 'static,
+    {
+        let mut handlers = self.handlers.write().await;
+        handlers.insert(command_id.into(), Arc::new(handler));
+    }
+
+    /// Remove a previously registered handler, if any.
+    pub async fn unregister_handler(&self, command_id: &str) {
+        let mut handlers = self.handlers.write().await;
+        handlers.remove(command_id);
     }
 
     /// Build the set of default voice commands
@@ -401,19 +455,28 @@ impl VoiceControlManager {
         Ok(intent)
     }
 
-    /// Execute a voice command
+    /// Execute a voice command.
+    ///
+    /// Dispatches to the real handler registered for `intent.command_id` via
+    /// [`VoiceControlManager::register_handler`], propagating whatever that
+    /// handler genuinely reports. If no handler is registered, this reports
+    /// a real failure (`success: false`) rather than fabricating success --
+    /// consistent with how a missing required parameter is already reported
+    /// below.
     pub async fn execute_command(
         &self,
         intent: &VoiceIntent,
     ) -> VoiceControlResult<CommandExecution> {
         let start_time = std::time::Instant::now();
 
-        let commands = self.commands.read().await;
-        let command = commands.get(&intent.command_id).ok_or_else(|| {
-            VoiceControlError::CommandNotRecognized {
-                input: intent.command_id.clone(),
-            }
-        })?;
+        let command = {
+            let commands = self.commands.read().await;
+            commands.get(&intent.command_id).cloned().ok_or_else(|| {
+                VoiceControlError::CommandNotRecognized {
+                    input: intent.command_id.clone(),
+                }
+            })?
+        };
 
         // Validate required parameters
         for param in &command.parameters {
@@ -432,13 +495,33 @@ impl VoiceControlManager {
             }
         }
 
-        // In a real implementation, this would dispatch to actual command handlers
-        // For now, we'll return a success mock
+        // Look up the real handler registered for this command, if any, then
+        // drop the lock before invoking it (handlers are arbitrary user code
+        // and must not run while holding our internal lock).
+        let handler = {
+            let handlers = self.handlers.read().await;
+            handlers.get(&intent.command_id).cloned()
+        };
+
+        let (success, message) = match handler {
+            Some(handler) => match handler(intent) {
+                Ok(real_message) => (true, real_message),
+                Err(e) => (false, e.to_string()),
+            },
+            None => (
+                false,
+                VoiceControlError::HandlerNotRegistered {
+                    command_id: intent.command_id.clone(),
+                }
+                .to_string(),
+            ),
+        };
+
         let execution = CommandExecution {
             execution_id: uuid::Uuid::new_v4().to_string(),
             command_id: intent.command_id.clone(),
-            success: true,
-            message: format!("Command '{}' executed successfully", command.name),
+            success,
+            message,
             execution_time_ms: start_time.elapsed().as_millis() as u64,
             executed_at: Utc::now(),
         };
@@ -626,15 +709,78 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// With no handler registered, `execute_command` must report a real,
+    /// honest failure instead of fabricating success -- there is genuinely
+    /// nothing wired up to run.
     #[tokio::test]
-    async fn test_execute_command() {
+    async fn test_execute_command_without_handler_is_honest_failure() {
         let manager = VoiceControlManager::new(VoiceControlConfig::default());
 
         let intent = manager.recognize_intent("play").await.unwrap();
         let execution = manager.execute_command(&intent).await.unwrap();
 
+        assert!(!execution.success);
+        assert!(execution.message.contains("No handler registered"));
+
+        // The failure must also be reflected in real statistics, not hidden.
+        let stats = manager.get_statistics().await;
+        assert_eq!(stats.failed_executions, 1);
+        assert_eq!(stats.successful_executions, 0);
+    }
+
+    /// A registered handler must be genuinely invoked and its real result
+    /// (not a constant) must flow through to the `CommandExecution`.
+    #[tokio::test]
+    async fn test_execute_command_dispatches_to_real_handler() {
+        let manager = VoiceControlManager::new(VoiceControlConfig::default());
+        let play_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        let counter = play_count.clone();
+        manager
+            .register_handler("play", move |_intent| {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok("playback actually started".to_string())
+            })
+            .await;
+
+        let intent = manager.recognize_intent("play").await.unwrap();
+        let execution = manager.execute_command(&intent).await.unwrap();
+
         assert!(execution.success);
-        assert!(execution.message.contains("executed successfully"));
+        assert_eq!(execution.message, "playback actually started");
+        assert_eq!(
+            play_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the real handler must actually run exactly once"
+        );
+
+        // A different, unregistered command must still honestly fail --
+        // registering one handler does not fabricate success for others.
+        let pause_intent = manager.recognize_intent("pause").await.unwrap();
+        let pause_execution = manager.execute_command(&pause_intent).await.unwrap();
+        assert!(!pause_execution.success);
+    }
+
+    /// A handler that reports a genuine failure must have that failure
+    /// propagate through `execute_command`, not get silently upgraded to
+    /// success.
+    #[tokio::test]
+    async fn test_execute_command_propagates_real_handler_failure() {
+        let manager = VoiceControlManager::new(VoiceControlConfig::default());
+
+        manager
+            .register_handler("play", |_intent| {
+                Err(VoiceControlError::ConfigError {
+                    message: "audio device unavailable".to_string(),
+                })
+            })
+            .await;
+
+        let intent = manager.recognize_intent("play").await.unwrap();
+        let execution = manager.execute_command(&intent).await.unwrap();
+
+        assert!(!execution.success);
+        assert!(execution.message.contains("audio device unavailable"));
     }
 
     #[tokio::test]

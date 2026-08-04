@@ -92,6 +92,10 @@ oxiarc-deflate.workspace = true
 # Configuration
 toml = "1.1"
 
+# Temporary corpora for the `mfa` feature, which drives the real Montreal Forced
+# Aligner executable over files it must read from disk.
+tempfile = { workspace = true, optional = true }
+
 # Homomorphic encryption (optional)
 num-bigint-dig = { workspace = true, features = ["rand", "prime"], optional = true }
 # Required by num-bigint-dig's RandPrime trait API for prime generation (cannot use fastrand here).
@@ -145,7 +149,7 @@ transformer = []  # Transformer-based end-to-end ASR
 conformer = []  # Conformer: Convolution-augmented Transformer for Speech Recognition
 analysis = []
 forced-align = []
-mfa = []
+mfa = ["dep:tempfile"]  # Montreal Forced Aligner integration (drives the real `mfa` CLI)
 python = ["pyo3", "numpy", "pyo3-async-runtimes"]  # Python bindings with async support
 wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "console_error_panic_hook", "wasm-logger"]  # WASM bindings for browser/Node.js
 c-api = []  # C/C++ API bindings

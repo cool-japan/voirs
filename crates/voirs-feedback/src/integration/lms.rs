@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::timeout;
+
+#[cfg(feature = "microservices")]
+use reqwest::Client;
 
 /// LMS integration error types
 #[derive(Debug, Clone)]
@@ -215,6 +217,10 @@ pub struct LMSCourse {
 pub struct GradeSubmission {
     /// Student identifier
     pub student_id: String,
+    /// Course identifier (required to address the real per-platform grade
+    /// passback endpoint, e.g. Canvas's
+    /// `/courses/{course_id}/assignments/{assignment_id}/submissions/{student_id}`).
+    pub course_id: String,
     /// Assignment identifier
     pub assignment_id: String,
     /// Earned score
@@ -299,21 +305,49 @@ pub struct LMSIntegrationManager {
     rate_limiter: RateLimiter,
     /// Data cache
     cache: LMSCache,
+    /// HTTP client used for real platform API requests
+    #[cfg(feature = "microservices")]
+    http_client: Client,
 }
 
 impl LMSIntegrationManager {
     /// Create a new LMS integration manager
     #[must_use]
     pub fn new(config: LMSAuthConfig) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
+
         Self {
             config,
             rate_limiter: RateLimiter::new(100, Duration::from_secs(60)), // 100 requests per minute
             cache: LMSCache::new(),
+            #[cfg(feature = "microservices")]
+            http_client: Client::new(),
         }
+    }
+
+    /// Verify the manager has the minimum configuration required to reach a
+    /// real LMS endpoint, failing closed instead of attempting a request
+    /// that could never succeed (or, worse, silently no-op).
+    fn ensure_configured(&self) -> Result<(), LMSError> {
+        if self.config.base_url.trim().is_empty() {
+            return Err(LMSError::ConfigurationError(
+                "LMS base_url is not configured".to_string(),
+            ));
+        }
+        if self.config.api_key.trim().is_empty() {
+            return Err(LMSError::ConfigurationError(
+                "LMS api_key is not configured".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Authenticate with the LMS platform
     pub async fn authenticate(&mut self) -> Result<(), LMSError> {
+        self.ensure_configured()?;
         self.rate_limiter.check_rate_limit()?;
 
         match self.config.platform {
@@ -333,6 +367,7 @@ impl LMSIntegrationManager {
             return Ok(cached_course.clone());
         }
 
+        self.ensure_configured()?;
         self.rate_limiter.check_rate_limit()?;
 
         let course = match self.config.platform {
@@ -355,6 +390,7 @@ impl LMSIntegrationManager {
         &mut self,
         course_id: &str,
     ) -> Result<Vec<LMSStudent>, LMSError> {
+        self.ensure_configured()?;
         self.rate_limiter.check_rate_limit()?;
 
         match self.config.platform {
@@ -372,6 +408,7 @@ impl LMSIntegrationManager {
         &mut self,
         course_id: &str,
     ) -> Result<Vec<LMSAssignment>, LMSError> {
+        self.ensure_configured()?;
         self.rate_limiter.check_rate_limit()?;
 
         match self.config.platform {
@@ -387,6 +424,7 @@ impl LMSIntegrationManager {
     /// Submit grade for a student
     pub async fn submit_grade(&mut self, submission: &GradeSubmission) -> Result<(), LMSError> {
         self.validate_grade_submission(submission)?;
+        self.ensure_configured()?;
         self.rate_limiter.check_rate_limit()?;
 
         match self.config.platform {
@@ -435,6 +473,7 @@ impl LMSIntegrationManager {
 
         Ok(GradeSubmission {
             student_id: student_id.to_string(),
+            course_id: assignment.course_id.clone(),
             assignment_id: assignment_id.to_string(),
             score: grade_score,
             max_score: assignment.max_points,
@@ -445,241 +484,404 @@ impl LMSIntegrationManager {
     }
 
     // Platform-specific authentication methods
+    #[cfg(feature = "microservices")]
     async fn authenticate_canvas(&self) -> Result<(), LMSError> {
-        // Canvas API authentication using access token
-        let auth_url = format!("{}/api/v1/users/self", self.config.base_url);
+        // Canvas API: a plain bearer-token GET against any authenticated
+        // endpoint proves the token is valid. `/users/self` is the smallest
+        // one available.
+        let url = format!("{}/api/v1/users/self", self.config.base_url);
 
-        // Simulate API call with timeout
-        let result = timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            self.make_canvas_request(&auth_url),
-        )
-        .await;
+        let response = self
+            .http_client
+            .get(&url)
+            .bearer_auth(&self.config.api_key)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
 
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(LMSError::AuthenticationFailed(e)),
-            Err(_) => Err(LMSError::ConnectionTimeout),
-        }
+        ensure_lms_success(response).await?;
+        Ok(())
     }
 
+    #[cfg(not(feature = "microservices"))]
+    async fn authenticate_canvas(&self) -> Result<(), LMSError> {
+        Err(feature_disabled_error())
+    }
+
+    #[cfg(feature = "microservices")]
     async fn authenticate_blackboard(&self) -> Result<(), LMSError> {
-        // Blackboard Learn API authentication
-        let auth_url = format!("{}/learn/api/public/v1/oauth2/token", self.config.base_url);
+        // Blackboard Learn REST: OAuth2 client-credentials grant, application
+        // key/secret sent as HTTP Basic auth per Blackboard's documented flow.
+        let url = format!("{}/learn/api/public/v1/oauth2/token", self.config.base_url);
 
-        // Simulate OAuth2 authentication
-        let result = timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            self.make_blackboard_oauth_request(&auth_url),
-        )
-        .await;
+        let response = self
+            .http_client
+            .post(&url)
+            .basic_auth(&self.config.api_key, self.config.api_secret.as_deref())
+            .form(&[("grant_type", "client_credentials")])
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
 
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(LMSError::AuthenticationFailed(e)),
-            Err(_) => Err(LMSError::ConnectionTimeout),
+        let response = ensure_lms_success(response).await?;
+        let token: serde_json::Value = response.json().await.map_err(|e| {
+            LMSError::AuthenticationFailed(format!(
+                "failed to parse Blackboard token response: {e}"
+            ))
+        })?;
+
+        if token["access_token"].as_str().is_none() {
+            return Err(LMSError::AuthenticationFailed(
+                "Blackboard token response is missing 'access_token'".to_string(),
+            ));
         }
+        Ok(())
     }
 
+    #[cfg(not(feature = "microservices"))]
+    async fn authenticate_blackboard(&self) -> Result<(), LMSError> {
+        Err(feature_disabled_error())
+    }
+
+    #[cfg(feature = "microservices")]
     async fn authenticate_moodle(&self) -> Result<(), LMSError> {
-        // Moodle Web Services authentication
-        let auth_url = format!("{}/webservice/rest/server.php", self.config.base_url);
+        // Moodle web services: the token and requested function are query
+        // parameters on a GET, not a header; errors come back as HTTP 200
+        // with an embedded `exception` object rather than a non-2xx status.
+        let url = format!(
+            "{}/webservice/rest/server.php?wstoken={}&wsfunction=core_webservice_get_site_info&moodlewsrestformat=json",
+            self.config.base_url,
+            urlencoding::encode(&self.config.api_key),
+        );
 
-        // Simulate token validation
-        let result = timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            self.make_moodle_request(&auth_url, "core_webservice_get_site_info"),
-        )
-        .await;
+        let response = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
 
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(LMSError::AuthenticationFailed(e)),
-            Err(_) => Err(LMSError::ConnectionTimeout),
-        }
+        let response = ensure_lms_success(response).await?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            LMSError::AuthenticationFailed(format!("failed to parse Moodle response: {e}"))
+        })?;
+        check_moodle_exception(&data)
+    }
+
+    #[cfg(not(feature = "microservices"))]
+    async fn authenticate_moodle(&self) -> Result<(), LMSError> {
+        Err(feature_disabled_error())
     }
 
     async fn authenticate_d2l(&self) -> Result<(), LMSError> {
-        // D2L Valence API authentication
-        Ok(()) // Placeholder implementation
+        Err(LMSError::ConfigurationError(
+            "D2L/Brightspace (Valence API) integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_schoology(&self) -> Result<(), LMSError> {
-        // Schoology API authentication
-        Ok(()) // Placeholder implementation
+        Err(LMSError::ConfigurationError(
+            "Schoology integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_sakai(&self) -> Result<(), LMSError> {
-        // Sakai API authentication
-        Ok(()) // Placeholder implementation
+        Err(LMSError::ConfigurationError(
+            "Sakai integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_custom(&self) -> Result<(), LMSError> {
-        // Custom LMS authentication
-        Ok(()) // Placeholder implementation
+        Err(LMSError::ConfigurationError(
+            "custom LMS platforms have no built-in client; supply one via a platform-specific integration".to_string(),
+        ))
     }
 
     // Platform-specific course retrieval methods
+    #[cfg(feature = "microservices")]
     async fn get_canvas_course(&self, course_id: &str) -> Result<LMSCourse, LMSError> {
         let url = format!("{}/api/v1/courses/{}", self.config.base_url, course_id);
 
-        // Simulate API call
-        Ok(LMSCourse {
-            id: course_id.to_string(),
-            name: "Speech Communication 101".to_string(),
-            course_code: "COMM101".to_string(),
-            term: "Fall 2024".to_string(),
-            start_date: Some(SystemTime::now()),
-            end_date: None,
-            enrollment_term_id: Some("123".to_string()),
-            published: true,
-        })
+        let response = self
+            .http_client
+            .get(&url)
+            .bearer_auth(&self.config.api_key)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+
+        if response.status().as_u16() == 404 {
+            return Err(LMSError::CourseNotFound(course_id.to_string()));
+        }
+        let response = ensure_lms_success(response).await?;
+        let data: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| LMSError::NetworkError(format!("failed to parse Canvas course: {e}")))?;
+        parse_canvas_course(&data, course_id)
     }
 
-    async fn get_blackboard_course(&self, course_id: &str) -> Result<LMSCourse, LMSError> {
-        // Blackboard course retrieval
-        Ok(LMSCourse {
-            id: course_id.to_string(),
-            name: "Public Speaking".to_string(),
-            course_code: "SPCH101".to_string(),
-            term: "Fall 2024".to_string(),
-            start_date: Some(SystemTime::now()),
-            end_date: None,
-            enrollment_term_id: None,
-            published: true,
-        })
+    #[cfg(not(feature = "microservices"))]
+    async fn get_canvas_course(&self, _course_id: &str) -> Result<LMSCourse, LMSError> {
+        Err(feature_disabled_error())
     }
 
+    #[cfg(feature = "microservices")]
+    async fn get_blackboard_course(&self, _course_id: &str) -> Result<LMSCourse, LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Blackboard course retrieval is not yet implemented (only OAuth2 authentication is)"
+                .to_string(),
+        ))
+    }
+
+    #[cfg(not(feature = "microservices"))]
+    async fn get_blackboard_course(&self, _course_id: &str) -> Result<LMSCourse, LMSError> {
+        Err(feature_disabled_error())
+    }
+
+    #[cfg(feature = "microservices")]
     async fn get_moodle_course(&self, course_id: &str) -> Result<LMSCourse, LMSError> {
-        // Moodle course retrieval
-        Ok(LMSCourse {
-            id: course_id.to_string(),
-            name: "Pronunciation Practice".to_string(),
-            course_code: "PRON101".to_string(),
-            term: "Fall 2024".to_string(),
-            start_date: Some(SystemTime::now()),
-            end_date: None,
-            enrollment_term_id: None,
-            published: true,
-        })
+        let url = format!(
+            "{}/webservice/rest/server.php?wstoken={}&wsfunction=core_course_get_courses&moodlewsrestformat=json&options[ids][0]={}",
+            self.config.base_url,
+            urlencoding::encode(&self.config.api_key),
+            urlencoding::encode(course_id),
+        );
+
+        let response = self
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+
+        let response = ensure_lms_success(response).await?;
+        let data: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| LMSError::NetworkError(format!("failed to parse Moodle course: {e}")))?;
+        check_moodle_exception(&data)?;
+
+        let course_value = data
+            .as_array()
+            .and_then(|arr| arr.first())
+            .ok_or_else(|| LMSError::CourseNotFound(course_id.to_string()))?;
+        parse_moodle_course(course_value, course_id)
+    }
+
+    #[cfg(not(feature = "microservices"))]
+    async fn get_moodle_course(&self, _course_id: &str) -> Result<LMSCourse, LMSError> {
+        Err(feature_disabled_error())
     }
 
     // Platform-specific student retrieval methods
+    #[cfg(feature = "microservices")]
     async fn get_canvas_students(&self, course_id: &str) -> Result<Vec<LMSStudent>, LMSError> {
-        // Canvas student list retrieval
-        Ok(vec![LMSStudent {
-            id: "1001".to_string(),
-            external_id: Some("ext_1001".to_string()),
-            name: "John Doe".to_string(),
-            email: "john.doe@university.edu".to_string(),
-            course_id: course_id.to_string(),
-            enrollment_status: "active".to_string(),
-            role: "student".to_string(),
-        }])
+        let url = format!(
+            "{}/api/v1/courses/{}/students?include[]=email&per_page=100",
+            self.config.base_url, course_id
+        );
+
+        let response = self
+            .http_client
+            .get(&url)
+            .bearer_auth(&self.config.api_key)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+
+        if response.status().as_u16() == 404 {
+            return Err(LMSError::CourseNotFound(course_id.to_string()));
+        }
+        let response = ensure_lms_success(response).await?;
+        let data: Vec<serde_json::Value> = response.json().await.map_err(|e| {
+            LMSError::NetworkError(format!("failed to parse Canvas students response: {e}"))
+        })?;
+
+        data.iter()
+            .map(|value| parse_canvas_student(value, course_id))
+            .collect()
     }
 
-    async fn get_blackboard_students(&self, course_id: &str) -> Result<Vec<LMSStudent>, LMSError> {
-        // Blackboard student list retrieval
-        Ok(vec![])
+    #[cfg(not(feature = "microservices"))]
+    async fn get_canvas_students(&self, _course_id: &str) -> Result<Vec<LMSStudent>, LMSError> {
+        Err(feature_disabled_error())
     }
 
-    async fn get_moodle_students(&self, course_id: &str) -> Result<Vec<LMSStudent>, LMSError> {
-        // Moodle student list retrieval
-        Ok(vec![])
+    async fn get_blackboard_students(&self, _course_id: &str) -> Result<Vec<LMSStudent>, LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Blackboard student roster retrieval is not yet implemented".to_string(),
+        ))
+    }
+
+    async fn get_moodle_students(&self, _course_id: &str) -> Result<Vec<LMSStudent>, LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Moodle student roster retrieval is not yet implemented".to_string(),
+        ))
     }
 
     // Platform-specific assignment retrieval methods
+    #[cfg(feature = "microservices")]
     async fn get_canvas_assignments(
         &self,
         course_id: &str,
     ) -> Result<Vec<LMSAssignment>, LMSError> {
-        // Canvas assignment retrieval
-        Ok(vec![LMSAssignment {
-            id: "assign_001".to_string(),
-            name: "Pronunciation Assessment".to_string(),
-            description: "Complete pronunciation exercises using VoiRS".to_string(),
-            course_id: course_id.to_string(),
-            max_points: 100.0,
-            due_date: None,
-            published: true,
-            submission_types: vec!["online_upload".to_string()],
-            grading_criteria: vec![
-                GradingCriterion {
-                    name: "Pronunciation Accuracy".to_string(),
-                    description: "Accuracy of pronunciation".to_string(),
-                    points: 40.0,
-                    focus_area: Some(FocusArea::Pronunciation),
-                },
-                GradingCriterion {
-                    name: "Fluency".to_string(),
-                    description: "Speech fluency and rhythm".to_string(),
-                    points: 30.0,
-                    focus_area: Some(FocusArea::Fluency),
-                },
-                GradingCriterion {
-                    name: "Intonation".to_string(),
-                    description: "Natural intonation patterns".to_string(),
-                    points: 30.0,
-                    focus_area: Some(FocusArea::Intonation),
-                },
-            ],
-        }])
+        let url = format!(
+            "{}/api/v1/courses/{}/assignments?include[]=rubric&per_page=100",
+            self.config.base_url, course_id
+        );
+
+        let response = self
+            .http_client
+            .get(&url)
+            .bearer_auth(&self.config.api_key)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+
+        if response.status().as_u16() == 404 {
+            return Err(LMSError::CourseNotFound(course_id.to_string()));
+        }
+        let response = ensure_lms_success(response).await?;
+        let data: Vec<serde_json::Value> = response.json().await.map_err(|e| {
+            LMSError::NetworkError(format!("failed to parse Canvas assignments response: {e}"))
+        })?;
+
+        data.iter()
+            .map(|value| parse_canvas_assignment(value, course_id))
+            .collect()
+    }
+
+    #[cfg(not(feature = "microservices"))]
+    async fn get_canvas_assignments(
+        &self,
+        _course_id: &str,
+    ) -> Result<Vec<LMSAssignment>, LMSError> {
+        Err(feature_disabled_error())
     }
 
     async fn get_blackboard_assignments(
         &self,
-        course_id: &str,
+        _course_id: &str,
     ) -> Result<Vec<LMSAssignment>, LMSError> {
-        // Blackboard assignment retrieval
-        Ok(vec![])
+        Err(LMSError::ConfigurationError(
+            "Blackboard assignment retrieval is not yet implemented".to_string(),
+        ))
     }
 
     async fn get_moodle_assignments(
         &self,
-        course_id: &str,
+        _course_id: &str,
     ) -> Result<Vec<LMSAssignment>, LMSError> {
-        // Moodle assignment retrieval
-        Ok(vec![])
+        Err(LMSError::ConfigurationError(
+            "Moodle assignment retrieval is not yet implemented".to_string(),
+        ))
     }
 
     // Platform-specific grade submission methods
+    #[cfg(feature = "microservices")]
     async fn submit_canvas_grade(&self, submission: &GradeSubmission) -> Result<(), LMSError> {
+        // Canvas grade passback: PUT .../submissions/:user_id with the grade
+        // and (optional) comment as form-encoded nested params.
         let url = format!(
             "{}/api/v1/courses/{}/assignments/{}/submissions/{}",
             self.config.base_url,
-            self.extract_course_id(&submission.assignment_id)?,
+            submission.course_id,
             submission.assignment_id,
             submission.student_id
         );
 
-        // Simulate grade submission
+        let mut form: Vec<(&str, String)> =
+            vec![("submission[posted_grade]", submission.score.to_string())];
+        if let Some(comment) = &submission.comment {
+            form.push(("comment[text_comment]", comment.clone()));
+        }
+
+        let response = self
+            .http_client
+            .put(&url)
+            .bearer_auth(&self.config.api_key)
+            .form(&form)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+
+        ensure_lms_success(response).await?;
         Ok(())
     }
 
-    async fn submit_blackboard_grade(&self, submission: &GradeSubmission) -> Result<(), LMSError> {
-        // Blackboard grade submission
-        Ok(())
+    #[cfg(not(feature = "microservices"))]
+    async fn submit_canvas_grade(&self, _submission: &GradeSubmission) -> Result<(), LMSError> {
+        Err(feature_disabled_error())
     }
 
-    async fn submit_moodle_grade(&self, submission: &GradeSubmission) -> Result<(), LMSError> {
-        // Moodle grade submission
-        Ok(())
+    async fn submit_blackboard_grade(&self, _submission: &GradeSubmission) -> Result<(), LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Blackboard grade passback is not yet implemented".to_string(),
+        ))
+    }
+
+    async fn submit_moodle_grade(&self, _submission: &GradeSubmission) -> Result<(), LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Moodle grade passback is not yet implemented".to_string(),
+        ))
     }
 
     // Progress report submission methods
+    #[cfg(feature = "microservices")]
     async fn submit_canvas_progress(&self, report: &LMSProgressReport) -> Result<(), LMSError> {
-        // Submit progress report to Canvas (could be via custom field or comment)
+        // Canvas has no first-class "progress report" resource; deliver it
+        // as a real Conversations message to the student, which is a
+        // documented, genuine Canvas API action.
+        let url = format!("{}/api/v1/conversations", self.config.base_url);
+        let body = format_progress_report_message(report);
+
+        let form: Vec<(&str, String)> = vec![
+            ("recipients[]", report.student_id.clone()),
+            ("subject", "VoiRS Progress Report".to_string()),
+            ("body", body),
+        ];
+
+        let response = self
+            .http_client
+            .post(&url)
+            .bearer_auth(&self.config.api_key)
+            .form(&form)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_reqwest_err)?;
+
+        ensure_lms_success(response).await?;
         Ok(())
     }
 
-    async fn submit_blackboard_progress(&self, report: &LMSProgressReport) -> Result<(), LMSError> {
-        // Submit progress report to Blackboard
-        Ok(())
+    #[cfg(not(feature = "microservices"))]
+    async fn submit_canvas_progress(&self, _report: &LMSProgressReport) -> Result<(), LMSError> {
+        Err(feature_disabled_error())
     }
 
-    async fn submit_moodle_progress(&self, report: &LMSProgressReport) -> Result<(), LMSError> {
-        // Submit progress report to Moodle
-        Ok(())
+    async fn submit_blackboard_progress(
+        &self,
+        _report: &LMSProgressReport,
+    ) -> Result<(), LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Blackboard progress reporting is not yet implemented".to_string(),
+        ))
+    }
+
+    async fn submit_moodle_progress(&self, _report: &LMSProgressReport) -> Result<(), LMSError> {
+        Err(LMSError::ConfigurationError(
+            "Moodle progress reporting is not yet implemented".to_string(),
+        ))
     }
 
     // Utility methods
@@ -858,28 +1060,284 @@ impl LMSIntegrationManager {
 
         Ok(())
     }
+}
 
-    fn extract_course_id(&self, assignment_id: &str) -> Result<&str, LMSError> {
-        // In real implementation, this would extract course ID from assignment ID
-        // For now, return a placeholder
-        Ok("course_123")
+/// Build the error returned by every real-platform method when the crate is
+/// compiled without the `microservices` feature (no HTTP client available).
+#[cfg(feature = "microservices")]
+fn feature_disabled_error() -> LMSError {
+    LMSError::ConfigurationError(
+        "the `microservices` feature (reqwest HTTP client) is not enabled".to_string(),
+    )
+}
+
+/// Map a [`reqwest::Error`] to the appropriate [`LMSError`], distinguishing
+/// timeouts from other transport failures.
+#[cfg(feature = "microservices")]
+fn map_reqwest_err(e: reqwest::Error) -> LMSError {
+    if e.is_timeout() {
+        LMSError::ConnectionTimeout
+    } else {
+        LMSError::NetworkError(e.to_string())
+    }
+}
+
+/// Turn a non-2xx response into a typed [`LMSError`], carrying the real
+/// response body instead of discarding it.
+#[cfg(feature = "microservices")]
+async fn ensure_lms_success(response: reqwest::Response) -> Result<reqwest::Response, LMSError> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    Err(match status.as_u16() {
+        401 | 403 => LMSError::AuthenticationFailed(format!("HTTP {status}: {body}")),
+        429 => LMSError::RateLimitExceeded,
+        _ => LMSError::NetworkError(format!("HTTP {status}: {body}")),
+    })
+}
+
+/// Moodle web services report failures as HTTP 200 responses whose JSON
+/// body contains an `exception` object rather than using HTTP status codes.
+#[cfg(feature = "microservices")]
+fn check_moodle_exception(value: &serde_json::Value) -> Result<(), LMSError> {
+    if value.get("exception").is_some() {
+        let message = value["message"]
+            .as_str()
+            .unwrap_or("Moodle web service returned an exception")
+            .to_string();
+        return Err(LMSError::AuthenticationFailed(message));
+    }
+    Ok(())
+}
+
+/// Convert a JSON id field to a `String`, accepting either a JSON string
+/// (Moodle, most REST APIs) or a bare number (Canvas returns numeric IDs).
+#[cfg(feature = "microservices")]
+fn json_number_or_string(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(std::string::ToString::to_string)
+        .or_else(|| value.as_u64().map(|n| n.to_string()))
+        .or_else(|| value.as_i64().map(|n| n.to_string()))
+}
+
+/// Parse an ISO 8601 / RFC 3339 timestamp (Canvas's wire format for
+/// `*_at` fields) into a [`SystemTime`], if present and well-formed.
+#[cfg(feature = "microservices")]
+fn parse_iso8601(value: &serde_json::Value) -> Option<SystemTime> {
+    let raw = value.as_str()?;
+    let dt = chrono::DateTime::parse_from_rfc3339(raw).ok()?;
+    let secs = dt.timestamp();
+    if secs < 0 {
+        return None;
+    }
+    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64))
+}
+
+/// Parse a Canvas `Course` JSON object.
+///
+/// <https://canvas.instructure.com/doc/api/courses.html>
+#[cfg(feature = "microservices")]
+fn parse_canvas_course(
+    value: &serde_json::Value,
+    fallback_id: &str,
+) -> Result<LMSCourse, LMSError> {
+    let id = json_number_or_string(&value["id"]).unwrap_or_else(|| fallback_id.to_string());
+    let name = value["name"]
+        .as_str()
+        .ok_or_else(|| {
+            LMSError::DataValidationError(format!("Canvas course {id} response is missing 'name'"))
+        })?
+        .to_string();
+
+    Ok(LMSCourse {
+        id,
+        name,
+        course_code: value["course_code"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        term: value["term"]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        start_date: parse_iso8601(&value["start_at"]),
+        end_date: parse_iso8601(&value["end_at"]),
+        enrollment_term_id: json_number_or_string(&value["enrollment_term_id"]),
+        published: value["workflow_state"].as_str() == Some("available"),
+    })
+}
+
+/// Parse a Canvas `User` JSON object as returned from the
+/// `/courses/:id/students` endpoint.
+#[cfg(feature = "microservices")]
+fn parse_canvas_student(
+    value: &serde_json::Value,
+    course_id: &str,
+) -> Result<LMSStudent, LMSError> {
+    let id = json_number_or_string(&value["id"]).ok_or_else(|| {
+        LMSError::DataValidationError("Canvas student response is missing 'id'".to_string())
+    })?;
+    let name = value["name"]
+        .as_str()
+        .ok_or_else(|| {
+            LMSError::DataValidationError(format!("Canvas student {id} is missing 'name'"))
+        })?
+        .to_string();
+
+    Ok(LMSStudent {
+        id,
+        external_id: value["sis_user_id"].as_str().map(String::from),
+        name,
+        // Only present when the request includes `?include[]=email` and the
+        // caller has permission to view it.
+        email: value["email"].as_str().unwrap_or_default().to_string(),
+        course_id: course_id.to_string(),
+        // This endpoint only ever returns actively-enrolled students, and by
+        // definition every entry it returns is a student.
+        enrollment_status: "active".to_string(),
+        role: "student".to_string(),
+    })
+}
+
+/// Parse a Canvas `Assignment` JSON object.
+///
+/// <https://canvas.instructure.com/doc/api/assignments.html>
+#[cfg(feature = "microservices")]
+fn parse_canvas_assignment(
+    value: &serde_json::Value,
+    course_id: &str,
+) -> Result<LMSAssignment, LMSError> {
+    let id = json_number_or_string(&value["id"]).ok_or_else(|| {
+        LMSError::DataValidationError("Canvas assignment response is missing 'id'".to_string())
+    })?;
+    let name = value["name"]
+        .as_str()
+        .ok_or_else(|| {
+            LMSError::DataValidationError(format!("Canvas assignment {id} is missing 'name'"))
+        })?
+        .to_string();
+
+    let submission_types = value["submission_types"]
+        .as_array()
+        .map(|types| {
+            types
+                .iter()
+                .filter_map(|t| t.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Only present when the request includes `?include[]=rubric`; genuinely
+    // absent otherwise, so an empty list (not a fabricated default rubric)
+    // is the honest result.
+    let grading_criteria = value["rubric"]
+        .as_array()
+        .map(|criteria| {
+            criteria
+                .iter()
+                .filter_map(|c| {
+                    Some(GradingCriterion {
+                        name: c["description"].as_str()?.to_string(),
+                        description: c["long_description"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        points: c["points"].as_f64().unwrap_or(0.0),
+                        // Canvas has no concept of VoiRS focus areas.
+                        focus_area: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(LMSAssignment {
+        id,
+        name,
+        description: value["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        course_id: course_id.to_string(),
+        max_points: value["points_possible"].as_f64().unwrap_or(0.0),
+        due_date: parse_iso8601(&value["due_at"]),
+        published: value["published"].as_bool().unwrap_or(false),
+        submission_types,
+        grading_criteria,
+    })
+}
+
+/// Parse a Moodle `core_course_get_courses` course entry.
+///
+/// <https://docs.moodle.org/dev/Web_service_API_functions#core_course_get_courses>
+#[cfg(feature = "microservices")]
+fn parse_moodle_course(
+    value: &serde_json::Value,
+    fallback_id: &str,
+) -> Result<LMSCourse, LMSError> {
+    let id = json_number_or_string(&value["id"]).unwrap_or_else(|| fallback_id.to_string());
+    let name = value["fullname"]
+        .as_str()
+        .ok_or_else(|| {
+            LMSError::DataValidationError(format!(
+                "Moodle course {id} response is missing 'fullname'"
+            ))
+        })?
+        .to_string();
+
+    let unix_time = |field: &serde_json::Value| {
+        field
+            .as_u64()
+            .filter(|&secs| secs > 0)
+            .map(|secs| SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    };
+
+    Ok(LMSCourse {
+        id,
+        name,
+        course_code: value["shortname"].as_str().unwrap_or_default().to_string(),
+        // Moodle has no separate "term" concept on this resource.
+        term: String::new(),
+        start_date: unix_time(&value["startdate"]),
+        end_date: unix_time(&value["enddate"]),
+        enrollment_term_id: None,
+        published: value["visible"].as_u64().is_none_or(|v| v == 1),
+    })
+}
+
+/// Render a [`LMSProgressReport`] as a human-readable message body for
+/// delivery through an LMS messaging endpoint (e.g. Canvas Conversations).
+#[cfg(feature = "microservices")]
+fn format_progress_report_message(report: &LMSProgressReport) -> String {
+    let mut lines = vec![
+        "VoiRS Progress Report".to_string(),
+        format!(
+            "Overall progress: {:.1}% ({} sessions, {} minutes)",
+            report.overall_progress * 100.0,
+            report.sessions_completed,
+            report.time_spent_minutes
+        ),
+        format!("Completion: {:.1}%", report.completion_percentage),
+    ];
+
+    if !report.skill_breakdown.is_empty() {
+        lines.push("Skill breakdown:".to_string());
+        for (area, score) in &report.skill_breakdown {
+            lines.push(format!("  - {area:?}: {:.1}%", score * 100.0));
+        }
     }
 
-    // Placeholder HTTP request methods
-    async fn make_canvas_request(&self, url: &str) -> Result<String, String> {
-        // Simulate successful authentication
-        Ok("Canvas authenticated".to_string())
+    if !report.achievements.is_empty() {
+        lines.push("Achievements:".to_string());
+        for achievement in &report.achievements {
+            lines.push(format!("  - {achievement}"));
+        }
     }
 
-    async fn make_blackboard_oauth_request(&self, url: &str) -> Result<String, String> {
-        // Simulate successful OAuth
-        Ok("Blackboard authenticated".to_string())
-    }
-
-    async fn make_moodle_request(&self, url: &str, function: &str) -> Result<String, String> {
-        // Simulate successful Moodle request
-        Ok("Moodle authenticated".to_string())
-    }
+    lines.join("\n")
 }
 
 /// Rate limiter for API requests
@@ -983,6 +1441,7 @@ mod tests {
 
         let valid_submission = GradeSubmission {
             student_id: "123".to_string(),
+            course_id: "789".to_string(),
             assignment_id: "456".to_string(),
             score: 85.0,
             max_score: 100.0,
@@ -995,6 +1454,7 @@ mod tests {
 
         let invalid_submission = GradeSubmission {
             student_id: "".to_string(),
+            course_id: "789".to_string(),
             assignment_id: "456".to_string(),
             score: 85.0,
             max_score: 100.0,
@@ -1043,5 +1503,274 @@ mod tests {
         let cached_course = cache.get_course("123");
         assert!(cached_course.is_some());
         assert_eq!(cached_course.unwrap().name, "Test Course");
+    }
+
+    // --- Fail-closed behavior -------------------------------------------
+
+    #[tokio::test]
+    async fn test_unconfigured_manager_fails_closed_without_network() {
+        // Default config has an empty base_url/api_key: every real entry
+        // point must reject the call locally, never attempt a request nor
+        // fabricate a success.
+        let mut manager = LMSIntegrationManager::new(LMSAuthConfig::default());
+
+        assert!(matches!(
+            manager.authenticate().await,
+            Err(LMSError::ConfigurationError(_))
+        ));
+        assert!(matches!(
+            manager.get_course("123").await,
+            Err(LMSError::ConfigurationError(_))
+        ));
+        assert!(matches!(
+            manager.get_course_students("123").await,
+            Err(LMSError::ConfigurationError(_))
+        ));
+        assert!(matches!(
+            manager.get_course_assignments("123").await,
+            Err(LMSError::ConfigurationError(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_unimplemented_platforms_fail_closed_not_ok() {
+        for platform in [
+            LMSPlatform::D2L,
+            LMSPlatform::Schoology,
+            LMSPlatform::Sakai,
+            LMSPlatform::Custom("Acme LMS".to_string()),
+        ] {
+            let config = LMSAuthConfig {
+                platform,
+                api_key: "key".to_string(),
+                base_url: "https://lms.example.com".to_string(),
+                ..LMSAuthConfig::default()
+            };
+            let mut manager = LMSIntegrationManager::new(config);
+            let result = manager.authenticate().await;
+            assert!(
+                result.is_err(),
+                "unimplemented platform must never report Ok"
+            );
+        }
+    }
+
+    #[test]
+    fn test_session_to_grade_submission_uses_assignment_course_id() {
+        let config = LMSAuthConfig::default();
+        let manager = LMSIntegrationManager::new(config);
+
+        let assignment = LMSAssignment {
+            id: "assign-1".to_string(),
+            name: "Test".to_string(),
+            description: String::new(),
+            course_id: "course-77".to_string(),
+            max_points: 100.0,
+            due_date: None,
+            published: true,
+            submission_types: vec![],
+            grading_criteria: vec![],
+        };
+        let session = LMSSession {
+            timestamp: SystemTime::now(),
+            duration: Duration::from_secs(120),
+            score: None,
+            feedback: vec![],
+        };
+
+        let submission = manager
+            .session_to_grade_submission("student-1", "assign-1", &session, &assignment)
+            .unwrap();
+
+        assert_eq!(submission.course_id, "course-77");
+        assert_eq!(submission.assignment_id, "assign-1");
+    }
+
+    // --- Real response parsing (offline, JSON fixtures) ------------------
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_canvas_course_from_real_response_shape() {
+        let value = serde_json::json!({
+            "id": 12345,
+            "name": "Speech Communication 101",
+            "course_code": "COMM101",
+            "workflow_state": "available",
+            "term": { "name": "Fall 2024" },
+            "start_at": "2024-08-26T00:00:00Z",
+            "end_at": null,
+            "enrollment_term_id": 42
+        });
+
+        let course = parse_canvas_course(&value, "unused").unwrap();
+        assert_eq!(course.id, "12345");
+        assert_eq!(course.name, "Speech Communication 101");
+        assert_eq!(course.course_code, "COMM101");
+        assert_eq!(course.term, "Fall 2024");
+        assert!(course.published);
+        assert!(course.start_date.is_some());
+        assert_eq!(course.enrollment_term_id.as_deref(), Some("42"));
+
+        // A different response must produce genuinely different data.
+        let other = serde_json::json!({
+            "id": 999,
+            "name": "Advanced Diction",
+            "workflow_state": "unpublished",
+            "course_code": "DICT200"
+        });
+        let other_course = parse_canvas_course(&other, "unused").unwrap();
+        assert_ne!(course.name, other_course.name);
+        assert!(!other_course.published);
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_canvas_student_from_real_response_shape() {
+        let value = serde_json::json!({
+            "id": 1001,
+            "name": "Grace Hopper",
+            "email": "grace@example.edu",
+            "sis_user_id": "sis-1001"
+        });
+
+        let student = parse_canvas_student(&value, "course-1").unwrap();
+        assert_eq!(student.id, "1001");
+        assert_eq!(student.name, "Grace Hopper");
+        assert_eq!(student.email, "grace@example.edu");
+        assert_eq!(student.course_id, "course-1");
+        assert_eq!(student.role, "student");
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_canvas_assignment_with_rubric() {
+        let value = serde_json::json!({
+            "id": 55,
+            "name": "Pronunciation Assessment",
+            "description": "Read the passage aloud",
+            "points_possible": 100.0,
+            "published": true,
+            "submission_types": ["online_upload", "media_recording"],
+            "due_at": "2024-09-01T23:59:00Z",
+            "rubric": [
+                { "description": "Clarity", "long_description": "How clear", "points": 40.0 },
+                { "description": "Fluency", "points": 60.0 }
+            ]
+        });
+
+        let assignment = parse_canvas_assignment(&value, "course-9").unwrap();
+        assert_eq!(assignment.id, "55");
+        assert_eq!(assignment.course_id, "course-9");
+        assert_eq!(assignment.max_points, 100.0);
+        assert_eq!(assignment.submission_types.len(), 2);
+        assert_eq!(assignment.grading_criteria.len(), 2);
+        assert_eq!(assignment.grading_criteria[0].name, "Clarity");
+        assert!(assignment.due_date.is_some());
+
+        // No rubric included: honest empty list, not a fabricated default.
+        let no_rubric = serde_json::json!({
+            "id": 56,
+            "name": "Untitled",
+            "points_possible": 10.0
+        });
+        let assignment2 = parse_canvas_assignment(&no_rubric, "course-9").unwrap();
+        assert!(assignment2.grading_criteria.is_empty());
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_canvas_course_missing_name_fails_closed() {
+        let value = serde_json::json!({ "id": 1, "workflow_state": "available" });
+        assert!(matches!(
+            parse_canvas_course(&value, "1"),
+            Err(LMSError::DataValidationError(_))
+        ));
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_moodle_course_from_real_response_shape() {
+        let value = serde_json::json!({
+            "id": 7,
+            "fullname": "Pronunciation Practice",
+            "shortname": "PRON101",
+            "startdate": 1_704_067_200_u64,
+            "enddate": 0,
+            "visible": 1
+        });
+
+        let course = parse_moodle_course(&value, "unused").unwrap();
+        assert_eq!(course.id, "7");
+        assert_eq!(course.name, "Pronunciation Practice");
+        assert_eq!(course.course_code, "PRON101");
+        assert!(course.published);
+        assert!(course.start_date.is_some());
+        // enddate of 0 means "no end date" per Moodle's convention.
+        assert!(course.end_date.is_none());
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_check_moodle_exception_detects_embedded_errors() {
+        let error_body = serde_json::json!({
+            "exception": "moodle_exception",
+            "errorcode": "invalidtoken",
+            "message": "Invalid token - token not found"
+        });
+        let result = check_moodle_exception(&error_body);
+        assert!(
+            matches!(result, Err(LMSError::AuthenticationFailed(msg)) if msg.contains("Invalid token"))
+        );
+
+        let ok_body = serde_json::json!({ "sitename": "Test Site" });
+        assert!(check_moodle_exception(&ok_body).is_ok());
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_json_number_or_string() {
+        assert_eq!(
+            json_number_or_string(&serde_json::json!(42)),
+            Some("42".to_string())
+        );
+        assert_eq!(
+            json_number_or_string(&serde_json::json!("abc")),
+            Some("abc".to_string())
+        );
+        assert_eq!(json_number_or_string(&serde_json::json!(null)), None);
+    }
+
+    /// Live end-to-end tests are opt-in: set `VOIRS_TEST_CANVAS_BASE_URL`
+    /// and `VOIRS_TEST_CANVAS_TOKEN` (and optionally
+    /// `VOIRS_TEST_CANVAS_COURSE_ID`) to exercise this against a real Canvas
+    /// instance. The default offline test run never touches the network.
+    #[cfg(feature = "microservices")]
+    #[tokio::test]
+    async fn test_canvas_get_course_live() {
+        let (Ok(base_url), Ok(api_key)) = (
+            std::env::var("VOIRS_TEST_CANVAS_BASE_URL"),
+            std::env::var("VOIRS_TEST_CANVAS_TOKEN"),
+        ) else {
+            eprintln!(
+                "skipping test_canvas_get_course_live: set VOIRS_TEST_CANVAS_BASE_URL and \
+                 VOIRS_TEST_CANVAS_TOKEN to run this against a real Canvas instance"
+            );
+            return;
+        };
+        let course_id =
+            std::env::var("VOIRS_TEST_CANVAS_COURSE_ID").unwrap_or_else(|_| "1".to_string());
+
+        let config = LMSAuthConfig {
+            platform: LMSPlatform::Canvas,
+            api_key,
+            base_url,
+            ..LMSAuthConfig::default()
+        };
+        let mut manager = LMSIntegrationManager::new(config);
+        let course = manager
+            .get_course(&course_id)
+            .await
+            .expect("live Canvas API call should succeed with a valid token");
+        assert_eq!(course.id, course_id);
     }
 }

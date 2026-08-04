@@ -572,41 +572,113 @@ impl PyStatisticalAnalyzer {
     }
 }
 
-/// Python wrapper for pronunciation evaluator (simplified)
+/// Python wrapper for the real pronunciation evaluator
+/// ([`crate::pronunciation::PronunciationEvaluatorImpl`]).
+///
+/// Mirrors the [`PyQualityEvaluator`] pattern: construction is cheap (no I/O), but the
+/// evaluator itself is built lazily via [`PyPronunciationEvaluator::initialize`] (it
+/// owns a G2P converter) and each synchronous `evaluate` call drives the crate's
+/// async pronunciation-evaluation pipeline on a dedicated Tokio runtime.
 #[cfg(feature = "python")]
 #[pyclass]
-pub struct PyPronunciationEvaluator;
+pub struct PyPronunciationEvaluator {
+    /// Internal pronunciation evaluator, `None` until `initialize()` is called.
+    evaluator: Option<crate::pronunciation::PronunciationEvaluatorImpl>,
+}
 
 #[cfg(feature = "python")]
 #[pymethods]
 impl PyPronunciationEvaluator {
-    /// Create a new pronunciation evaluator
+    /// Create a new (uninitialized) pronunciation evaluator
     #[new]
     pub fn new() -> Self {
-        Self
+        Self { evaluator: None }
     }
 
-    /// Evaluate pronunciation from audio and reference text
+    /// Initialize the evaluator (call this once after construction, before `evaluate`)
+    pub fn initialize(&mut self) -> PyResult<()> {
+        let rt = tokio::runtime::Runtime::new().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to create async runtime: {}",
+                e
+            ))
+        })?;
+        let evaluator = rt
+            .block_on(async { crate::pronunciation::PronunciationEvaluatorImpl::new().await })
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Failed to initialize evaluator: {}",
+                    e
+                ))
+            })?;
+        self.evaluator = Some(evaluator);
+        Ok(())
+    }
+
+    /// Evaluate pronunciation from audio and reference text using the real
+    /// forced-alignment + acoustic-confidence pipeline
+    /// ([`crate::traits::PronunciationEvaluator::evaluate_pronunciation`]).
     pub fn evaluate(
         &self,
         audio: PyReadonlyArray1<f32>,
         reference_text: String,
         sample_rate: u32,
     ) -> PyResult<PyPronunciationResult> {
+        let evaluator = self.evaluator.as_ref().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "Evaluator not initialized. Call initialize() first.",
+            )
+        })?;
+
         let audio_array = audio.as_array();
         let samples: Vec<f32> = audio_array.to_vec();
-        let _audio_buffer = AudioBuffer::mono(samples, sample_rate);
+        let audio_buffer = AudioBuffer::mono(samples, sample_rate);
 
-        // Placeholder implementation
-        let _text_len = reference_text.len() as f32;
+        let rt = tokio::runtime::Runtime::new().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to create async runtime: {}",
+                e
+            ))
+        })?;
+        let score = rt
+            .block_on(async {
+                use crate::traits::PronunciationEvaluator as _;
+                evaluator
+                    .evaluate_pronunciation(&audio_buffer, &reference_text, None)
+                    .await
+            })
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Pronunciation evaluation failed: {}",
+                    e
+                ))
+            })?;
+
+        let phoneme_accuracy = if score.phoneme_scores.is_empty() {
+            score.overall_score
+        } else {
+            score.phoneme_scores.iter().map(|s| s.accuracy).sum::<f32>()
+                / score.phoneme_scores.len() as f32
+        };
+        // `PyPronunciationResult` has a single "prosody_score" field; average the
+        // three real prosody components the Rust API reports separately.
+        let prosody_score =
+            (score.rhythm_score + score.stress_accuracy + score.intonation_accuracy) / 3.0;
 
         Ok(PyPronunciationResult {
-            overall_score: 0.85,
-            phoneme_accuracy: 0.82,
-            fluency_score: 0.88,
-            prosody_score: 0.75,
-            confidence: 0.9,
+            overall_score: score.overall_score,
+            phoneme_accuracy,
+            fluency_score: score.fluency_score,
+            prosody_score,
+            confidence: score.confidence,
         })
+    }
+}
+
+#[cfg(feature = "python")]
+impl Default for PyPronunciationEvaluator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -722,5 +794,24 @@ mod tests {
         {
             python_bindings_not_available();
         }
+    }
+
+    /// `initialize()` must build a real `PronunciationEvaluatorImpl` (no I/O,
+    /// pure-Rust G2P) rather than leave `evaluate()` permanently unusable or
+    /// silently faking success. This does not exercise `evaluate()` itself, which
+    /// requires a live Python interpreter to construct the `PyReadonlyArray1`
+    /// argument (this crate does not enable pyo3's `auto-initialize` test feature);
+    /// `evaluate()`'s delegation to the real, audio-dependent
+    /// `PronunciationEvaluator::evaluate_pronunciation` is covered directly (without
+    /// the pyo3 layer) by the `pronunciation::functions::tests` regression tests.
+    #[cfg(feature = "python")]
+    #[test]
+    fn test_pronunciation_evaluator_initialize_builds_real_evaluator() {
+        let mut evaluator = PyPronunciationEvaluator::new();
+        assert!(evaluator.evaluator.is_none());
+        evaluator
+            .initialize()
+            .expect("initialize() should build a real PronunciationEvaluatorImpl");
+        assert!(evaluator.evaluator.is_some());
     }
 }

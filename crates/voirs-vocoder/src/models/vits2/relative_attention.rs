@@ -39,8 +39,11 @@ pub struct AttentionConfig {
     pub p_dropout: f32,
     /// Apply rotary position embeddings (RoPE) to the query and key projections
     ///
-    /// Requires an even `head_dim`. Can be combined with the learned relative
-    /// bias; both are position signals applied to different parts of the score.
+    /// Requires an even `head_dim`. **Mutually exclusive** with the learned
+    /// windowed relative bias: RoPE *replaces* it rather than stacking on top,
+    /// so [`RelativeMultiHeadAttention::new`] rejects a configuration that
+    /// requests both (`use_rope` together with `relative_attention` and a
+    /// non-zero `window_size`).
     #[serde(default)]
     pub use_rope: bool,
 }
@@ -60,6 +63,11 @@ pub struct AttentionConfig {
 /// `weight[h,i,m]` accumulates the attention mass that falls on relative offset
 /// `m`. The relative term is *added* to the content score, never substituted
 /// for it.
+///
+/// Rotary position embeddings are the alternative scheme: when
+/// [`AttentionConfig::use_rope`] is set, the query and key are rotated by their
+/// position before the content product and the learned windowed bias is
+/// disabled. The two are mutually exclusive and requesting both is an error.
 #[derive(Debug, Clone)]
 pub struct RelativeMultiHeadAttention {
     /// Configuration
@@ -128,6 +136,14 @@ impl RelativeMultiHeadAttention {
             return Err(VocoderError::ModelError(format!(
                 "Rotary position embeddings require an even head_dim (got {head_dim})"
             )));
+        }
+        if config.use_rope && config.relative_attention && config.window_size.unwrap_or(0) > 0 {
+            return Err(VocoderError::ModelError(
+                "use_rope and the learned windowed relative bias are mutually exclusive \
+                 relative-position schemes: set window_size = None / relative_attention = false \
+                 for rotary embeddings, or use_rope = false for the learned bias"
+                    .to_string(),
+            ));
         }
 
         let (emb_rel_k, emb_rel_v) = if config.relative_attention && window > 0 {

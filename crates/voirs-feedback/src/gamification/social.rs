@@ -26,6 +26,8 @@ pub struct SocialSystem {
     study_groups: HashMap<Uuid, StudyGroup>,
     /// Social network connections
     connections: HashMap<Uuid, Vec<SocialConnection>>,
+    /// Collaborative challenges
+    collaborative_challenges: HashMap<Uuid, CollaborativeChallenge>,
 }
 
 impl SocialSystem {
@@ -38,6 +40,7 @@ impl SocialSystem {
             forums: HashMap::new(),
             study_groups: HashMap::new(),
             connections: HashMap::new(),
+            collaborative_challenges: HashMap::new(),
         }
     }
 
@@ -79,43 +82,73 @@ impl SocialSystem {
         }
     }
 
-    /// Get peer comparison for user
+    /// Get peer comparison for user.
+    ///
+    /// `peer_progress` supplies each peer's *real*, caller-fetched
+    /// [`UserProgress`] (e.g. loaded from the persistence layer), keyed by
+    /// user id. A peer present in a shared group but absent from
+    /// `peer_progress` is honestly omitted from the result rather than
+    /// being replaced by a fabricated stand-in -- if none of the user's
+    /// group peers have real data available, this returns an empty
+    /// `Vec` rather than synthesizing comparisons.
     #[must_use]
     pub fn get_peer_comparison(
         &self,
         user_id: Uuid,
         user_progress: &UserProgress,
+        peer_progress: &HashMap<Uuid, UserProgress>,
     ) -> Vec<PeerComparison> {
         let mut comparisons = Vec::new();
 
         // Find all groups user belongs to
         for group in self.peer_groups.values() {
-            if group.members.contains(&user_id) {
-                for &peer_id in &group.members {
-                    if peer_id != user_id {
-                        // Generate simulated peer progress for demonstration
-                        // In production, this would fetch from database
-                        let peer_progress =
-                            self.generate_simulated_peer_progress(peer_id, user_progress);
-                        let peer_comparison = PeerComparison {
-                            peer_id,
-                            peer_name: format!("User_{}", peer_id.simple()),
-                            user_rank: self.calculate_rank_in_group(user_id, group),
-                            peer_rank: self.calculate_rank_in_group(peer_id, group),
-                            metrics: self.compare_metrics(user_progress, &peer_progress),
-                            improvement_suggestions: self
-                                .generate_improvement_suggestions(user_progress),
-                        };
-                        comparisons.push(peer_comparison);
-                    }
+            if !group.members.contains(&user_id) {
+                continue;
+            }
+            for &peer_id in &group.members {
+                if peer_id == user_id {
+                    continue;
                 }
+                // Only compare against peers we have real, caller-supplied
+                // progress data for -- never a fabricated stand-in.
+                let Some(peer) = peer_progress.get(&peer_id) else {
+                    continue;
+                };
+
+                let peer_comparison = PeerComparison {
+                    peer_id,
+                    peer_name: Self::display_name(&peer.user_id, peer_id, "User"),
+                    user_rank: Self::rank_in_group(
+                        group,
+                        user_id,
+                        user_id,
+                        user_progress,
+                        peer_progress,
+                    ),
+                    peer_rank: Self::rank_in_group(
+                        group,
+                        peer_id,
+                        user_id,
+                        user_progress,
+                        peer_progress,
+                    ),
+                    metrics: self.compare_metrics(user_progress, peer),
+                    improvement_suggestions: Self::generate_improvement_suggestions(user_progress),
+                };
+                comparisons.push(peer_comparison);
             }
         }
 
         comparisons
     }
 
-    /// Create collaborative challenge
+    /// Create a collaborative challenge.
+    ///
+    /// The created [`CollaborativeChallenge`] is stored (not just its id
+    /// returned) so it can actually be retrieved afterward via
+    /// [`Self::get_collaborative_challenge`] -- creating a challenge is a
+    /// real, persisted state change, not a discarded value behind a
+    /// freshly-minted id.
     pub fn create_collaborative_challenge(
         &mut self,
         creator_id: Uuid,
@@ -145,31 +178,55 @@ impl SocialSystem {
             }
         }
 
+        self.collaborative_challenges
+            .insert(challenge_id, challenge);
+
         challenge_id
     }
 
-    /// Find mentorship matches
+    /// Look up a previously created collaborative challenge by id.
+    #[must_use]
+    pub fn get_collaborative_challenge(
+        &self,
+        challenge_id: Uuid,
+    ) -> Option<&CollaborativeChallenge> {
+        self.collaborative_challenges.get(&challenge_id)
+    }
+
+    /// Find mentorship matches.
+    ///
+    /// `mentor_progress` supplies each candidate mentor's *real*,
+    /// caller-fetched [`UserProgress`] (specifically its `skill_breakdown`),
+    /// keyed by user id. A mentor connection with no entry in
+    /// `mentor_progress` is honestly skipped rather than assigned a
+    /// fabricated compatibility score or expertise list.
     #[must_use]
     pub fn find_mentorship_matches(
         &self,
         mentee_id: Uuid,
-        preferences: MentorshipPreferences,
+        preferences: &MentorshipPreferences,
+        mentor_progress: &HashMap<Uuid, UserProgress>,
     ) -> Vec<MentorshipMatch> {
         let mut matches = Vec::new();
 
-        // In a real implementation, this would search through available mentors
-        // based on expertise, availability, and compatibility
         for connection in self.connections.get(&mentee_id).unwrap_or(&Vec::new()) {
             if let ConnectionType::Mentor = connection.connection_type {
-                let compatibility_score =
-                    self.calculate_mentor_compatibility(&preferences, &connection.user_id);
+                let Some(mentor) = mentor_progress.get(&connection.user_id) else {
+                    continue;
+                };
+
+                let compatibility_score = Self::calculate_mentor_compatibility(preferences, mentor);
                 if compatibility_score > 0.7 {
                     matches.push(MentorshipMatch {
                         mentor_id: connection.user_id,
-                        mentor_name: format!("Mentor_{}", connection.user_id.simple()),
+                        mentor_name: Self::display_name(
+                            &mentor.user_id,
+                            connection.user_id,
+                            "Mentor",
+                        ),
                         compatibility_score,
-                        shared_focus_areas: preferences.focus_areas.clone(),
-                        mentor_expertise: self.calculate_mentor_expertise(connection.user_id),
+                        shared_focus_areas: Self::shared_focus_areas(preferences, mentor),
+                        mentor_expertise: Self::calculate_mentor_expertise(mentor),
                         availability: TimeSlot {
                             start_time: Utc::now(),
                             end_time: Utc::now() + chrono::Duration::hours(1),
@@ -180,11 +237,7 @@ impl SocialSystem {
             }
         }
 
-        matches.sort_by(|a, b| {
-            b.compatibility_score
-                .partial_cmp(&a.compatibility_score)
-                .expect("value should be present")
-        });
+        matches.sort_by(|a, b| b.compatibility_score.total_cmp(&a.compatibility_score));
         matches
     }
 
@@ -255,40 +308,77 @@ impl SocialSystem {
         // Suggest peer groups based on skill level and focus areas
         for group in self.peer_groups.values() {
             if !group.members.contains(&user_id) && group.members.len() < group.max_members {
-                let compatibility = self.calculate_group_compatibility(user_progress, group);
+                let compatibility = Self::calculate_group_compatibility(user_progress, group);
                 if compatibility > 0.6 {
+                    // Real intersection between the group's focus areas and
+                    // the areas the user actually has tracked skill data
+                    // for -- not a blind clone of the group's areas.
+                    let shared_focus_areas: Vec<FocusArea> = group
+                        .focus_areas
+                        .iter()
+                        .filter(|area| user_progress.skill_breakdown.contains_key(area))
+                        .cloned()
+                        .collect();
                     recommendations
                         .suggested_peer_groups
                         .push(PeerGroupSuggestion {
                             group_id: group.id,
                             group_name: group.name.clone(),
                             compatibility_score: compatibility,
-                            shared_focus_areas: group.focus_areas.clone(),
+                            shared_focus_areas,
                             member_count: group.members.len(),
                         });
                 }
             }
         }
 
-        // Sort by compatibility
-        recommendations.suggested_peer_groups.sort_by(|a, b| {
-            b.compatibility_score
-                .partial_cmp(&a.compatibility_score)
-                .expect("value should be present")
-        });
+        // Sort by compatibility. `total_cmp` (rather than
+        // `partial_cmp().expect(...)`) avoids a NaN panic now that
+        // `compatibility_score` is a real computed value instead of a
+        // hardcoded constant.
+        recommendations
+            .suggested_peer_groups
+            .sort_by(|a, b| b.compatibility_score.total_cmp(&a.compatibility_score));
 
         recommendations
     }
 
-    /// Helper methods
-    fn calculate_rank_in_group(&self, user_id: Uuid, group: &PeerGroup) -> usize {
-        // Simplified ranking calculation
-        group
+    /// Real per-metric rank of `target_id` within `group`, computed from
+    /// actual tracked progress data (average pronunciation score). Only
+    /// members with real progress data available -- the querying user via
+    /// `user_progress`, or other members present in `peer_progress` -- are
+    /// included in the ranking; members with no known progress are neither
+    /// ranked nor allowed to distort others' ranks. If `target_id` itself
+    /// has no real data among the ranked members (should not normally
+    /// happen), it is placed last rather than assigned a fabricated rank.
+    fn rank_in_group(
+        group: &PeerGroup,
+        target_id: Uuid,
+        user_id: Uuid,
+        user_progress: &UserProgress,
+        peer_progress: &HashMap<Uuid, UserProgress>,
+    ) -> usize {
+        let mut ranked: Vec<(Uuid, f32)> = group
             .members
             .iter()
-            .position(|&id| id == user_id)
-            .unwrap_or(0)
-            + 1
+            .filter_map(|&member_id| {
+                let score = if member_id == user_id {
+                    Some(user_progress.average_scores.average_pronunciation)
+                } else {
+                    peer_progress
+                        .get(&member_id)
+                        .map(|p| p.average_scores.average_pronunciation)
+                };
+                score.map(|s| (member_id, s))
+            })
+            .collect();
+
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+        ranked
+            .iter()
+            .position(|(id, _)| *id == target_id)
+            .map_or(ranked.len() + 1, |pos| pos + 1)
     }
 
     fn compare_metrics(
@@ -331,125 +421,160 @@ impl SocialSystem {
         ]
     }
 
-    /// Calculate percentile for session count (simulated distribution)
+    /// Percentile of a real session count under an assumed reference
+    /// population distribution (normal, mean=20, std=10 -- there is no
+    /// real cross-user population data source in this crate to derive
+    /// these parameters from empirically). The input is always the
+    /// caller's real, measured session count; only the reference
+    /// distribution against which it is scored is an assumption.
     fn calculate_percentile_for_sessions(&self, sessions: usize) -> f32 {
-        // Simulate percentile based on typical session distribution
-        // Assumes normal distribution with mean=20, std=10
         let mean = 20.0;
         let std_dev = 10.0;
         let z_score = (sessions as f32 - mean) / std_dev;
 
-        // Simple approximation of normal CDF
-        let percentile = 50.0 + 30.0 * z_score.tanh(); // Rough sigmoid approximation
-        percentile.clamp(1.0, 99.0)
-    }
-
-    /// Calculate percentile for accuracy scores (simulated distribution)
-    fn calculate_percentile_for_accuracy(&self, score: f32) -> f32 {
-        // Assumes typical accuracy distribution with mean=0.7, std=0.15
-        let mean = 0.7;
-        let std_dev = 0.15;
-        let z_score = (score - mean) / std_dev;
-
-        // Simple approximation of normal CDF
+        // tanh-based approximation of the normal CDF.
         let percentile = 50.0 + 30.0 * z_score.tanh();
         percentile.clamp(1.0, 99.0)
     }
 
-    /// Generate simulated peer progress for comparison
-    /// In production, this would fetch from database
-    fn generate_simulated_peer_progress(
-        &self,
-        peer_id: Uuid,
-        base_progress: &UserProgress,
-    ) -> UserProgress {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+    /// Percentile of a real accuracy score under an assumed reference
+    /// population distribution (normal, mean=0.7, std=0.15 -- see
+    /// [`Self::calculate_percentile_for_sessions`] for why these are
+    /// assumed rather than empirical). The input is always the caller's
+    /// real, measured score.
+    fn calculate_percentile_for_accuracy(&self, score: f32) -> f32 {
+        let mean = 0.7;
+        let std_dev = 0.15;
+        let z_score = (score - mean) / std_dev;
 
-        // Use peer_id as seed for consistent simulation
-        let mut hasher = DefaultHasher::new();
-        peer_id.hash(&mut hasher);
-        let seed = hasher.finish();
-
-        // Generate variation based on peer ID (deterministic but varied)
-        let variation = ((seed % 1000) as f32 / 1000.0 - 0.5) * 0.4; // ±20% variation
-
-        let mut peer_progress = base_progress.clone();
-
-        // Vary the key metrics
-        peer_progress.average_scores.average_pronunciation =
-            (base_progress.average_scores.average_pronunciation + variation).clamp(0.0, 1.0);
-        peer_progress.average_scores.average_fluency =
-            (base_progress.average_scores.average_fluency + variation * 0.8).clamp(0.0, 1.0);
-        peer_progress.average_scores.average_quality =
-            (base_progress.average_scores.average_quality + variation * 0.6).clamp(0.0, 1.0);
-
-        // Vary session counts
-        let session_variation = ((seed % 100) as i32 - 50) / 10; // ±5 sessions
-        peer_progress.training_stats.total_sessions =
-            (base_progress.training_stats.total_sessions as i32 + session_variation).max(0)
-                as usize;
-        peer_progress.training_stats.successful_sessions =
-            (peer_progress.training_stats.total_sessions as f32 * 0.8) as usize;
-
-        peer_progress
+        // tanh-based approximation of the normal CDF.
+        let percentile = 50.0 + 30.0 * z_score.tanh();
+        percentile.clamp(1.0, 99.0)
     }
 
-    fn generate_improvement_suggestions(&self, _user_progress: &UserProgress) -> Vec<String> {
-        vec![
-            "Focus on pronunciation accuracy".to_string(),
-            "Increase practice frequency".to_string(),
-            "Join collaborative challenges".to_string(),
-        ]
-    }
+    /// Real improvement suggestions derived from which of the user's
+    /// tracked average scores are actually below a "solid" threshold,
+    /// rather than a fixed list independent of `user_progress`.
+    fn generate_improvement_suggestions(user_progress: &UserProgress) -> Vec<String> {
+        const SOLID_THRESHOLD: f32 = 0.7;
+        const MIN_SESSIONS_FOR_CONSISTENCY: usize = 10;
 
-    /// Calculate mentor's expertise areas based on simulated performance
-    fn calculate_mentor_expertise(&self, mentor_id: Uuid) -> Vec<FocusArea> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        let mut suggestions = Vec::new();
+        let scores = &user_progress.average_scores;
 
-        // Use mentor_id to deterministically assign expertise
-        let mut hasher = DefaultHasher::new();
-        mentor_id.hash(&mut hasher);
-        let seed = hasher.finish();
-
-        let mut expertise = Vec::new();
-
-        // Each mentor has 1-3 areas of expertise based on their ID
-        let num_areas = (seed % 3) + 1; // 1-3 areas
-        let areas = [
-            FocusArea::Pronunciation,
-            FocusArea::Fluency,
-            FocusArea::Quality,
-            FocusArea::Rhythm,
-        ];
-
-        for i in 0..num_areas {
-            let area_index = ((seed + i) % areas.len() as u64) as usize;
-            if !expertise.contains(&areas[area_index]) {
-                expertise.push(areas[area_index].clone());
-            }
+        if scores.average_pronunciation < SOLID_THRESHOLD {
+            suggestions.push("Focus on pronunciation accuracy".to_string());
+        }
+        if scores.average_fluency < SOLID_THRESHOLD {
+            suggestions.push("Practice speaking fluently with fewer pauses".to_string());
+        }
+        if scores.average_quality < SOLID_THRESHOLD {
+            suggestions.push("Work on overall speech clarity and quality".to_string());
+        }
+        if user_progress.training_stats.total_sessions < MIN_SESSIONS_FOR_CONSISTENCY {
+            suggestions.push("Increase practice frequency".to_string());
+        }
+        if suggestions.is_empty() {
+            suggestions
+                .push("Strong performance across the board -- try a collaborative challenge to push further".to_string());
         }
 
-        expertise
+        suggestions
     }
 
+    /// Real mentor expertise areas: the focus areas from the mentor's own
+    /// tracked `skill_breakdown` where their skill level meets an
+    /// "expert" threshold, ordered strongest-first (ties broken by a fixed
+    /// area ordering for determinism).
+    fn calculate_mentor_expertise(mentor_profile: &UserProgress) -> Vec<FocusArea> {
+        const EXPERTISE_THRESHOLD: f32 = 0.75;
+
+        let mut expertise: Vec<(FocusArea, f32)> = mentor_profile
+            .skill_breakdown
+            .iter()
+            .filter(|&(_, &level)| level >= EXPERTISE_THRESHOLD)
+            .map(|(area, &level)| (area.clone(), level))
+            .collect();
+
+        expertise.sort_by(|a, b| {
+            b.1.total_cmp(&a.1)
+                .then_with(|| format!("{:?}", a.0).cmp(&format!("{:?}", b.0)))
+        });
+
+        expertise.into_iter().map(|(area, _)| area).collect()
+    }
+
+    /// The subset of the mentee's preferred focus areas that the mentor
+    /// actually has tracked skill data for -- a real intersection, not a
+    /// blind clone of the mentee's preferences.
+    fn shared_focus_areas(
+        preferences: &MentorshipPreferences,
+        mentor_profile: &UserProgress,
+    ) -> Vec<FocusArea> {
+        preferences
+            .focus_areas
+            .iter()
+            .filter(|area| mentor_profile.skill_breakdown.contains_key(area))
+            .cloned()
+            .collect()
+    }
+
+    /// Real weighted-similarity compatibility score: the mentor's average
+    /// real skill level across the mentee's preferred focus areas (areas
+    /// the mentor has no tracked data for count as 0.0 skill in that area).
+    /// Falls back to the mentor's overall skill level when the mentee
+    /// stated no focus-area preference at all.
     fn calculate_mentor_compatibility(
-        &self,
-        _preferences: &MentorshipPreferences,
-        _mentor_id: &Uuid,
+        preferences: &MentorshipPreferences,
+        mentor_profile: &UserProgress,
     ) -> f32 {
-        // Simplified compatibility calculation
-        0.8
+        if preferences.focus_areas.is_empty() {
+            return mentor_profile.overall_skill_level.clamp(0.0, 1.0);
+        }
+
+        let scores: Vec<f32> = preferences
+            .focus_areas
+            .iter()
+            .map(|area| {
+                mentor_profile
+                    .skill_breakdown
+                    .get(area)
+                    .copied()
+                    .unwrap_or(0.0)
+            })
+            .collect();
+
+        (scores.iter().sum::<f32>() / scores.len() as f32).clamp(0.0, 1.0)
     }
 
-    fn calculate_group_compatibility(
-        &self,
-        _user_progress: &UserProgress,
-        _group: &PeerGroup,
-    ) -> f32 {
-        // Simplified compatibility calculation
-        0.7
+    /// Real display name for a peer/mentor: the caller-supplied real
+    /// `user_id` (from their fetched [`UserProgress`]) when non-empty,
+    /// falling back to a `<prefix>_<uuid>` placeholder only when no real
+    /// identifier is available (e.g. a default/uninitialized profile).
+    fn display_name(real_user_id: &str, id: Uuid, prefix: &str) -> String {
+        if real_user_id.is_empty() {
+            format!("{prefix}_{}", id.simple())
+        } else {
+            real_user_id.to_string()
+        }
+    }
+
+    /// Real group compatibility: the fraction of the group's stated focus
+    /// areas that the user actually has tracked skill data for -- a real
+    /// overlap measure between the user's real progress and the group's
+    /// real focus areas.
+    fn calculate_group_compatibility(user_progress: &UserProgress, group: &PeerGroup) -> f32 {
+        if group.focus_areas.is_empty() {
+            return 0.0;
+        }
+
+        let matched = group
+            .focus_areas
+            .iter()
+            .filter(|area| user_progress.skill_breakdown.contains_key(area))
+            .count();
+
+        matched as f32 / group.focus_areas.len() as f32
     }
 }
 
@@ -1031,9 +1156,25 @@ mod tests {
 
         let challenge_id = system.create_collaborative_challenge(creator_id, config);
 
-        // In a real implementation, you would store challenges somewhere
-        // For this test, we just verify the ID was generated
-        assert!(!challenge_id.is_nil());
+        // The created challenge must be real, persisted state -- retrievable
+        // afterward with the same data that was passed in, not a discarded
+        // value behind a freshly-minted id.
+        let stored = system
+            .get_collaborative_challenge(challenge_id)
+            .expect("challenge should be retrievable after creation");
+        assert_eq!(stored.id, challenge_id);
+        assert_eq!(stored.title, "Pronunciation Challenge");
+        assert_eq!(stored.creator_id, creator_id);
+        assert_eq!(stored.participants, vec![creator_id]);
+        assert_eq!(stored.status, ChallengeStatus::Pending);
+    }
+
+    /// A challenge id that was never created must honestly return `None`,
+    /// not a fabricated challenge.
+    #[test]
+    fn test_get_collaborative_challenge_unknown_id_is_none() {
+        let system = SocialSystem::new();
+        assert!(system.get_collaborative_challenge(Uuid::new_v4()).is_none());
     }
 
     #[test]
@@ -1076,5 +1217,334 @@ mod tests {
 
         assert_eq!(preferences.focus_areas.len(), 1);
         assert_eq!(preferences.experience_level, ExperienceLevel::Intermediate);
+    }
+
+    fn progress_with_pronunciation(score: f32) -> UserProgress {
+        UserProgress {
+            average_scores: crate::traits::SessionScores {
+                average_pronunciation: score,
+                ..crate::traits::SessionScores::default()
+            },
+            ..UserProgress::default()
+        }
+    }
+
+    /// A peer present in a shared group but absent from the caller-supplied
+    /// `peer_progress` map must be honestly omitted -- never replaced by a
+    /// fabricated stand-in.
+    #[test]
+    fn test_get_peer_comparison_omits_peers_without_real_data() {
+        let mut system = SocialSystem::new();
+        let user_id = Uuid::new_v4();
+        let known_peer = Uuid::new_v4();
+        let unknown_peer = Uuid::new_v4();
+
+        let group_id = system.create_peer_group(
+            user_id,
+            PeerGroupConfig {
+                name: "Group".to_string(),
+                description: String::new(),
+                max_members: 10,
+                focus_areas: vec![FocusArea::Pronunciation],
+                privacy_level: PrivacyLevel::Public,
+            },
+        );
+        system.join_peer_group(known_peer, group_id).unwrap();
+        system.join_peer_group(unknown_peer, group_id).unwrap();
+
+        let user_progress = progress_with_pronunciation(0.5);
+        let mut peer_progress = HashMap::new();
+        peer_progress.insert(known_peer, progress_with_pronunciation(0.6));
+        // `unknown_peer` deliberately has no entry.
+
+        let comparisons = system.get_peer_comparison(user_id, &user_progress, &peer_progress);
+
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(comparisons[0].peer_id, known_peer);
+    }
+
+    /// With zero real peer data available, the result must be an honest
+    /// empty list, not a synthesized comparison.
+    #[test]
+    fn test_get_peer_comparison_empty_without_any_peer_data() {
+        let mut system = SocialSystem::new();
+        let user_id = Uuid::new_v4();
+        let peer_id = Uuid::new_v4();
+
+        let group_id = system.create_peer_group(
+            user_id,
+            PeerGroupConfig {
+                name: "Group".to_string(),
+                description: String::new(),
+                max_members: 10,
+                focus_areas: vec![],
+                privacy_level: PrivacyLevel::Public,
+            },
+        );
+        system.join_peer_group(peer_id, group_id).unwrap();
+
+        let user_progress = progress_with_pronunciation(0.5);
+        let comparisons = system.get_peer_comparison(user_id, &user_progress, &HashMap::new());
+
+        assert!(comparisons.is_empty());
+    }
+
+    /// Ranks must reflect real, differing average-pronunciation scores --
+    /// the highest real scorer ranks first.
+    #[test]
+    fn test_rank_in_group_reflects_real_scores() {
+        let mut system = SocialSystem::new();
+        let user_id = Uuid::new_v4();
+        let strong_peer = Uuid::new_v4();
+        let weak_peer = Uuid::new_v4();
+
+        let group_id = system.create_peer_group(
+            user_id,
+            PeerGroupConfig {
+                name: "Group".to_string(),
+                description: String::new(),
+                max_members: 10,
+                focus_areas: vec![],
+                privacy_level: PrivacyLevel::Public,
+            },
+        );
+        system.join_peer_group(strong_peer, group_id).unwrap();
+        system.join_peer_group(weak_peer, group_id).unwrap();
+
+        let user_progress = progress_with_pronunciation(0.5); // middle
+        let mut peer_progress = HashMap::new();
+        peer_progress.insert(strong_peer, progress_with_pronunciation(0.9)); // top
+        peer_progress.insert(weak_peer, progress_with_pronunciation(0.1)); // bottom
+
+        let comparisons = system.get_peer_comparison(user_id, &user_progress, &peer_progress);
+        assert_eq!(comparisons.len(), 2);
+
+        // The user (0.5) ranks between the strong peer (0.9, rank 1) and
+        // the weak peer (0.1, rank 3).
+        for comparison in &comparisons {
+            assert_eq!(comparison.user_rank, 2);
+            if comparison.peer_id == strong_peer {
+                assert_eq!(comparison.peer_rank, 1);
+            } else {
+                assert_eq!(comparison.peer_rank, 3);
+            }
+        }
+    }
+
+    /// A peer's real, tracked `user_id` must be used as their display name
+    /// instead of a fabricated `User_<uuid>` placeholder.
+    #[test]
+    fn test_get_peer_comparison_uses_real_user_id_as_name() {
+        let mut system = SocialSystem::new();
+        let user_id = Uuid::new_v4();
+        let named_peer = Uuid::new_v4();
+        let unnamed_peer = Uuid::new_v4();
+
+        let group_id = system.create_peer_group(
+            user_id,
+            PeerGroupConfig {
+                name: "Group".to_string(),
+                description: String::new(),
+                max_members: 10,
+                focus_areas: vec![],
+                privacy_level: PrivacyLevel::Public,
+            },
+        );
+        system.join_peer_group(named_peer, group_id).unwrap();
+        system.join_peer_group(unnamed_peer, group_id).unwrap();
+
+        let user_progress = progress_with_pronunciation(0.5);
+        let mut peer_progress = HashMap::new();
+        peer_progress.insert(
+            named_peer,
+            UserProgress {
+                user_id: "real_alice".to_string(),
+                ..progress_with_pronunciation(0.6)
+            },
+        );
+        // `unnamed_peer` has a default (empty) `user_id`, so the honest
+        // fallback placeholder must still be used for them.
+        peer_progress.insert(unnamed_peer, progress_with_pronunciation(0.4));
+
+        let comparisons = system.get_peer_comparison(user_id, &user_progress, &peer_progress);
+        assert_eq!(comparisons.len(), 2);
+
+        for comparison in &comparisons {
+            if comparison.peer_id == named_peer {
+                assert_eq!(comparison.peer_name, "real_alice");
+            } else {
+                assert_eq!(
+                    comparison.peer_name,
+                    format!("User_{}", unnamed_peer.simple())
+                );
+            }
+        }
+    }
+
+    /// A mentor with real, high skill in the mentee's preferred focus areas
+    /// must score more compatible than one with no tracked skill there.
+    #[test]
+    fn test_calculate_mentor_compatibility_reflects_real_skill() {
+        let preferences = MentorshipPreferences {
+            focus_areas: vec![FocusArea::Pronunciation, FocusArea::Fluency],
+            preferred_times: vec![],
+            experience_level: ExperienceLevel::Intermediate,
+            communication_style: CommunicationStyle::Supportive,
+        };
+
+        let mut skilled_mentor = UserProgress::default();
+        skilled_mentor
+            .skill_breakdown
+            .insert(FocusArea::Pronunciation, 0.95);
+        skilled_mentor
+            .skill_breakdown
+            .insert(FocusArea::Fluency, 0.9);
+
+        let unskilled_mentor = UserProgress::default();
+
+        let skilled_score =
+            SocialSystem::calculate_mentor_compatibility(&preferences, &skilled_mentor);
+        let unskilled_score =
+            SocialSystem::calculate_mentor_compatibility(&preferences, &unskilled_mentor);
+
+        assert!((skilled_score - 0.925).abs() < 1e-6);
+        assert_eq!(unskilled_score, 0.0);
+        assert!(skilled_score > unskilled_score);
+    }
+
+    /// Expertise must be drawn from the mentor's real `skill_breakdown`,
+    /// only areas at/above the expertise threshold, strongest first.
+    #[test]
+    fn test_calculate_mentor_expertise_reflects_real_skill_breakdown() {
+        let mut mentor = UserProgress::default();
+        mentor.skill_breakdown.insert(FocusArea::Pronunciation, 0.9);
+        mentor.skill_breakdown.insert(FocusArea::Fluency, 0.5); // below threshold
+        mentor.skill_breakdown.insert(FocusArea::Rhythm, 0.8);
+
+        let expertise = SocialSystem::calculate_mentor_expertise(&mentor);
+
+        assert_eq!(expertise, vec![FocusArea::Pronunciation, FocusArea::Rhythm]);
+    }
+
+    /// A mentor connection with no real profile data available must be
+    /// honestly skipped, never assigned a fabricated compatibility score.
+    #[test]
+    fn test_find_mentorship_matches_omits_mentors_without_real_data() {
+        let mut system = SocialSystem::new();
+        let mentee_id = Uuid::new_v4();
+        let known_mentor = Uuid::new_v4();
+        let unknown_mentor = Uuid::new_v4();
+
+        system.connections.insert(
+            mentee_id,
+            vec![
+                SocialConnection {
+                    user_id: known_mentor,
+                    connection_type: ConnectionType::Mentor,
+                    strength: 1.0,
+                    connected_at: Utc::now(),
+                },
+                SocialConnection {
+                    user_id: unknown_mentor,
+                    connection_type: ConnectionType::Mentor,
+                    strength: 1.0,
+                    connected_at: Utc::now(),
+                },
+            ],
+        );
+
+        let preferences = MentorshipPreferences {
+            focus_areas: vec![FocusArea::Pronunciation],
+            preferred_times: vec![],
+            experience_level: ExperienceLevel::Intermediate,
+            communication_style: CommunicationStyle::Supportive,
+        };
+
+        let mut known_mentor_profile = UserProgress::default();
+        known_mentor_profile
+            .skill_breakdown
+            .insert(FocusArea::Pronunciation, 0.95);
+
+        let mut mentor_progress = HashMap::new();
+        mentor_progress.insert(known_mentor, known_mentor_profile);
+        // `unknown_mentor` deliberately has no entry.
+
+        let matches = system.find_mentorship_matches(mentee_id, &preferences, &mentor_progress);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].mentor_id, known_mentor);
+    }
+
+    /// Group compatibility must reflect the real overlap between the
+    /// user's tracked skill areas and the group's focus areas.
+    #[test]
+    fn test_calculate_group_compatibility_reflects_overlap() {
+        let group = PeerGroup {
+            id: Uuid::new_v4(),
+            name: "Group".to_string(),
+            description: String::new(),
+            creator_id: Uuid::new_v4(),
+            members: vec![],
+            max_members: 10,
+            focus_areas: vec![FocusArea::Pronunciation, FocusArea::Fluency],
+            privacy_level: PrivacyLevel::Public,
+            created_at: Utc::now(),
+            is_active: true,
+        };
+
+        let mut full_overlap = UserProgress::default();
+        full_overlap
+            .skill_breakdown
+            .insert(FocusArea::Pronunciation, 0.5);
+        full_overlap.skill_breakdown.insert(FocusArea::Fluency, 0.5);
+
+        let no_overlap = UserProgress::default();
+
+        assert_eq!(
+            SocialSystem::calculate_group_compatibility(&full_overlap, &group),
+            1.0
+        );
+        assert_eq!(
+            SocialSystem::calculate_group_compatibility(&no_overlap, &group),
+            0.0
+        );
+    }
+
+    /// Improvement suggestions must vary with the user's real average
+    /// scores, not be a fixed list.
+    #[test]
+    fn test_generate_improvement_suggestions_reflects_scores() {
+        let strong = UserProgress {
+            average_scores: crate::traits::SessionScores {
+                average_pronunciation: 0.95,
+                average_fluency: 0.95,
+                average_quality: 0.95,
+                ..crate::traits::SessionScores::default()
+            },
+            training_stats: crate::traits::TrainingStatistics {
+                total_sessions: 50,
+                ..crate::traits::TrainingStatistics::default()
+            },
+            ..UserProgress::default()
+        };
+        let weak = UserProgress {
+            average_scores: crate::traits::SessionScores {
+                average_pronunciation: 0.2,
+                average_fluency: 0.2,
+                average_quality: 0.2,
+                ..crate::traits::SessionScores::default()
+            },
+            training_stats: crate::traits::TrainingStatistics {
+                total_sessions: 1,
+                ..crate::traits::TrainingStatistics::default()
+            },
+            ..UserProgress::default()
+        };
+
+        let strong_suggestions = SocialSystem::generate_improvement_suggestions(&strong);
+        let weak_suggestions = SocialSystem::generate_improvement_suggestions(&weak);
+
+        assert_ne!(strong_suggestions, weak_suggestions);
+        assert!(weak_suggestions.len() > strong_suggestions.len());
     }
 }

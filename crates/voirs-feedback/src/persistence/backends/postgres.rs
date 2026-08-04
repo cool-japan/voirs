@@ -616,6 +616,27 @@ impl PersistenceManager for PostgresPersistenceManager {
         })
     }
 
+    async fn list_user_ids(&self) -> PersistenceResult<Vec<String>> {
+        let user_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT user_id FROM (
+                SELECT user_id FROM sessions
+                UNION
+                SELECT user_id FROM user_progress
+                UNION
+                SELECT user_id FROM user_preferences
+                UNION
+                SELECT user_id FROM feedback_history
+            ) AS all_users",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| PersistenceError::ConnectionError {
+            message: format!("Failed to list user IDs: {e}"),
+        })?;
+
+        Ok(user_ids)
+    }
+
     async fn cleanup(&self, older_than: DateTime<Utc>) -> PersistenceResult<CleanupResult> {
         let start_time = std::time::Instant::now();
 

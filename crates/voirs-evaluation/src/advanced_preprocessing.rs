@@ -654,7 +654,7 @@ impl AdvancedPreprocessor {
     /// residual captures harmonic distortion *and* broadband noise. The result
     /// is a ratio in `[0, 1]` (clamped), where `0` denotes a perfectly clean
     /// tone.
-    fn estimate_thd_n(samples: &[f32]) -> f32 {
+    pub(crate) fn estimate_thd_n(samples: &[f32]) -> f32 {
         // A meaningful spectrum needs a reasonable number of samples.
         if samples.len() < 16 {
             return 0.0;

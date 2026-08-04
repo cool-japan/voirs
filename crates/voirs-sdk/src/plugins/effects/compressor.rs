@@ -47,8 +47,8 @@ impl CompressorEffect {
     }
 
     fn calculate_gain_reduction(&self, input_level_db: f32) -> f32 {
-        let threshold = *self.threshold.read().expect("lock should not be poisoned");
-        let ratio = *self.ratio.read().expect("lock should not be poisoned");
+        let threshold = *self.threshold.read().unwrap_or_else(|e| e.into_inner());
+        let ratio = *self.ratio.read().unwrap_or_else(|e| e.into_inner());
 
         if input_level_db <= threshold {
             0.0 // No compression below threshold
@@ -96,31 +96,23 @@ impl AudioEffect for CompressorEffect {
         let current_sample_rate = *self
             .sample_rate
             .read()
-            .expect("lock should not be poisoned");
-        if current_sample_rate.is_none()
-            || current_sample_rate.expect("value should be present") != sample_rate
-        {
-            *self
-                .sample_rate
-                .write()
-                .expect("lock should not be poisoned") = Some(sample_rate);
+            .unwrap_or_else(|e| e.into_inner());
+        if current_sample_rate != Some(sample_rate) {
+            *self.sample_rate.write().unwrap_or_else(|e| e.into_inner()) = Some(sample_rate);
         }
 
         let mut processed = audio.clone();
         let samples = processed.samples_mut();
 
-        let attack = *self.attack.read().expect("lock should not be poisoned");
-        let release = *self.release.read().expect("lock should not be poisoned");
-        let makeup_gain = *self
-            .makeup_gain
-            .read()
-            .expect("lock should not be poisoned");
+        let attack = *self.attack.read().unwrap_or_else(|e| e.into_inner());
+        let release = *self.release.read().unwrap_or_else(|e| e.into_inner());
+        let makeup_gain = *self.makeup_gain.read().unwrap_or_else(|e| e.into_inner());
 
         // Calculate attack and release coefficients
         let attack_coeff = (-1.0 / (sample_rate as f32 * attack / 1000.0)).exp();
         let release_coeff = (-1.0 / (sample_rate as f32 * release / 1000.0)).exp();
 
-        let mut envelope = *self.envelope.read().expect("lock should not be poisoned");
+        let mut envelope = *self.envelope.read().unwrap_or_else(|e| e.into_inner());
         let makeup_gain_linear = 10_f32.powf(makeup_gain / 20.0);
 
         for sample in samples.iter_mut() {
@@ -148,7 +140,7 @@ impl AudioEffect for CompressorEffect {
             *sample = sample.clamp(-1.0, 1.0);
         }
 
-        *self.envelope.write().expect("lock should not be poisoned") = envelope;
+        *self.envelope.write().unwrap_or_else(|e| e.into_inner()) = envelope;
 
         Ok(processed)
     }
@@ -157,28 +149,23 @@ impl AudioEffect for CompressorEffect {
         let mut params = HashMap::new();
         params.insert(
             "threshold".to_string(),
-            ParameterValue::Float(*self.threshold.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.threshold.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "ratio".to_string(),
-            ParameterValue::Float(*self.ratio.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.ratio.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "attack".to_string(),
-            ParameterValue::Float(*self.attack.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.attack.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "release".to_string(),
-            ParameterValue::Float(*self.release.read().expect("lock should not be poisoned")),
+            ParameterValue::Float(*self.release.read().unwrap_or_else(|e| e.into_inner())),
         );
         params.insert(
             "makeup_gain".to_string(),
-            ParameterValue::Float(
-                *self
-                    .makeup_gain
-                    .read()
-                    .expect("lock should not be poisoned"),
-            ),
+            ParameterValue::Float(*self.makeup_gain.read().unwrap_or_else(|e| e.into_inner())),
         );
         params
     }
@@ -187,7 +174,7 @@ impl AudioEffect for CompressorEffect {
         match name {
             "threshold" => {
                 if let Some(v) = value.as_f32() {
-                    *self.threshold.write().expect("lock should not be poisoned") =
+                    *self.threshold.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(-60.0, 0.0);
                     Ok(())
                 } else {
@@ -199,7 +186,7 @@ impl AudioEffect for CompressorEffect {
             }
             "ratio" => {
                 if let Some(v) = value.as_f32() {
-                    *self.ratio.write().expect("lock should not be poisoned") = v.clamp(1.0, 20.0);
+                    *self.ratio.write().unwrap_or_else(|e| e.into_inner()) = v.clamp(1.0, 20.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(
@@ -210,7 +197,7 @@ impl AudioEffect for CompressorEffect {
             }
             "attack" => {
                 if let Some(v) = value.as_f32() {
-                    *self.attack.write().expect("lock should not be poisoned") =
+                    *self.attack.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(0.1, 100.0);
                     Ok(())
                 } else {
@@ -222,7 +209,7 @@ impl AudioEffect for CompressorEffect {
             }
             "release" => {
                 if let Some(v) = value.as_f32() {
-                    *self.release.write().expect("lock should not be poisoned") =
+                    *self.release.write().unwrap_or_else(|e| e.into_inner()) =
                         v.clamp(10.0, 1000.0);
                     Ok(())
                 } else {
@@ -234,10 +221,8 @@ impl AudioEffect for CompressorEffect {
             }
             "makeup_gain" => {
                 if let Some(v) = value.as_f32() {
-                    *self
-                        .makeup_gain
-                        .write()
-                        .expect("lock should not be poisoned") = v.clamp(0.0, 30.0);
+                    *self.makeup_gain.write().unwrap_or_else(|e| e.into_inner()) =
+                        v.clamp(0.0, 30.0);
                     Ok(())
                 } else {
                     Err(VoirsError::internal(

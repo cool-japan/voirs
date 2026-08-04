@@ -34,63 +34,77 @@ Add VoiRS Recognizer to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-voirs-recognizer = "0.1.0"
-
-# Enable specific ASR models
-voirs-recognizer = { version = "0.1.0", features = ["whisper", "forced-align"] }
+# The ONNX backends are the ones that run real pretrained weights.
+voirs-recognizer = { version = "0.1.0", features = ["onnx", "forced-align"] }
 ```
 
 ### Basic Speech Recognition
 
+Speech recognition requires real pretrained model weights. VoiRS never ships or
+fabricates them: every backend fails closed with a typed error when the weights
+it needs are not present on disk. Export Whisper to ONNX (for example with
+`optimum-cli export onnx --model openai/whisper-tiny whisper-tiny-onnx/`) and
+point the config at the resulting files.
+
 ```rust
+use voirs_recognizer::asr::whisper_onnx::{OnnxWhisper, OnnxWhisperConfig};
 use voirs_recognizer::prelude::*;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize ASR system with Whisper
-    let asr = WhisperASR::new().await?;
-    
-    // Load audio file
-    let audio = AudioBuffer::from_file("speech.wav")?;
-    
-    // Recognize speech
-    let transcript = asr.recognize(&audio, None).await?;
+    // Initialize the ONNX Whisper backend with real exported weights.
+    let asr = OnnxWhisper::new(OnnxWhisperConfig {
+        encoder_path: PathBuf::from("whisper-tiny-onnx/encoder_model.onnx"),
+        decoder_path: PathBuf::from("whisper-tiny-onnx/decoder_model.onnx"),
+        ..Default::default()
+    })?;
+
+    // Load an audio file (WAV/FLAC/OGG/MP3 are auto-detected).
+    let audio = load_audio("speech.wav")?;
+
+    // Recognize speech.
+    let transcript = asr.transcribe(&audio, None).await?;
     println!("Transcript: {}", transcript.text);
-    
-    // Get word-level timestamps
-    for word in &transcript.words {
-        println!("{}: {:.2}s - {:.2}s", word.word, word.start, word.end);
+
+    // Word-level timestamps.
+    for word in &transcript.word_timestamps {
+        println!("{}: {:.2}s - {:.2}s", word.word, word.start_time, word.end_time);
     }
-    
+
     Ok(())
 }
 ```
 
 ### Phoneme Alignment
 
+`ForcedAlignModel` performs real MFCC extraction plus DTW alignment in pure
+Rust, so it works from a pronunciation dictionary alone.
+
 ```rust
 use voirs_recognizer::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize phoneme recognizer
-    let recognizer = MFARecognizer::new().await?;
-    
-    // Align audio with text
-    let audio = AudioBuffer::from_file("speech.wav")?;
-    let text = "Hello world, this is a test.";
-    
-    let alignment = recognizer.align_phonemes(&audio, text, None).await?;
-    
-    // Print phoneme-level alignment
+    // Initialize the forced-alignment phoneme recognizer (requires the
+    // `forced-align` feature). The dictionary argument is optional.
+    let recognizer = ForcedAlignModel::new("align-model.bin".to_string(), None).await?;
+
+    // Align audio with its transcript.
+    let audio = load_audio("speech.wav")?;
+    let alignment = recognizer
+        .align_text(&audio, "Hello world, this is a test.", None)
+        .await?;
+
+    // Print phoneme-level alignment.
     for phoneme in &alignment.phonemes {
-        println!("{}: {:.3}s - {:.3}s (confidence: {:.2})", 
-                 phoneme.phoneme.symbol, 
-                 phoneme.start_time, 
+        println!("{}: {:.3}s - {:.3}s (confidence: {:.2})",
+                 phoneme.phoneme.symbol,
+                 phoneme.start_time,
                  phoneme.end_time,
                  phoneme.confidence);
     }
-    
+
     Ok(())
 }
 ```
@@ -106,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let analyzer = AudioAnalyzer::new().await?;
     
     // Analyze audio quality
-    let audio = AudioBuffer::from_file("speech.wav")?;
+    let audio = load_audio("speech.wav")?;
     let analysis = analyzer.analyze_quality(&audio, None).await?;
     
     println!("SNR: {:.1} dB", analysis.snr);
@@ -191,9 +205,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let custom_validator = PerformanceValidator::with_requirements(requirements);
     
     // Validate your ASR system
-    let audio = AudioBuffer::from_file("test_audio.wav")?;
+    let audio = load_audio("test_audio.wav")?;
     let startup_fn = || async {
-        let _asr = WhisperASR::new().await?;
+        let _asr = OnnxWhisper::new(OnnxWhisperConfig::default())?;
         Ok(())
     };
     
@@ -370,7 +384,7 @@ let audio_files = vec![
 // Load audio files
 let audio_buffers: Vec<AudioBuffer> = audio_files
     .iter()
-    .map(|path| AudioBuffer::from_file(path))
+    .map(load_audio)
     .collect::<Result<Vec<_>, _>>()?;
 
 // Process batch efficiently
@@ -398,9 +412,9 @@ let monitor = PerformanceMonitor::new()
 
 // Monitor ASR performance
 let start = Instant::now();
-let audio = AudioBuffer::from_file("speech.wav")?;
+let audio = load_audio("speech.wav")?;
 
-let transcript = asr.recognize(&audio, None).await?;
+let transcript = asr.transcribe(&audio, None).await?;
 let processing_time = start.elapsed();
 
 // Validate performance
@@ -441,20 +455,18 @@ No manual configuration required - optimizations are applied automatically.
 Optimize thread usage for your hardware:
 
 ```rust
-use voirs_recognizer::prelude::*;
+use voirs_recognizer::config::{PerformanceConfig, RecognizerConfig};
 
-// Automatic thread optimization
-let thread_config = ThreadingConfig::auto_detect();
+// `PerformanceConfig::default()` already auto-detects the core count.
+let mut config = RecognizerConfig::default();
 
-// Manual thread configuration
-let manual_config = ThreadingConfig {
-    num_inference_threads: num_cpus::get(),     // All cores for inference
-    num_preprocessing_threads: 2,               // 2 cores for preprocessing
-    enable_thread_affinity: true,               // Pin threads to cores
-    prefer_performance_cores: true,             // Use P-cores on hybrid CPUs
+// Manual tuning.
+config.performance = PerformanceConfig {
+    num_threads: num_cpus::get(), // All cores for inference
+    enable_simd: true,            // SIMD kernels for feature extraction
+    memory_limit_mb: Some(2048),  // Cap resident model memory
+    ..PerformanceConfig::default()
 };
-
-let asr = WhisperASR::with_threading_config(manual_config).await?;
 ```
 
 ### Troubleshooting Performance Issues
@@ -573,7 +585,7 @@ VoiRS Recognizer provides comprehensive error handling:
 ```rust
 use voirs_recognizer::prelude::*;
 
-match asr.recognize(&audio, None).await {
+match asr.transcribe(&audio, None).await {
     Ok(transcript) => {
         println!("Success: {}", transcript.text);
     }

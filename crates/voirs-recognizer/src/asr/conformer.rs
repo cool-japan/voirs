@@ -18,6 +18,166 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use voirs_sdk::{AudioBuffer, LanguageCode};
 
+/// Load one feed-forward network's parameters from a checkpoint.
+fn load_feed_forward(
+    network: &mut FeedForwardNetwork,
+    header: &crate::asr::weights::SafetensorsHeader,
+    prefix: &str,
+    slot: &str,
+    model_dim: usize,
+    hidden_dim: usize,
+) -> Result<(), RecognitionError> {
+    network.linear1_weights = header.read_matrix(
+        &format!("{prefix}.{slot}.linear1.weight"),
+        hidden_dim,
+        model_dim,
+    )?;
+    network.linear1_bias =
+        header.read_vector(&format!("{prefix}.{slot}.linear1.bias"), hidden_dim)?;
+    network.linear2_weights = header.read_matrix(
+        &format!("{prefix}.{slot}.linear2.weight"),
+        model_dim,
+        hidden_dim,
+    )?;
+    network.linear2_bias =
+        header.read_vector(&format!("{prefix}.{slot}.linear2.bias"), model_dim)?;
+    Ok(())
+}
+
+/// Convert a frequency in Hz to the mel scale (HTK formula).
+fn hz_to_mel(hz: f32) -> f32 {
+    2595.0 * (1.0 + hz / 700.0).log10()
+}
+
+/// Convert a mel-scale value back to Hz (HTK formula).
+fn mel_to_hz(mel: f32) -> f32 {
+    700.0 * (10.0_f32.powf(mel / 2595.0) - 1.0)
+}
+
+/// Build a triangular mel filterbank spanning 0 Hz to Nyquist.
+///
+/// Returns `n_mels` filters, each holding one weight per FFT bin.
+fn mel_filterbank(n_mels: usize, n_bins: usize, sample_rate: f32) -> Vec<Vec<f32>> {
+    let mut filters = vec![vec![0.0_f32; n_bins]; n_mels];
+    if n_mels == 0 || n_bins < 2 {
+        return filters;
+    }
+
+    let nyquist = sample_rate / 2.0;
+    let mel_max = hz_to_mel(nyquist);
+
+    // n_mels + 2 equally spaced mel points give n_mels overlapping triangles.
+    #[allow(clippy::cast_precision_loss)]
+    let points: Vec<f32> = (0..n_mels + 2)
+        .map(|i| {
+            let mel = mel_max * i as f32 / (n_mels + 1) as f32;
+            mel_to_hz(mel)
+        })
+        .collect();
+
+    #[allow(clippy::cast_precision_loss)]
+    let bin_width = nyquist / (n_bins - 1) as f32;
+
+    for (m, filter) in filters.iter_mut().enumerate() {
+        let (left, center, right) = (points[m], points[m + 1], points[m + 2]);
+        for (bin, weight) in filter.iter_mut().enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let freq = bin as f32 * bin_width;
+            if freq > left && freq < center && center > left {
+                *weight = (freq - left) / (center - left);
+            } else if freq >= center && freq < right && right > center {
+                *weight = (right - freq) / (right - center);
+            }
+        }
+    }
+
+    filters
+}
+
+/// Numerically stable in-place softmax over a slice of scores.
+fn softmax_in_place(scores: &mut [f32]) {
+    let max = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    if !max.is_finite() {
+        let uniform = if scores.is_empty() {
+            0.0
+        } else {
+            #[allow(clippy::cast_precision_loss)]
+            {
+                1.0 / scores.len() as f32
+            }
+        };
+        scores.fill(uniform);
+        return;
+    }
+    let mut sum = 0.0_f32;
+    for score in scores.iter_mut() {
+        *score = (*score - max).exp();
+        sum += *score;
+    }
+    if sum > 0.0 {
+        for score in scores.iter_mut() {
+            *score /= sum;
+        }
+    }
+}
+
+/// Logistic sigmoid.
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// Multiply every row of `input` by `weights` transposed.
+///
+/// `weights` is stored as `weights[output_unit][input_unit]`, so the result of a row
+/// `x` is the vector `y` with `y[o] = Σ_i weights[o][i] * x[i]`.
+///
+/// # Errors
+/// Returns [`RecognitionError::ModelError`] when a weight row is shorter than the input
+/// frames, which would silently truncate the dot product.
+fn matmul_rows(
+    input: &[Vec<f32>],
+    weights: &[Vec<f32>],
+) -> Result<Vec<Vec<f32>>, RecognitionError> {
+    let Some(first) = input.first() else {
+        return Ok(Vec::new());
+    };
+    let input_dim = first.len();
+
+    if let Some(row) = weights.iter().find(|row| row.len() != input_dim) {
+        return Err(RecognitionError::ModelError {
+            message: format!(
+                "Weight row has {} columns but the input frames have {input_dim}",
+                row.len()
+            ),
+            source: None,
+        });
+    }
+
+    let mut output = Vec::with_capacity(input.len());
+    for frame in input {
+        if frame.len() != input_dim {
+            return Err(RecognitionError::ModelError {
+                message: format!(
+                    "Ragged input sequence: frame with {} values among frames of {input_dim}",
+                    frame.len()
+                ),
+                source: None,
+            });
+        }
+        let mut row_out = Vec::with_capacity(weights.len());
+        for weight_row in weights {
+            let mut sum = 0.0_f32;
+            for (w, x) in weight_row.iter().zip(frame.iter()) {
+                sum += w * x;
+            }
+            row_out.push(sum);
+        }
+        output.push(row_out);
+    }
+
+    Ok(output)
+}
+
 /// Conformer model configuration
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// Conformer Config
@@ -117,6 +277,33 @@ pub struct FeedForwardConfig {
     pub dropout_rate: f32,
     /// activation
     pub activation: ActivationType,
+}
+
+/// Where a [`ConformerModel`]'s parameters came from.
+///
+/// This is what separates a runnable model from an architecture skeleton. Transcription
+/// is only permitted for [`ConformerWeightSource::Checkpoint`]: a randomly initialised
+/// network has no learned representation, so any text decoded from it would be noise
+/// dressed up as a transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConformerWeightSource {
+    /// Parameters were drawn from a Xavier/Glorot distribution, never trained.
+    RandomInit,
+    /// Parameters were loaded from a real checkpoint at this path.
+    Checkpoint {
+        /// Path the parameters were read from.
+        path: std::path::PathBuf,
+        /// Real number of scalar parameters loaded.
+        parameter_count: usize,
+    },
+}
+
+impl ConformerWeightSource {
+    /// Whether these parameters are trained and therefore usable for transcription.
+    #[must_use]
+    pub fn is_trained(&self) -> bool {
+        matches!(self, Self::Checkpoint { .. })
+    }
 }
 
 /// Conformer encoder block
@@ -226,6 +413,8 @@ pub struct ConformerModel {
     stats: Arc<RwLock<ConformerStats>>,
     /// Supported languages
     supported_languages: Vec<LanguageCode>,
+    /// Provenance of the parameters currently held by this model
+    weight_source: ConformerWeightSource,
 }
 
 /// Statistics and metrics for Conformer model
@@ -298,7 +487,193 @@ impl ConformerModel {
             output_projection,
             stats: Arc::new(RwLock::new(ConformerStats::default())),
             supported_languages,
+            // `with_config` only allocates the architecture; nothing has been trained.
+            weight_source: ConformerWeightSource::RandomInit,
         })
+    }
+
+    /// Load real trained parameters from a `safetensors` checkpoint.
+    ///
+    /// The checkpoint must use the VoiRS Conformer tensor layout, which mirrors the
+    /// module structure of this implementation:
+    ///
+    /// ```text
+    /// input_projection.weight               [encoder_dim, input_dim]
+    /// output_projection.weight              [vocab_size, encoder_dim]
+    /// blocks.{i}.attention.query.weight     [heads*head_dim, encoder_dim]
+    /// blocks.{i}.attention.key.weight       [heads*head_dim, encoder_dim]
+    /// blocks.{i}.attention.value.weight     [heads*head_dim, encoder_dim]
+    /// blocks.{i}.attention.output.weight    [encoder_dim, heads*head_dim]
+    /// blocks.{i}.conv.pointwise1.weight     [2*encoder_dim, encoder_dim]
+    /// blocks.{i}.conv.depthwise.weight      [encoder_dim, conv_kernel_size]
+    /// blocks.{i}.conv.pointwise2.weight     [encoder_dim, encoder_dim]
+    /// blocks.{i}.conv.norm.weight/.bias     [encoder_dim]
+    /// blocks.{i}.ff1.linear1.weight/.bias   [feed_forward_dim, encoder_dim] / [feed_forward_dim]
+    /// blocks.{i}.ff1.linear2.weight/.bias   [encoder_dim, feed_forward_dim] / [encoder_dim]
+    /// blocks.{i}.ff2.*                      same as ff1, only when macaron_style
+    /// blocks.{i}.layer_norm{1,2,3}.weight/.bias  [encoder_dim]
+    /// blocks.{i}.layer_norm4.weight/.bias   [encoder_dim], only when macaron_style
+    /// ```
+    ///
+    /// Every tensor is shape-checked against `config` before it is accepted, so a
+    /// mismatched checkpoint is rejected instead of being silently truncated.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelLoadError`] when the file is missing, is not a
+    /// valid `safetensors` container, lacks a required tensor, or declares a shape that
+    /// does not match `config`.
+    pub async fn from_checkpoint(
+        path: impl AsRef<std::path::Path>,
+        config: ConformerConfig,
+    ) -> Result<Self, RecognitionError> {
+        let header = super::weights::SafetensorsHeader::read(path.as_ref())?;
+        let mut model = Self::with_config(config).await?;
+        model.load_parameters(&header)?;
+        model.weight_source = ConformerWeightSource::Checkpoint {
+            path: header.path.clone(),
+            parameter_count: model.parameter_count(),
+        };
+        tracing::info!(
+            "Loaded Conformer checkpoint {} ({} parameters)",
+            header.path.display(),
+            model.parameter_count()
+        );
+        Ok(model)
+    }
+
+    /// Overwrite every parameter with the corresponding tensor from `header`.
+    fn load_parameters(
+        &mut self,
+        header: &super::weights::SafetensorsHeader,
+    ) -> Result<(), RecognitionError> {
+        let dim = self.config.encoder_dim;
+        let inner = self.config.attention_heads * (dim / self.config.attention_heads);
+        let hidden = self.config.feed_forward_dim;
+
+        self.input_projection =
+            header.read_matrix("input_projection.weight", dim, self.config.input_dim)?;
+        self.output_projection =
+            header.read_matrix("output_projection.weight", self.config.vocab_size, dim)?;
+
+        for (index, block) in self.blocks.iter_mut().enumerate() {
+            let prefix = format!("blocks.{index}");
+
+            block.attention.query_weights =
+                header.read_matrix(&format!("{prefix}.attention.query.weight"), inner, dim)?;
+            block.attention.key_weights =
+                header.read_matrix(&format!("{prefix}.attention.key.weight"), inner, dim)?;
+            block.attention.value_weights =
+                header.read_matrix(&format!("{prefix}.attention.value.weight"), inner, dim)?;
+            block.attention.output_weights =
+                header.read_matrix(&format!("{prefix}.attention.output.weight"), dim, inner)?;
+
+            block.convolution.pointwise_conv1_weights =
+                header.read_matrix(&format!("{prefix}.conv.pointwise1.weight"), dim * 2, dim)?;
+            block.convolution.depthwise_conv_weights = header.read_matrix(
+                &format!("{prefix}.conv.depthwise.weight"),
+                dim,
+                self.config.conv_kernel_size,
+            )?;
+            block.convolution.pointwise_conv2_weights =
+                header.read_matrix(&format!("{prefix}.conv.pointwise2.weight"), dim, dim)?;
+            block.convolution.batch_norm_gamma =
+                header.read_vector(&format!("{prefix}.conv.norm.weight"), dim)?;
+            block.convolution.batch_norm_beta =
+                header.read_vector(&format!("{prefix}.conv.norm.bias"), dim)?;
+
+            load_feed_forward(&mut block.feed_forward_1, header, &prefix, "ff1", dim, hidden)?;
+            if let Some(ff2) = block.feed_forward_2.as_mut() {
+                load_feed_forward(ff2, header, &prefix, "ff2", dim, hidden)?;
+            }
+
+            for (slot, name) in [
+                (&mut block.layer_norm_1, "layer_norm1"),
+                (&mut block.layer_norm_2, "layer_norm2"),
+                (&mut block.layer_norm_3, "layer_norm3"),
+            ] {
+                slot.gamma = header.read_vector(&format!("{prefix}.{name}.weight"), dim)?;
+                slot.beta = header.read_vector(&format!("{prefix}.{name}.bias"), dim)?;
+            }
+            if let Some(ln4) = block.layer_norm_4.as_mut() {
+                ln4.gamma = header.read_vector(&format!("{prefix}.layer_norm4.weight"), dim)?;
+                ln4.beta = header.read_vector(&format!("{prefix}.layer_norm4.bias"), dim)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Total number of scalar parameters really held by this model.
+    #[must_use]
+    pub fn parameter_count(&self) -> usize {
+        let matrix = |m: &Vec<Vec<f32>>| m.iter().map(Vec::len).sum::<usize>();
+        let mut total = matrix(&self.input_projection) + matrix(&self.output_projection);
+
+        for block in &self.blocks {
+            total += matrix(&block.attention.query_weights)
+                + matrix(&block.attention.key_weights)
+                + matrix(&block.attention.value_weights)
+                + matrix(&block.attention.output_weights);
+            total += matrix(&block.convolution.pointwise_conv1_weights)
+                + matrix(&block.convolution.depthwise_conv_weights)
+                + matrix(&block.convolution.pointwise_conv2_weights)
+                + block.convolution.batch_norm_gamma.len()
+                + block.convolution.batch_norm_beta.len();
+            for ff in [Some(&block.feed_forward_1), block.feed_forward_2.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                total += matrix(&ff.linear1_weights)
+                    + matrix(&ff.linear2_weights)
+                    + ff.linear1_bias.len()
+                    + ff.linear2_bias.len();
+            }
+            for ln in [
+                Some(&block.layer_norm_1),
+                Some(&block.layer_norm_2),
+                Some(&block.layer_norm_3),
+                block.layer_norm_4.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                total += ln.gamma.len() + ln.beta.len();
+            }
+        }
+
+        total
+    }
+
+    /// Provenance of this model's parameters.
+    #[must_use]
+    pub fn weight_source(&self) -> &ConformerWeightSource {
+        &self.weight_source
+    }
+
+    /// Features this instance can really deliver.
+    ///
+    /// An untrained model advertises nothing, because every inference entry point
+    /// refuses to run. Word timestamps and language detection are not advertised even
+    /// when trained: this implementation exposes neither CTC frame alignment nor a
+    /// language-identification head.
+    fn advertised_features(&self) -> Vec<ASRFeature> {
+        if self.weight_source.is_trained() {
+            vec![ASRFeature::StreamingInference]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The typed error returned when transcription is attempted without trained weights.
+    fn untrained_error() -> RecognitionError {
+        RecognitionError::ModelLoadError {
+            message: "Conformer model has randomly initialised parameters and has not been \
+                      trained, so it cannot transcribe. Load real parameters with \
+                      ConformerModel::from_checkpoint(path, config), or use OnnxConformer \
+                      (`onnx` feature) with an exported graph."
+                .to_string(),
+            source: None,
+        }
     }
 
     /// Initialize input feature projection layer
@@ -426,43 +801,80 @@ impl ConformerModel {
         Ok(features)
     }
 
-    /// Compute mel-spectrogram from audio samples
+    /// Compute a real log-mel spectrogram from audio samples.
+    ///
+    /// 25 ms Hann-windowed frames with a 10 ms hop are transformed with
+    /// [`scirs2_fft::rfft`], the power spectrum is passed through a triangular mel
+    /// filterbank spanning 0 Hz to Nyquist, and the filter energies are returned as
+    /// natural logs with a floor.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::AudioProcessingError`] if the FFT fails.
     async fn compute_mel_spectrogram(
         &self,
         samples: &[f32],
     ) -> Result<Vec<Vec<f32>>, RecognitionError> {
-        // Simplified mel-spectrogram computation
-        // In a real implementation, this would use proper STFT and mel-filter banks
-
-        let window_size = 400; // 25ms at 16kHz
-        let hop_size = 160; // 10ms at 16kHz
+        const SAMPLE_RATE: f32 = 16_000.0;
+        let window_size = 400; // 25 ms at 16 kHz
+        let hop_size = 160; // 10 ms at 16 kHz
         let n_mels = self.config.input_dim;
 
+        if samples.len() < window_size {
+            return Ok(Vec::new());
+        }
+
+        // Periodic Hann window.
+        #[allow(clippy::cast_precision_loss)]
+        let window: Vec<f64> = (0..window_size)
+            .map(|i| {
+                let phase =
+                    2.0 * std::f64::consts::PI * i as f64 / window_size as f64;
+                0.5 * (1.0 - phase.cos())
+            })
+            .collect();
+
+        let n_bins = window_size / 2 + 1;
+        let filterbank = mel_filterbank(n_mels, n_bins, SAMPLE_RATE);
+
         let num_frames = (samples.len() - window_size) / hop_size + 1;
-        let mut features = Vec::new();
+        let mut features = Vec::with_capacity(num_frames);
 
         for frame_idx in 0..num_frames {
             let start = frame_idx * hop_size;
-            let end = (start + window_size).min(samples.len());
+            let frame = &samples[start..start + window_size];
 
-            if end - start < window_size {
-                break;
-            }
+            let windowed: Vec<f64> = frame
+                .iter()
+                .zip(window.iter())
+                .map(|(&sample, &w)| f64::from(sample) * w)
+                .collect();
 
-            let window = &samples[start..end];
+            let spectrum = scirs2_fft::rfft(&windowed, None).map_err(|e| {
+                RecognitionError::AudioProcessingError {
+                    message: format!("FFT failed for frame {frame_idx}: {e}"),
+                    source: None,
+                }
+            })?;
 
-            // Simple energy-based features (placeholder for real mel-spectrogram)
-            let mut frame_features = Vec::new();
-            for mel_idx in 0..n_mels {
-                let freq_start = (mel_idx * window_size) / n_mels;
-                let freq_end = ((mel_idx + 1) * window_size) / n_mels;
+            let power: Vec<f32> = spectrum
+                .iter()
+                .take(n_bins)
+                .map(|c| {
+                    #[allow(clippy::cast_possible_truncation)]
+                    {
+                        (c.re * c.re + c.im * c.im) as f32
+                    }
+                })
+                .collect();
 
-                let energy: f32 = window[freq_start..freq_end.min(window.len())]
+            let mut frame_features = Vec::with_capacity(n_mels);
+            for filter in &filterbank {
+                let energy: f32 = filter
                     .iter()
-                    .map(|x| x * x)
+                    .zip(power.iter())
+                    .map(|(weight, value)| weight * value)
                     .sum();
-
-                frame_features.push(energy.ln().max(-80.0)); // Log energy with floor
+                frame_features.push(energy.max(1e-10).ln().max(-80.0));
             }
 
             features.push(frame_features);
@@ -562,12 +974,16 @@ impl ConformerModel {
         mut input: Vec<Vec<f32>>,
         block: &ConformerBlock,
     ) -> Result<Vec<Vec<f32>>, RecognitionError> {
-        // Macaron-style: First feed-forward (half-step)
+        // Macaron-style half-step feed-forward: x = x + 1/2 * FFN(LN(x)).
+        // The residual connection was previously missing, so the half-step replaced the
+        // input instead of being added to it.
         if let Some(ff2) = &block.feed_forward_2 {
-            input = self.apply_feed_forward(&input, ff2, 0.5).await?;
+            let macaron_residual = input.clone();
             if let Some(ln4) = &block.layer_norm_4 {
                 input = self.apply_layer_norm(&input, ln4)?;
             }
+            input = self.apply_feed_forward(&input, ff2, 0.5).await?;
+            input = self.add_residual_connection(input, macaron_residual)?;
         }
 
         // Multi-head self-attention
@@ -597,96 +1013,230 @@ impl ConformerModel {
         Ok(input)
     }
 
-    /// Apply multi-head self-attention
+    /// Apply scaled dot-product multi-head self-attention.
+    ///
+    /// This is the real computation: each frame is projected through the module's own
+    /// learned `query`/`key`/`value` matrices, attention scores are formed per head as
+    /// `Q Kᵀ / sqrt(head_dim)`, normalised with a numerically stable softmax, applied to
+    /// `V`, and the concatenated heads are projected back through `output_weights`.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelError`] if the stored weight matrices do not
+    /// match the sequence's model dimension.
     async fn apply_multi_head_attention(
         &self,
         input: &[Vec<f32>],
         attention: &MultiHeadAttention,
     ) -> Result<Vec<Vec<f32>>, RecognitionError> {
-        // Simplified multi-head attention implementation
-        // In practice, this would involve proper Q, K, V computations and attention weights
-
         let seq_len = input.len();
         let model_dim = input[0].len();
         let head_dim = attention.config.head_dim;
         let num_heads = attention.config.num_heads;
+        let inner_dim = num_heads * head_dim;
 
-        tracing::debug!("Applying multi-head attention with {} heads", num_heads);
+        tracing::debug!("Applying multi-head attention with {num_heads} heads");
 
-        let mut output = vec![vec![0.0; model_dim]; seq_len];
+        if attention.query_weights.len() != inner_dim
+            || attention.output_weights.len() != model_dim
+        {
+            return Err(RecognitionError::ModelError {
+                message: format!(
+                    "Attention weight shapes do not match the model: expected {inner_dim} \
+                     projection rows and {model_dim} output rows, found {} and {}",
+                    attention.query_weights.len(),
+                    attention.output_weights.len()
+                ),
+                source: None,
+            });
+        }
 
-        // Simplified attention computation (placeholder)
-        for i in 0..seq_len {
-            for j in 0..model_dim {
-                output[i][j] = input[i][j] * 0.95; // Simplified transformation
+        // Project the whole sequence into Q, K and V.
+        let queries = matmul_rows(input, &attention.query_weights)?;
+        let keys = matmul_rows(input, &attention.key_weights)?;
+        let values = matmul_rows(input, &attention.value_weights)?;
+
+        #[allow(clippy::cast_precision_loss)]
+        let scale = 1.0 / (head_dim as f32).sqrt();
+        let mut context = vec![vec![0.0_f32; inner_dim]; seq_len];
+
+        for head in 0..num_heads {
+            let offset = head * head_dim;
+            for (i, context_row) in context.iter_mut().enumerate() {
+                // Scores of query i against every key.
+                let mut scores = Vec::with_capacity(seq_len);
+                for key in keys.iter() {
+                    let mut dot = 0.0_f32;
+                    for d in 0..head_dim {
+                        dot += queries[i][offset + d] * key[offset + d];
+                    }
+                    scores.push(dot * scale);
+                }
+
+                // Learned relative-position bias, when the checkpoint provides one.
+                if let Some(bias) = &attention.relative_position_bias {
+                    for (j, score) in scores.iter_mut().enumerate() {
+                        let distance = j as isize - i as isize;
+                        let index = (distance + bias[head].len() as isize / 2)
+                            .clamp(0, bias[head].len() as isize - 1)
+                            as usize;
+                        *score += bias[head][index];
+                    }
+                }
+
+                softmax_in_place(&mut scores);
+
+                for (j, weight) in scores.iter().enumerate() {
+                    for d in 0..head_dim {
+                        context_row[offset + d] += weight * values[j][offset + d];
+                    }
+                }
             }
         }
 
-        Ok(output)
+        matmul_rows(&context, &attention.output_weights)
     }
 
-    /// Apply convolution module
+    /// Apply the Conformer convolution module.
+    ///
+    /// Real computation, in the order given by the Conformer paper (section 2.2):
+    /// pointwise convolution to `2 * d` channels, gated linear unit, depthwise
+    /// convolution over time using the module's own per-channel kernel, normalisation
+    /// with the learned `gamma`/`beta`, the configured activation, and a second
+    /// pointwise convolution back to `d` channels.
+    ///
+    /// Because inference-time batch-norm running statistics are not part of the stored
+    /// parameters, normalisation uses the per-channel statistics of the current
+    /// utterance before applying the learned affine transform.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelError`] when the stored kernels do not match the
+    /// sequence's channel count.
     async fn apply_convolution_module(
         &self,
         input: &[Vec<f32>],
         conv_module: &ConvolutionModule,
     ) -> Result<Vec<Vec<f32>>, RecognitionError> {
-        // Simplified convolution module implementation
         let seq_len = input.len();
         let model_dim = input[0].len();
-
-        tracing::debug!(
-            "Applying convolution module with kernel size {}",
-            conv_module.config.kernel_size
-        );
-
-        let mut output = vec![vec![0.0; model_dim]; seq_len];
-
-        // Simplified 1D convolution (placeholder)
         let kernel_size = conv_module.config.kernel_size;
-        let padding = kernel_size / 2;
 
-        for i in 0..seq_len {
-            for j in 0..model_dim {
-                let mut sum = 0.0;
-                let mut count = 0;
+        tracing::debug!("Applying convolution module with kernel size {kernel_size}");
 
-                for k in 0..kernel_size {
-                    let idx = i as i32 + k as i32 - padding as i32;
-                    if idx >= 0 && (idx as usize) < seq_len {
-                        sum += input[idx as usize][j];
-                        count += 1;
-                    }
-                }
+        if conv_module.pointwise_conv1_weights.len() != model_dim * 2
+            || conv_module.depthwise_conv_weights.len() != model_dim
+            || conv_module.pointwise_conv2_weights.len() != model_dim
+        {
+            return Err(RecognitionError::ModelError {
+                message: format!(
+                    "Convolution module shapes do not match the model dimension {model_dim}: \
+                     pointwise1 rows {}, depthwise rows {}, pointwise2 rows {}",
+                    conv_module.pointwise_conv1_weights.len(),
+                    conv_module.depthwise_conv_weights.len(),
+                    conv_module.pointwise_conv2_weights.len()
+                ),
+                source: None,
+            });
+        }
 
-                output[i][j] = if count > 0 { sum / count as f32 } else { 0.0 };
-
-                // Apply activation function
-                output[i][j] = self.apply_activation(output[i][j], &conv_module.config.activation);
+        // Pointwise convolution 1: d -> 2d, then GLU gating back down to d.
+        let expanded = matmul_rows(input, &conv_module.pointwise_conv1_weights)?;
+        let mut gated = vec![vec![0.0_f32; model_dim]; seq_len];
+        for (t, frame) in expanded.iter().enumerate() {
+            for c in 0..model_dim {
+                let value = frame[c];
+                let gate = frame[model_dim + c];
+                gated[t][c] = value * sigmoid(gate);
             }
         }
 
-        Ok(output)
+        // Depthwise convolution over time with the module's own learned kernel.
+        let padding = kernel_size / 2;
+        let mut convolved = vec![vec![0.0_f32; model_dim]; seq_len];
+        for c in 0..model_dim {
+            let kernel = &conv_module.depthwise_conv_weights[c];
+            let taps = kernel.len().min(kernel_size);
+            for t in 0..seq_len {
+                let mut sum = 0.0_f32;
+                for (k, &tap) in kernel.iter().take(taps).enumerate() {
+                    let index = t as isize + k as isize - padding as isize;
+                    if index >= 0 && (index as usize) < seq_len {
+                        sum += tap * gated[index as usize][c];
+                    }
+                }
+                convolved[t][c] = sum;
+            }
+        }
+
+        // Normalisation with the learned affine parameters, then the activation.
+        #[allow(clippy::cast_precision_loss)]
+        let frames = seq_len as f32;
+        for c in 0..model_dim {
+            let mean = convolved.iter().map(|frame| frame[c]).sum::<f32>() / frames;
+            let variance = convolved
+                .iter()
+                .map(|frame| (frame[c] - mean).powi(2))
+                .sum::<f32>()
+                / frames;
+            let inv_std = 1.0 / (variance + 1e-5).sqrt();
+            let gamma = conv_module.batch_norm_gamma.get(c).copied().unwrap_or(1.0);
+            let beta = conv_module.batch_norm_beta.get(c).copied().unwrap_or(0.0);
+            for frame in &mut convolved {
+                let normalized = (frame[c] - mean) * inv_std * gamma + beta;
+                frame[c] = self.apply_activation(normalized, &conv_module.config.activation);
+            }
+        }
+
+        // Pointwise convolution 2: d -> d.
+        matmul_rows(&convolved, &conv_module.pointwise_conv2_weights)
     }
 
-    /// Apply feed-forward network
+    /// Apply the position-wise feed-forward network.
+    ///
+    /// Real computation: `scale * W2 · activation(W1 · x + b1) + b2`, using the
+    /// network's own stored matrices and biases. `scale` is `0.5` for the macaron-style
+    /// half-step feed-forward and `1.0` for the full-step one.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelError`] when the stored matrices do not match
+    /// the sequence's model dimension.
     async fn apply_feed_forward(
         &self,
         input: &[Vec<f32>],
         ff_network: &FeedForwardNetwork,
         scale: f32,
     ) -> Result<Vec<Vec<f32>>, RecognitionError> {
-        let seq_len = input.len();
         let model_dim = input[0].len();
+        let hidden_dim = ff_network.config.hidden_dim;
 
-        tracing::debug!("Applying feed-forward network with scale {}", scale);
+        tracing::debug!("Applying feed-forward network with scale {scale}");
 
-        let mut output = vec![vec![0.0; model_dim]; seq_len];
+        if ff_network.linear1_weights.len() != hidden_dim
+            || ff_network.linear2_weights.len() != model_dim
+        {
+            return Err(RecognitionError::ModelError {
+                message: format!(
+                    "Feed-forward shapes do not match: expected {hidden_dim} hidden rows and \
+                     {model_dim} output rows, found {} and {}",
+                    ff_network.linear1_weights.len(),
+                    ff_network.linear2_weights.len()
+                ),
+                source: None,
+            });
+        }
 
-        // Simplified feed-forward computation (placeholder)
-        for i in 0..seq_len {
-            for j in 0..model_dim {
-                output[i][j] = input[i][j] * scale * 0.98; // Simplified transformation
+        let mut hidden = matmul_rows(input, &ff_network.linear1_weights)?;
+        for frame in &mut hidden {
+            for (unit, value) in frame.iter_mut().enumerate() {
+                *value += ff_network.linear1_bias.get(unit).copied().unwrap_or(0.0);
+                *value = self.apply_activation(*value, &ff_network.config.activation);
+            }
+        }
+
+        let mut output = matmul_rows(&hidden, &ff_network.linear2_weights)?;
+        for frame in &mut output {
+            for (unit, value) in frame.iter_mut().enumerate() {
+                *value += ff_network.linear2_bias.get(unit).copied().unwrap_or(0.0);
+                *value *= scale;
             }
         }
 
@@ -776,30 +1326,57 @@ impl ConformerModel {
         Ok(logits)
     }
 
-    /// Convert logits to text using greedy decoding
-    async fn decode_logits(&self, logits: Vec<Vec<f32>>) -> Result<String, RecognitionError> {
-        // Simplified greedy decoding
-        let mut tokens = Vec::new();
+    /// Greedy CTC decoding.
+    ///
+    /// Returns the decoded text together with a real confidence: the mean softmax
+    /// posterior of the arg-max token across frames, which varies with the actual
+    /// logits rather than being a fixed constant.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelError`] if a frame has no logits.
+    async fn decode_logits(
+        &self,
+        logits: Vec<Vec<f32>>,
+    ) -> Result<(String, f32), RecognitionError> {
+        let mut tokens = Vec::with_capacity(logits.len());
+        let mut posterior_sum = 0.0_f32;
 
-        for frame_logits in logits {
-            // Find the token with the highest probability
+        for frame_logits in &logits {
+            if frame_logits.is_empty() {
+                return Err(RecognitionError::ModelError {
+                    message: "Decoder received a frame with no logits".to_string(),
+                    source: None,
+                });
+            }
+
+            let mut probabilities = frame_logits.clone();
+            softmax_in_place(&mut probabilities);
+
             let mut max_idx = 0;
-            let mut max_val = frame_logits[0];
-
-            for (i, &logit) in frame_logits.iter().enumerate().skip(1) {
-                if logit > max_val {
-                    max_val = logit;
+            let mut max_val = probabilities[0];
+            for (i, &probability) in probabilities.iter().enumerate().skip(1) {
+                if probability > max_val {
+                    max_val = probability;
                     max_idx = i;
                 }
             }
 
+            posterior_sum += max_val;
             tokens.push(max_idx);
         }
 
-        // Convert tokens to text (simplified)
+        let confidence = if logits.is_empty() {
+            0.0
+        } else {
+            #[allow(clippy::cast_precision_loss)]
+            {
+                posterior_sum / logits.len() as f32
+            }
+        };
+
         let text = self.tokens_to_text(&tokens).await?;
 
-        Ok(text)
+        Ok((text, confidence))
     }
 
     /// Convert token IDs to text
@@ -868,7 +1445,6 @@ impl ASRModel for ConformerModel {
         audio: &AudioBuffer,
         config: Option<&ASRConfig>,
     ) -> crate::traits::RecognitionResult<Transcript> {
-        let _config = config; // Placeholder for future config usage
         let start_time = std::time::Instant::now();
 
         tracing::info!(
@@ -877,22 +1453,33 @@ impl ASRModel for ConformerModel {
         );
 
         let result = async {
+            // Refuse to decode from untrained parameters: the architecture is real but
+            // random weights carry no learned representation, so any text produced would
+            // be noise presented as a transcript.
+            if !self.weight_source.is_trained() {
+                return Err(Self::untrained_error().into());
+            }
+
             // Extract features
             let features = self.extract_features(audio).await?;
 
             // Forward pass through the model
             let logits = self.forward(features).await?;
 
-            // Decode to text
-            let text = self.decode_logits(logits).await?;
+            // Decode to text, keeping the decoder's own mean per-frame posterior as the
+            // confidence rather than a fixed constant.
+            let (text, confidence) = self.decode_logits(logits).await?;
 
-            // Create result
+            let language = config
+                .and_then(|c| c.language)
+                .unwrap_or(LanguageCode::EnUs);
+
             let result = Transcript {
                 text: text.clone(),
-                language: LanguageCode::EnUs, // Simplified
-                confidence: 0.85,             // Placeholder confidence
-                word_timestamps: vec![],      // Simplified - no word timestamps
-                sentence_boundaries: vec![],  // Simplified - no sentence boundaries
+                language,
+                confidence,
+                word_timestamps: vec![], // CTC frame alignment is not exposed yet
+                sentence_boundaries: vec![],
                 processing_duration: Some(start_time.elapsed()),
             };
 
@@ -919,36 +1506,47 @@ impl ASRModel for ConformerModel {
         result
     }
 
+    /// Model metadata.
+    ///
+    /// Every number here is derived from this instance rather than asserted:
+    /// `model_size_mb` is the real parameter count times four bytes, `wer_benchmarks` is
+    /// empty because VoiRS has measured no WER for this implementation, and
+    /// `inference_speed` is `0.0`, meaning "not measured".
     fn metadata(&self) -> ASRMetadata {
-        let mut wer_benchmarks = HashMap::new();
-        wer_benchmarks.insert(LanguageCode::EnUs, 0.05);
+        #[allow(clippy::cast_precision_loss)]
+        let model_size_mb =
+            (self.parameter_count() * std::mem::size_of::<f32>()) as f32 / (1024.0 * 1024.0);
+
+        let description = match &self.weight_source {
+            ConformerWeightSource::RandomInit => "Convolution-augmented Transformer for Speech \
+                 Recognition. Parameters are randomly initialised and untrained: \
+                 transcription is refused until a checkpoint is loaded."
+                .to_string(),
+            ConformerWeightSource::Checkpoint { path, .. } => format!(
+                "Convolution-augmented Transformer for Speech Recognition, parameters loaded \
+                 from {}",
+                path.display()
+            ),
+        };
 
         ASRMetadata {
             name: "Conformer".to_string(),
             version: "1.0.0".to_string(),
-            description: "Convolution-augmented Transformer for Speech Recognition".to_string(),
+            description,
             supported_languages: self.supported_languages(),
             architecture: "Conformer".to_string(),
-            model_size_mb: 512.0, // Estimated size
-            inference_speed: 1.5, // Relative to real-time
-            wer_benchmarks,
-            supported_features: vec![
-                ASRFeature::WordTimestamps,
-                ASRFeature::SentenceSegmentation,
-                ASRFeature::LanguageDetection,
-            ],
+            model_size_mb,
+            // 0.0 == not measured. Call the benchmarking suite on real hardware to get a
+            // real figure instead.
+            inference_speed: 0.0,
+            // Empty: no WER has been measured for this implementation.
+            wer_benchmarks: HashMap::new(),
+            supported_features: self.advertised_features(),
         }
     }
 
     fn supports_feature(&self, feature: ASRFeature) -> bool {
-        matches!(
-            feature,
-            ASRFeature::WordTimestamps
-                | ASRFeature::SentenceSegmentation
-                | ASRFeature::LanguageDetection
-                | ASRFeature::NoiseRobustness
-                | ASRFeature::StreamingInference
-        )
+        self.advertised_features().contains(&feature)
     }
 
     fn supported_languages(&self) -> Vec<LanguageCode> {
@@ -961,6 +1559,11 @@ impl ASRModel for ConformerModel {
         config: Option<&ASRConfig>,
     ) -> crate::traits::RecognitionResult<TranscriptStream> {
         use futures::StreamExt;
+
+        // Same invariant as `transcribe`: no decoding from untrained parameters.
+        if !self.weight_source.is_trained() {
+            return Err(Self::untrained_error().into());
+        }
 
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         let model = self.clone();
@@ -976,6 +1579,8 @@ impl ASRModel for ConformerModel {
             // Conformer encoder sees sufficient context (≥ one mel-spectrogram
             // window) before producing a partial transcript.
             let mut sample_buffer: Vec<f32> = Vec::new();
+            let mut confidence_sum = 0.0_f32;
+            let mut confidence_count = 0_usize;
             // Number of raw samples per chunk emit — 1 second at 16 kHz.
             const CHUNK_SAMPLES: usize = 16_000;
 
@@ -1004,16 +1609,18 @@ impl ASRModel for ConformerModel {
                     let end_time = start_time + 1.0;
 
                     match partial_result {
-                        Ok(text) => {
+                        Ok((text, confidence)) => {
                             accumulated_text.push_str(&text);
                             accumulated_text.push(' ');
+                            confidence_sum += confidence;
+                            confidence_count += 1;
 
                             let chunk = TranscriptChunk {
                                 text,
                                 is_final: false,
                                 start_time,
                                 end_time,
-                                confidence: 0.75,
+                                confidence,
                             };
                             if sender.send(Ok(chunk)).is_err() {
                                 return;
@@ -1039,21 +1646,31 @@ impl ASRModel for ConformerModel {
                 }
                 .await;
 
-                if let Ok(text) = flush_result {
+                if let Ok((text, confidence)) = flush_result {
                     accumulated_text.push_str(&text);
                     accumulated_text.push(' ');
+                    confidence_sum += confidence;
+                    confidence_count += 1;
                 }
             }
 
             // Emit the final consolidated transcript chunk.
             let final_text = accumulated_text.trim().to_string();
             let total_duration = chunk_index as f32;
+            // Real aggregate confidence: the mean of the per-chunk posteriors that were
+            // actually produced, not a constant.
+            #[allow(clippy::cast_precision_loss)]
+            let final_confidence = if confidence_count == 0 {
+                0.0
+            } else {
+                confidence_sum / confidence_count as f32
+            };
             let final_chunk = TranscriptChunk {
                 text: final_text,
                 is_final: true,
                 start_time: 0.0,
                 end_time: total_duration,
-                confidence: 0.85,
+                confidence: final_confidence,
             };
             let _ = sender.send(Ok(final_chunk));
         });
@@ -1098,13 +1715,16 @@ impl MultiHeadAttention {
 impl ConvolutionModule {
     fn new(config: ConvolutionConfig, model_dim: usize) -> Result<Self, RecognitionError> {
         Ok(Self {
-            config,
             pointwise_conv1_weights: Self::initialize_conv_weights(model_dim, model_dim * 2),
-            depthwise_conv_weights: Self::initialize_depthwise_weights(model_dim),
+            depthwise_conv_weights: Self::initialize_depthwise_weights(
+                model_dim,
+                config.kernel_size,
+            ),
             pointwise_conv2_weights: Self::initialize_conv_weights(model_dim, model_dim),
             batch_norm_gamma: vec![1.0; model_dim],
             batch_norm_beta: vec![0.0; model_dim],
-            glu_weights: None, // Simplified
+            glu_weights: None,
+            config,
         })
     }
 
@@ -1121,12 +1741,15 @@ impl ConvolutionModule {
         weights
     }
 
-    fn initialize_depthwise_weights(channels: usize) -> Vec<Vec<f32>> {
+    /// One kernel per channel, sized from the module's configured kernel size.
+    ///
+    /// Previously this always allocated 31 taps regardless of `kernel_size`, so a
+    /// configured kernel other than 31 silently used the wrong number of taps.
+    fn initialize_depthwise_weights(channels: usize, kernel_size: usize) -> Vec<Vec<f32>> {
         let mut weights = Vec::new();
         for _ in 0..channels {
             let mut row = Vec::new();
-            for _ in 0..31 {
-                // Kernel size
+            for _ in 0..kernel_size {
                 row.push(scirs2_core::random::random::<f32>() * 0.1 - 0.05);
             }
             weights.push(row);
@@ -1208,107 +1831,5 @@ pub async fn create_conformer_asr_with_config(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::traits::ASRFeature;
-    use voirs_sdk::AudioBuffer;
-
-    #[tokio::test]
-    async fn test_conformer_creation() {
-        let model = ConformerModel::new().await;
-        assert!(model.is_ok());
-
-        let model = model.unwrap();
-        assert_eq!(model.config.num_blocks, 16);
-        assert_eq!(model.config.encoder_dim, 512);
-        assert_eq!(model.config.attention_heads, 8);
-    }
-
-    #[tokio::test]
-    async fn test_conformer_config() {
-        let config = ConformerConfig {
-            num_blocks: 12,
-            encoder_dim: 256,
-            attention_heads: 4,
-            ..Default::default()
-        };
-
-        let model = ConformerModel::with_config(config).await;
-        assert!(model.is_ok());
-
-        let model = model.unwrap();
-        assert_eq!(model.config.num_blocks, 12);
-        assert_eq!(model.config.encoder_dim, 256);
-        assert_eq!(model.config.attention_heads, 4);
-    }
-
-    #[tokio::test]
-    async fn test_conformer_feature_support() {
-        let model = ConformerModel::new().await.unwrap();
-
-        assert!(model.supports_feature(ASRFeature::LanguageDetection));
-        assert!(model.supports_feature(ASRFeature::StreamingInference));
-        assert!(model.supports_feature(ASRFeature::WordTimestamps));
-        assert!(model.supports_feature(ASRFeature::SentenceSegmentation));
-        assert!(model.supports_feature(ASRFeature::NoiseRobustness));
-        assert!(!model.supports_feature(ASRFeature::SpeakerDiarization));
-    }
-
-    #[tokio::test]
-    async fn test_conformer_supported_languages() {
-        let model = ConformerModel::new().await.unwrap();
-        let languages = model.supported_languages();
-
-        assert!(!languages.is_empty());
-        assert!(languages.contains(&LanguageCode::EnUs));
-        assert!(languages.contains(&LanguageCode::JaJp));
-        assert!(languages.contains(&LanguageCode::ZhCn));
-    }
-
-    #[tokio::test]
-    async fn test_conformer_transcription() {
-        let model = ConformerModel::new().await.unwrap();
-
-        // Create test audio (1 second of silence at 16kHz)
-        let samples = vec![0.0; 16000];
-        let audio = AudioBuffer::new(samples, 16000, 1);
-
-        let result = model.transcribe(&audio, None).await;
-        assert!(result.is_ok());
-
-        let result = result.unwrap();
-        // NOTE: With all-zero (silent) audio and randomly-initialized model weights,
-        // greedy CTC decoding may output all blank tokens (token 0), yielding empty
-        // text. This is a valid result for silence; we only assert structural
-        // correctness (no error, positive confidence, processing duration recorded).
-        // Asserting non-empty text here would be flaky under resource contention
-        // because the random weight initialization depends on the RNG state at the
-        // moment of model construction, which varies with scheduler timing.
-        // With randomly-initialized weights, confidence may be 0.0 or any non-negative
-        // value. We only assert it is a finite, non-negative float.
-        assert!(result.confidence >= 0.0);
-        assert!(result.confidence.is_finite());
-        assert!(result.processing_duration.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_conformer_metadata() {
-        let model = ConformerModel::new().await.unwrap();
-        let metadata = model.metadata();
-
-        assert_eq!(metadata.name, "Conformer");
-        assert_eq!(metadata.architecture, "Conformer");
-        assert!(!metadata.supported_languages.is_empty());
-        assert!(!metadata.supported_features.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_factory_functions() {
-        let model1 = create_conformer_asr().await;
-        assert!(model1.is_ok());
-
-        let config = ConformerConfig::default();
-        let model2 = create_conformer_asr_with_config(config).await;
-        assert!(model2.is_ok());
-    }
-}
+#[path = "conformer_tests.rs"]
+mod tests;

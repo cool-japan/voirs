@@ -150,6 +150,20 @@ pub struct WeightLoadReport {
     pub shape_mismatches: usize,
     /// Checkpoint tensors with an unsupported dtype.
     pub unsupported_dtype: usize,
+    /// Model parameters that no checkpoint tensor supplied.
+    ///
+    /// Non-zero means part of the network kept its pseudo-random initialization,
+    /// so the model is **not** fully pretrained.
+    pub missing_parameters: usize,
+    /// Total number of parameters registered in the model.
+    pub total_parameters: usize,
+}
+
+impl WeightLoadReport {
+    /// Whether every model parameter was supplied by the checkpoint.
+    pub fn is_complete(&self) -> bool {
+        self.missing_parameters == 0
+    }
 }
 
 /// Decode a SafeTensors view into `f32` values.
@@ -263,6 +277,45 @@ pub fn load_safetensors_into_varmap<F>(
 where
     F: Fn(&str) -> Option<String>,
 {
+    load_safetensors_into_varmap_with_mode(varmap, path, device, map_name, LoadMode::Strict)
+}
+
+/// How thoroughly a checkpoint must cover the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LoadMode {
+    /// Every model parameter must be supplied by the checkpoint (default).
+    ///
+    /// A partially-matching checkpoint is rejected, because the unmatched layers
+    /// would silently keep their pseudo-random initialization while
+    /// `is_pretrained()` reported success.
+    #[default]
+    Strict,
+    /// Accept a partial load; the caller is responsible for interpreting
+    /// [`WeightLoadReport::missing_parameters`].
+    ///
+    /// Intended for adapting checkpoints layer by layer, never for inference.
+    Partial,
+}
+
+/// Load a SafeTensors checkpoint into `varmap` with an explicit coverage policy.
+///
+/// See [`load_safetensors_into_varmap`]; this variant additionally lets the
+/// caller accept a partial load.
+///
+/// # Errors
+/// Returns [`VocoderError::ModelError`] if the file cannot be read or parsed, if
+/// no tensor matched a model parameter, or — under [`LoadMode::Strict`] — if any
+/// model parameter was left unset by the checkpoint.
+pub fn load_safetensors_into_varmap_with_mode<F>(
+    varmap: &mut VarMap,
+    path: &Path,
+    device: &Device,
+    map_name: F,
+    mode: LoadMode,
+) -> Result<WeightLoadReport>
+where
+    F: Fn(&str) -> Option<String>,
+{
     let data = std::fs::read(path).map_err(|e| {
         VocoderError::ModelError(format!("Failed to read VITS2 weights file {path:?}: {e}"))
     })?;
@@ -330,6 +383,9 @@ where
     let mut entries: Vec<(String, RawTensor)> = decoded.into_iter().collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
+    report.total_parameters = targets.len();
+    let mut filled: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     for (external_name, raw) in entries {
         let Some(internal_name) = map_name(&external_name) else {
             report.unmapped += 1;
@@ -355,13 +411,20 @@ where
 
         let tensor = Tensor::from_vec(raw.values, shape, device)?;
         match varmap.set_one(&internal_name, &tensor) {
-            Ok(()) => report.loaded += 1,
+            Ok(()) => {
+                report.loaded += 1;
+                filled.insert(internal_name);
+            }
             Err(e) => {
                 tracing::warn!("VITS2: failed to set '{internal_name}': {e}");
                 report.shape_mismatches += 1;
             }
         }
     }
+
+    let mut missing: Vec<&String> = targets.keys().filter(|k| !filled.contains(*k)).collect();
+    missing.sort();
+    report.missing_parameters = missing.len();
 
     if report.loaded == 0 {
         return Err(VocoderError::ModelError(format!(
@@ -372,11 +435,22 @@ where
         )));
     }
 
+    if mode == LoadMode::Strict && report.missing_parameters > 0 {
+        let sample: Vec<&str> = missing.iter().take(5).map(|s| s.as_str()).collect();
+        return Err(VocoderError::ModelError(format!(
+            "Incomplete VITS2 checkpoint {path:?}: {} of {} model parameters were not supplied \
+             (e.g. {sample:?}); those layers would keep their pseudo-random initialization. \
+             Use a matching checkpoint, or load_weights_partial if a partial load is intended",
+            report.missing_parameters, report.total_parameters
+        )));
+    }
+
     tracing::info!(
-        "VITS2 checkpoint {path:?}: {} loaded, {} unmapped, {} shape mismatches",
+        "VITS2 checkpoint {path:?}: {} loaded, {} unmapped, {} shape mismatches, {} missing",
         report.loaded,
         report.unmapped,
-        report.shape_mismatches
+        report.shape_mismatches,
+        report.missing_parameters
     );
 
     Ok(report)
@@ -618,6 +692,9 @@ mod tests {
                 .expect("load");
         assert_eq!(report.loaded, 4);
         assert_eq!(report.shape_mismatches, 0);
+        assert_eq!(report.missing_parameters, 0);
+        assert_eq!(report.total_parameters, 4);
+        assert!(report.is_complete());
 
         let src = varmap_src.data().lock().expect("lock");
         let dst = varmap_dst.data().lock().expect("lock");
@@ -645,6 +722,45 @@ mod tests {
         let err = load_safetensors_into_varmap(&mut varmap_dst, &path, &device, |_| None)
             .expect_err("must fail closed");
         assert!(err.to_string().contains("No VITS2 weights"));
+    }
+
+    #[test]
+    fn test_strict_mode_rejects_partial_coverage() {
+        let (varmap_src, device) = build_varmap();
+        seed_varmap(&varmap_src, 5, &device).expect("seed");
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("weights.safetensors");
+        varmap_src.save(&path).expect("save");
+
+        // Only the layer-norm parameters are mapped; the linear layer would keep
+        // its random initialization.
+        let partial_map = |n: &str| {
+            if n.starts_with("norm.") {
+                Some(n.to_string())
+            } else {
+                None
+            }
+        };
+
+        let (mut strict_target, _) = build_varmap();
+        let err = load_safetensors_into_varmap(&mut strict_target, &path, &device, partial_map)
+            .expect_err("strict mode must reject a partial checkpoint");
+        assert!(err.to_string().contains("Incomplete VITS2 checkpoint"));
+
+        // Partial mode accepts it but reports exactly what is missing.
+        let (mut partial_target, _) = build_varmap();
+        let report = load_safetensors_into_varmap_with_mode(
+            &mut partial_target,
+            &path,
+            &device,
+            partial_map,
+            LoadMode::Partial,
+        )
+        .expect("partial load");
+        assert_eq!(report.loaded, 2);
+        assert_eq!(report.missing_parameters, 2);
+        assert_eq!(report.total_parameters, 4);
+        assert!(!report.is_complete());
     }
 
     #[test]

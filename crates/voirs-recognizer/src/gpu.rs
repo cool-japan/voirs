@@ -123,7 +123,7 @@ impl GpuAccelerator {
         });
 
         // Check for CUDA devices
-        #[cfg(feature = "cuda")]
+        #[cfg(feature = "gpu")]
         {
             if let Ok(cuda_devices) = Self::detect_cuda_devices() {
                 devices.extend(cuda_devices);
@@ -158,14 +158,24 @@ impl GpuAccelerator {
             Some(device_info) => {
                 match device_info.device_type {
                     DeviceType::Cpu => Ok(Device::Cpu),
-                    #[cfg(feature = "cuda")]
+                    #[cfg(feature = "gpu")]
                     DeviceType::Cuda => {
                         let device_index = config.cuda_device_index.unwrap_or(0);
-                        Device::new_cuda(device_index)
-                            .map_err(|e| RecognitionError::ResourceError {
+                        // `Device::new_cuda` panics (rather than returning Err) when the
+                        // CUDA toolkit is absent, so the call is unwind-guarded.
+                        match std::panic::catch_unwind(|| Device::new_cuda(device_index)) {
+                            Ok(Ok(device)) => Ok(device),
+                            Ok(Err(e)) => Err(RecognitionError::ResourceError {
                                 message: format!("Failed to initialize CUDA device {device_index}: {e}"),
                                 source: Some(Box::new(e)),
-                            })
+                            }),
+                            Err(_) => Err(RecognitionError::ResourceError {
+                                message: format!(
+                                    "CUDA runtime unavailable: initializing CUDA device {device_index} aborted"
+                                ),
+                                source: None,
+                            }),
+                        }
                     }
                     #[cfg(target_os = "macos")]
                     DeviceType::Metal => {
@@ -244,7 +254,7 @@ impl GpuAccelerator {
     }
 
     /// Detect CUDA devices
-    #[cfg(feature = "cuda")]
+    #[cfg(feature = "gpu")]
     fn detect_cuda_devices() -> Result<Vec<DeviceInfo>, RecognitionError> {
         use std::process::Command;
         

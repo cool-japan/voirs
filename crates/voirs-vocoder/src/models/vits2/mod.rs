@@ -218,6 +218,13 @@ impl Default for Vits2Config {
 }
 
 /// Exact parameter counts of the VITS2 components implemented in this crate.
+///
+/// **This is a partial model.** `voirs-vocoder` implements the text encoder and
+/// the decoder/generator. The posterior encoder, normalizing flows, duration
+/// predictors and discriminators that [`Vits2Config`] also describes are *not*
+/// implemented here, so no field of this struct — and no sum of them — is the
+/// parameter count of a complete VITS2 model. [`Self::missing_components`] names
+/// what is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vits2ParameterBreakdown {
     /// Parameters of [`text_encoder::TextEncoder`]
@@ -227,9 +234,31 @@ pub struct Vits2ParameterBreakdown {
 }
 
 impl Vits2ParameterBreakdown {
-    /// Sum of all implemented components.
-    pub fn total(&self) -> u64 {
+    /// Sum of the components implemented in this crate.
+    ///
+    /// Not the size of a complete VITS2 model — see the struct documentation and
+    /// [`Self::missing_components`].
+    pub fn implemented_total(&self) -> u64 {
         self.text_encoder + self.generator
+    }
+
+    /// Names of the VITS2 components this crate does not implement.
+    ///
+    /// Their parameters are not counted anywhere in this breakdown.
+    pub fn missing_components() -> &'static [&'static str] {
+        &[
+            "posterior_encoder",
+            "flow",
+            "duration_predictor",
+            "stochastic_duration_predictor",
+            "speaker_embedding",
+            "discriminators",
+        ]
+    }
+
+    /// Memory required by the implemented parameters, in MB (4 bytes per f32).
+    pub fn implemented_memory_mb(&self) -> f32 {
+        self.implemented_total() as f32 * 4.0 / (1024.0 * 1024.0)
     }
 }
 
@@ -380,35 +409,18 @@ impl Vits2Config {
     /// The counts mirror the layer shapes the real modules allocate, so they
     /// agree with `Vits2Generator::parameter_count()` and
     /// `TextEncoder::parameter_count()`.
+    ///
+    /// **Partial**: only the text encoder and the decoder are implemented here.
+    /// See [`Vits2ParameterBreakdown`] and
+    /// [`Vits2ParameterBreakdown::missing_components`]. There is deliberately no
+    /// whole-model `estimated_parameters()` / `estimated_memory_mb()` on this
+    /// type, because any such number would be a guess for the unimplemented
+    /// half of the architecture.
     pub fn parameter_breakdown(&self) -> Vits2ParameterBreakdown {
         Vits2ParameterBreakdown {
             text_encoder: self.text_encoder_config().parameter_count(),
             generator: self.generator_config().parameter_count(),
         }
-    }
-
-    /// Total parameters of the VITS2 components implemented in this crate.
-    ///
-    /// This covers the text encoder and the decoder/generator only. The
-    /// posterior encoder, normalizing flows, duration predictors and the
-    /// discriminators described by this configuration are **not** implemented in
-    /// `voirs-vocoder`, so they contribute nothing here — see
-    /// [`Vits2Config::parameter_breakdown`] for the split rather than reading
-    /// this as a full-model figure.
-    pub fn estimated_parameters(&self) -> u64 {
-        self.parameter_breakdown().total()
-    }
-
-    /// Memory required by the implemented components, in MB.
-    ///
-    /// Parameter memory is exact (4 bytes per f32 parameter); the activation
-    /// term is an estimate for one `segment_size` mel segment and its
-    /// intermediate buffers.
-    pub fn estimated_memory_mb(&self) -> f32 {
-        let param_memory = self.estimated_parameters() as f32 * 4.0 / (1024.0 * 1024.0);
-        let activation_memory =
-            self.segment_size as f32 * self.n_mel as f32 * 4.0 / (1024.0 * 1024.0);
-        param_memory + activation_memory * 2.0
     }
 }
 
@@ -603,14 +615,24 @@ mod tests {
     #[test]
     fn test_vits2_memory_estimation() {
         let config = Vits2Config::default();
-        let memory_mb = config.estimated_memory_mb();
-        assert!(memory_mb > 0.0);
-        assert!(memory_mb < 10000.0); // Reasonable upper bound
+        let breakdown = config.parameter_breakdown();
 
-        let params = config.estimated_parameters();
         // A HiFi-GAN-scale decoder plus a 6-layer transformer encoder is in the
         // tens of millions of parameters; the old estimate reported ~1e5.
-        assert!(params > 10_000_000, "unrealistically small count: {params}");
+        assert!(
+            breakdown.implemented_total() > 10_000_000,
+            "unrealistically small count: {}",
+            breakdown.implemented_total()
+        );
+        assert!(breakdown.generator > breakdown.text_encoder);
+
+        let memory_mb = breakdown.implemented_memory_mb();
+        assert!(memory_mb > 0.0);
+        assert!(memory_mb < 10000.0);
+
+        // The unimplemented half of the architecture is named, not silently
+        // folded into the total.
+        assert!(Vits2ParameterBreakdown::missing_components().contains(&"flow"));
     }
 
     #[test]
@@ -618,7 +640,10 @@ mod tests {
         // Use the fast preset so the modules stay cheap to allocate.
         let config = Vits2Config::fast();
         let breakdown = config.parameter_breakdown();
-        assert_eq!(breakdown.total(), config.estimated_parameters());
+        assert_eq!(
+            breakdown.implemented_total(),
+            breakdown.text_encoder + breakdown.generator
+        );
 
         let generator =
             generator::Vits2Generator::new(config.generator_config()).expect("generator");

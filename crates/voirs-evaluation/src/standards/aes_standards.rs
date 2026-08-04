@@ -303,14 +303,101 @@ impl AesStandards {
         Ok(thd_n)
     }
 
-    /// Calculate frequency response flatness
+    /// Calculate frequency response flatness (dB spread across the audible
+    /// passband).
+    ///
+    /// Computes the averaged magnitude spectrum (Hann-windowed, 50%-overlapping
+    /// frames, `scirs2_fft::rfft`) across `samples`, converts each passband bin
+    /// (20 Hz – min(20 kHz, 0.95·Nyquist)) to dB, and reports the spread between
+    /// the 95th and 5th percentile bin magnitudes. This robust-range approach
+    /// (rather than raw max − min) avoids letting a single narrow spectral null or
+    /// a near-silent high-frequency tail dominate the figure, standard practice
+    /// for frequency-response measurements. A perfectly flat response reports
+    /// `0.0` dB; real-world transducers/codecs typically show several dB of
+    /// passband ripple. A true swept-sine measurement (driving the device under
+    /// test directly) would be more precise than this passive spectral analysis
+    /// of a single recorded/rendered signal, but this is a genuine measurement
+    /// from the actual samples rather than a fixed placeholder.
     fn calculate_frequency_response_flatness(
         &self,
-        _samples: &[f32],
+        samples: &[f32],
     ) -> Result<f32, StandardsError> {
-        // Placeholder: would require swept sine measurement
-        // For now, return a conservative estimate
-        Ok(0.3) // ±0.3 dB
+        if samples.len() < 64 {
+            return Err(StandardsError::InvalidAudioData {
+                message: "Not enough samples to measure frequency response flatness".to_string(),
+            });
+        }
+
+        let fft_size = 8192usize.min(samples.len().next_power_of_two()).max(256);
+        let hop = (fft_size / 2).max(1);
+        let mut summed_power = vec![0.0f64; fft_size / 2 + 1];
+        let mut frame_count = 0usize;
+        let mut start = 0usize;
+        loop {
+            let available = (samples.len() - start).min(fft_size);
+            let mut buffer = vec![0.0f64; fft_size];
+            for (i, slot) in buffer.iter_mut().enumerate().take(available) {
+                let window = 0.5
+                    - 0.5
+                        * (2.0 * std::f64::consts::PI * i as f64 / (fft_size as f64 - 1.0).max(1.0))
+                            .cos();
+                *slot = f64::from(samples[start + i]) * window;
+            }
+            if let Ok(spectrum) = scirs2_fft::rfft(&buffer, Some(fft_size)) {
+                for (k, value) in spectrum.iter().enumerate().take(summed_power.len()) {
+                    summed_power[k] += value.re * value.re + value.im * value.im;
+                }
+                frame_count += 1;
+            }
+            if available < fft_size {
+                break;
+            }
+            start += hop;
+            if start >= samples.len() {
+                break;
+            }
+        }
+
+        if frame_count == 0 {
+            return Err(StandardsError::InvalidAudioData {
+                message: "Unable to compute a frequency-response spectrum".to_string(),
+            });
+        }
+
+        let bin_hz = f64::from(self.sample_rate) / fft_size as f64;
+        let nyquist = f64::from(self.sample_rate) / 2.0;
+        let passband_high = 20_000.0f64.min(nyquist * 0.95);
+        let mut magnitudes_db: Vec<f64> = summed_power
+            .iter()
+            .enumerate()
+            .filter_map(|(k, &power)| {
+                let freq = k as f64 * bin_hz;
+                if !(20.0..=passband_high).contains(&freq) {
+                    return None;
+                }
+                let mean_power = power / frame_count as f64;
+                if mean_power <= 1e-20 {
+                    return None;
+                }
+                Some(10.0 * mean_power.log10())
+            })
+            .collect();
+
+        if magnitudes_db.len() < 8 {
+            // Too little resolvable passband energy to characterize a response
+            // (e.g. a near-silent or heavily band-limited/degenerate signal).
+            return Err(StandardsError::InvalidAudioData {
+                message: "Insufficient passband energy to measure frequency response flatness"
+                    .to_string(),
+            });
+        }
+
+        magnitudes_db.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p05_idx = (magnitudes_db.len() as f64 * 0.05) as usize;
+        let p95_idx = ((magnitudes_db.len() as f64 * 0.95) as usize).min(magnitudes_db.len() - 1);
+        let flatness_db = (magnitudes_db[p95_idx] - magnitudes_db[p05_idx]) as f32;
+
+        Ok(flatness_db.max(0.0))
     }
 
     /// Calculate signal-to-noise ratio

@@ -12,6 +12,9 @@ use thiserror::Error;
 #[cfg(feature = "microservices")]
 use reqwest::Client;
 
+#[cfg(feature = "microservices")]
+use chrono::DateTime;
+
 /// Google Classroom integration errors
 #[derive(Error, Debug, Clone)]
 pub enum ClassroomError {
@@ -387,23 +390,23 @@ impl ClassroomClient {
                     message: e.to_string(),
                 })?;
 
-            let data: serde_json::Value =
-                response
-                    .json()
-                    .await
-                    .map_err(|e| ClassroomError::ApiError {
-                        message: e.to_string(),
-                    })?;
+            let data = parse_json_body(ensure_success(response).await?).await?;
 
-            // Parse courses from response
-            let courses: Vec<Course> = Vec::new();
-            // In production, parse from data["courses"]
-            Ok(courses)
+            data["courses"]
+                .as_array()
+                .map(std::vec::Vec::as_slice)
+                .unwrap_or(&[])
+                .iter()
+                .map(parse_course)
+                .collect()
         }
 
         #[cfg(not(feature = "microservices"))]
         {
-            Ok(vec![])
+            Err(ClassroomError::InvalidConfig {
+                message: "the `microservices` feature (reqwest HTTP client) is not enabled"
+                    .to_string(),
+            })
         }
     }
 
@@ -419,7 +422,7 @@ impl ClassroomClient {
         {
             let url = format!("https://classroom.googleapis.com/v1/courses/{course_id}");
 
-            let _response = self
+            let response = self
                 .http_client
                 .get(&url)
                 .bearer_auth(
@@ -434,23 +437,23 @@ impl ClassroomClient {
                     message: e.to_string(),
                 })?;
 
-            // Parse course from response
+            if response.status().as_u16() == 404 {
+                return Err(ClassroomError::CourseNotFound {
+                    course_id: course_id.to_string(),
+                });
+            }
+
+            let data = parse_json_body(ensure_success(response).await?).await?;
+            parse_course(&data)
         }
 
-        // Mock response for testing
-        Ok(Course {
-            id: course_id.to_string(),
-            name: "Mock Course".to_string(),
-            section: None,
-            description: None,
-            state: CourseState::Active,
-            room: None,
-            owner_id: "mock-owner".to_string(),
-            creation_time: 0,
-            update_time: 0,
-            enrollment_code: None,
-            calendar_id: None,
-        })
+        #[cfg(not(feature = "microservices"))]
+        {
+            Err(ClassroomError::InvalidConfig {
+                message: "the `microservices` feature (reqwest HTTP client) is not enabled"
+                    .to_string(),
+            })
+        }
     }
 
     /// List students in a course
@@ -465,7 +468,7 @@ impl ClassroomClient {
         {
             let url = format!("https://classroom.googleapis.com/v1/courses/{course_id}/students");
 
-            let _response = self
+            let response = self
                 .http_client
                 .get(&url)
                 .bearer_auth(
@@ -480,10 +483,30 @@ impl ClassroomClient {
                     message: e.to_string(),
                 })?;
 
-            // Parse students from response
+            if response.status().as_u16() == 404 {
+                return Err(ClassroomError::CourseNotFound {
+                    course_id: course_id.to_string(),
+                });
+            }
+
+            let data = parse_json_body(ensure_success(response).await?).await?;
+
+            data["students"]
+                .as_array()
+                .map(std::vec::Vec::as_slice)
+                .unwrap_or(&[])
+                .iter()
+                .map(parse_student)
+                .collect()
         }
 
-        Ok(vec![])
+        #[cfg(not(feature = "microservices"))]
+        {
+            Err(ClassroomError::InvalidConfig {
+                message: "the `microservices` feature (reqwest HTTP client) is not enabled"
+                    .to_string(),
+            })
+        }
     }
 
     /// Create course work (assignment)
@@ -501,7 +524,7 @@ impl ClassroomClient {
                 course_work.course_id
             );
 
-            let _response = self
+            let response = self
                 .http_client
                 .post(&url)
                 .bearer_auth(
@@ -517,10 +540,20 @@ impl ClassroomClient {
                     message: e.to_string(),
                 })?;
 
-            // Parse ID from response
+            let data = parse_json_body(ensure_success(response).await?).await?;
+
+            json_id_to_string(&data["id"]).ok_or_else(|| ClassroomError::ApiError {
+                message: "created courseWork response is missing an 'id' field".to_string(),
+            })
         }
 
-        Ok("mock-assignment-id".to_string())
+        #[cfg(not(feature = "microservices"))]
+        {
+            Err(ClassroomError::InvalidConfig {
+                message: "the `microservices` feature (reqwest HTTP client) is not enabled"
+                    .to_string(),
+            })
+        }
     }
 
     /// Submit grade for student
@@ -533,14 +566,17 @@ impl ClassroomClient {
 
         #[cfg(feature = "microservices")]
         {
+            // Draft the grade first (assignedGrade can only be set by the app that
+            // created the courseWork; draftGrade is always settable and is what the
+            // Classroom UI surfaces to the teacher for review before posting).
             let url = format!(
-                "https://classroom.googleapis.com/v1/courses/{}/courseWork/{}/studentSubmissions/{}:modifyAttachments",
+                "https://classroom.googleapis.com/v1/courses/{}/courseWork/{}/studentSubmissions/{}?updateMask=draftGrade",
                 grade.course_id, grade.course_work_id, grade.student_id
             );
 
-            let _response = self
+            let response = self
                 .http_client
-                .post(&url)
+                .patch(&url)
                 .bearer_auth(
                     self.config
                         .access_token
@@ -548,16 +584,53 @@ impl ClassroomClient {
                         .expect("value should be present"),
                 )
                 .json(&serde_json::json!({
-                    "assignedGrade": grade.grade,
+                    "draftGrade": grade.grade,
                 }))
                 .send()
                 .await
                 .map_err(|e| ClassroomError::ApiError {
                     message: e.to_string(),
                 })?;
+
+            ensure_success(response).await?;
+
+            if let Some(comment) = &grade.comment {
+                // Comments are delivered as a private (student <-> teacher) comment
+                // on the submission rather than a field on the grade itself.
+                let comment_url = format!(
+                    "https://classroom.googleapis.com/v1/courses/{}/courseWork/{}/studentSubmissions/{}/addComment",
+                    grade.course_id, grade.course_work_id, grade.student_id
+                );
+
+                let response = self
+                    .http_client
+                    .post(&comment_url)
+                    .bearer_auth(
+                        self.config
+                            .access_token
+                            .as_ref()
+                            .expect("value should be present"),
+                    )
+                    .json(&serde_json::json!({ "text": comment }))
+                    .send()
+                    .await
+                    .map_err(|e| ClassroomError::ApiError {
+                        message: e.to_string(),
+                    })?;
+
+                ensure_success(response).await?;
+            }
+
+            Ok(())
         }
 
-        Ok(())
+        #[cfg(not(feature = "microservices"))]
+        {
+            Err(ClassroomError::InvalidConfig {
+                message: "the `microservices` feature (reqwest HTTP client) is not enabled"
+                    .to_string(),
+            })
+        }
     }
 
     /// Get student submissions for course work
@@ -578,7 +651,7 @@ impl ClassroomClient {
                 "https://classroom.googleapis.com/v1/courses/{course_id}/courseWork/{course_work_id}/studentSubmissions"
             );
 
-            let _response = self
+            let response = self
                 .http_client
                 .get(&url)
                 .bearer_auth(
@@ -593,11 +666,226 @@ impl ClassroomClient {
                     message: e.to_string(),
                 })?;
 
-            // Parse submissions from response
+            if response.status().as_u16() == 404 {
+                return Err(ClassroomError::AssignmentNotFound {
+                    assignment_id: course_work_id.to_string(),
+                });
+            }
+
+            let data = parse_json_body(ensure_success(response).await?).await?;
+
+            data["studentSubmissions"]
+                .as_array()
+                .map(std::vec::Vec::as_slice)
+                .unwrap_or(&[])
+                .iter()
+                .map(parse_submission)
+                .collect()
         }
 
-        Ok(vec![])
+        #[cfg(not(feature = "microservices"))]
+        {
+            Err(ClassroomError::InvalidConfig {
+                message: "the `microservices` feature (reqwest HTTP client) is not enabled"
+                    .to_string(),
+            })
+        }
     }
+}
+
+/// Convert a JSON `id` value to a `String`, accepting either the string IDs
+/// Google Classroom normally returns or a bare number (defensive: some
+/// proxies/mocks re-encode numeric-looking IDs as JSON numbers).
+#[cfg(feature = "microservices")]
+fn json_id_to_string(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(std::string::ToString::to_string)
+        .or_else(|| value.as_u64().map(|n| n.to_string()))
+        .or_else(|| value.as_i64().map(|n| n.to_string()))
+}
+
+/// Extract the human-readable message from a Google API JSON error body,
+/// e.g. `{"error": {"code": 404, "message": "...", "status": "NOT_FOUND"}}`.
+#[cfg(feature = "microservices")]
+fn extract_google_error_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    value["error"]["message"]
+        .as_str()
+        .map(std::string::ToString::to_string)
+}
+
+/// Turn a non-2xx `reqwest::Response` into a typed [`ClassroomError`],
+/// pulling out Google's structured error message when present instead of
+/// discarding the body.
+#[cfg(feature = "microservices")]
+async fn ensure_success(response: reqwest::Response) -> ClassroomResult<reqwest::Response> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let message = extract_google_error_message(&body).unwrap_or(body);
+
+    Err(match status.as_u16() {
+        401 | 403 => ClassroomError::PermissionDenied { action: message },
+        429 => ClassroomError::RateLimitExceeded { seconds: 60 },
+        _ => ClassroomError::ApiError {
+            message: format!("HTTP {status}: {message}"),
+        },
+    })
+}
+
+/// Parse a successful response body as JSON, mapping decode failures to a
+/// typed error instead of letting a malformed body panic the caller.
+#[cfg(feature = "microservices")]
+async fn parse_json_body(response: reqwest::Response) -> ClassroomResult<serde_json::Value> {
+    response.json().await.map_err(|e| ClassroomError::ApiError {
+        message: format!("failed to parse response body as JSON: {e}"),
+    })
+}
+
+/// Parse an RFC 3339 timestamp (Google Classroom's wire format for all
+/// `*Time` fields) into Unix seconds.
+#[cfg(feature = "microservices")]
+fn parse_required_timestamp(value: &serde_json::Value, field: &str) -> ClassroomResult<u64> {
+    let raw = value.as_str().ok_or_else(|| ClassroomError::ApiError {
+        message: format!("response is missing required timestamp field '{field}'"),
+    })?;
+    DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.timestamp().max(0) as u64)
+        .map_err(|e| ClassroomError::ApiError {
+            message: format!("field '{field}' has an unparseable timestamp '{raw}': {e}"),
+        })
+}
+
+/// Parse a `Course` resource from a Google Classroom API JSON response.
+///
+/// <https://developers.google.com/classroom/reference/rest/v1/courses#Course>
+#[cfg(feature = "microservices")]
+fn parse_course(value: &serde_json::Value) -> ClassroomResult<Course> {
+    let id = json_id_to_string(&value["id"]).ok_or_else(|| ClassroomError::ApiError {
+        message: "course response is missing required field 'id'".to_string(),
+    })?;
+    let name = value["name"]
+        .as_str()
+        .ok_or_else(|| ClassroomError::ApiError {
+            message: format!("course {id} response is missing required field 'name'"),
+        })?
+        .to_string();
+    let owner_id = value["ownerId"]
+        .as_str()
+        .ok_or_else(|| ClassroomError::ApiError {
+            message: format!("course {id} response is missing required field 'ownerId'"),
+        })?
+        .to_string();
+    let state = match value["courseState"].as_str() {
+        Some("ACTIVE") => CourseState::Active,
+        Some("ARCHIVED") => CourseState::Archived,
+        Some("PROVISIONED") => CourseState::Provisioned,
+        Some("DECLINED") => CourseState::Declined,
+        Some("SUSPENDED") => CourseState::Suspended,
+        other => {
+            return Err(ClassroomError::ApiError {
+                message: format!("course {id} has unrecognized or missing courseState: {other:?}"),
+            })
+        }
+    };
+
+    Ok(Course {
+        id: id.clone(),
+        name,
+        section: value["section"].as_str().map(String::from),
+        description: value["description"].as_str().map(String::from),
+        state,
+        room: value["room"].as_str().map(String::from),
+        owner_id,
+        creation_time: parse_required_timestamp(&value["creationTime"], "creationTime")?,
+        update_time: parse_required_timestamp(&value["updateTime"], "updateTime")?,
+        enrollment_code: value["enrollmentCode"].as_str().map(String::from),
+        calendar_id: value["calendarId"].as_str().map(String::from),
+    })
+}
+
+/// Parse a `Student` resource from a Google Classroom API JSON response.
+///
+/// <https://developers.google.com/classroom/reference/rest/v1/courses.students#Student>
+#[cfg(feature = "microservices")]
+fn parse_student(value: &serde_json::Value) -> ClassroomResult<Student> {
+    let course_id =
+        json_id_to_string(&value["courseId"]).ok_or_else(|| ClassroomError::ApiError {
+            message: "student response is missing required field 'courseId'".to_string(),
+        })?;
+    let user_id = json_id_to_string(&value["userId"]).ok_or_else(|| ClassroomError::ApiError {
+        message: "student response is missing required field 'userId'".to_string(),
+    })?;
+    let profile = &value["profile"];
+    let id = json_id_to_string(&profile["id"]).unwrap_or_else(|| user_id.clone());
+    let name = profile["name"]["fullName"]
+        .as_str()
+        .ok_or_else(|| ClassroomError::ApiError {
+            message: format!("student {user_id} profile is missing 'name.fullName'"),
+        })?
+        .to_string();
+    let email = profile["emailAddress"]
+        .as_str()
+        .ok_or_else(|| ClassroomError::ApiError {
+            message: format!("student {user_id} profile is missing 'emailAddress'"),
+        })?
+        .to_string();
+
+    Ok(Student {
+        course_id,
+        user_id,
+        profile: UserProfile {
+            id,
+            name,
+            email,
+            photo_url: profile["photoUrl"].as_str().map(String::from),
+        },
+    })
+}
+
+/// Parse a `StudentSubmission` resource from a Google Classroom API JSON
+/// response.
+///
+/// <https://developers.google.com/classroom/reference/rest/v1/courses.courseWork.studentSubmissions#StudentSubmission>
+#[cfg(feature = "microservices")]
+fn parse_submission(value: &serde_json::Value) -> ClassroomResult<Submission> {
+    let id = json_id_to_string(&value["id"]).ok_or_else(|| ClassroomError::ApiError {
+        message: "submission response is missing required field 'id'".to_string(),
+    })?;
+    let course_id =
+        json_id_to_string(&value["courseId"]).ok_or_else(|| ClassroomError::ApiError {
+            message: format!("submission {id} is missing required field 'courseId'"),
+        })?;
+    let course_work_id =
+        json_id_to_string(&value["courseWorkId"]).ok_or_else(|| ClassroomError::ApiError {
+            message: format!("submission {id} is missing required field 'courseWorkId'"),
+        })?;
+    let user_id = json_id_to_string(&value["userId"]).ok_or_else(|| ClassroomError::ApiError {
+        message: format!("submission {id} is missing required field 'userId'"),
+    })?;
+    let state = value["state"]
+        .as_str()
+        .ok_or_else(|| ClassroomError::ApiError {
+            message: format!("submission {id} is missing required field 'state'"),
+        })?
+        .to_string();
+
+    Ok(Submission {
+        id: id.clone(),
+        course_id,
+        course_work_id,
+        user_id,
+        state,
+        assigned_grade: value["assignedGrade"].as_f64(),
+        draft_grade: value["draftGrade"].as_f64(),
+        creation_time: parse_required_timestamp(&value["creationTime"], "creationTime")?,
+        update_time: parse_required_timestamp(&value["updateTime"], "updateTime")?,
+        late: value["late"].as_bool().unwrap_or(false),
+    })
 }
 
 #[cfg(test)]
@@ -688,17 +976,178 @@ mod tests {
         assert!(grade.comment.is_some());
     }
 
+    /// Live end-to-end test against the real Google Classroom API. Gated
+    /// behind an environment variable so the default offline test run never
+    /// makes a network call: set `VOIRS_TEST_GOOGLE_ACCESS_TOKEN` and
+    /// `VOIRS_TEST_GOOGLE_COURSE_ID` to exercise this against a real course.
+    #[cfg(feature = "microservices")]
     #[tokio::test]
-    async fn test_get_course() {
-        let config = create_test_config();
+    async fn test_get_course_live() {
+        let (Ok(token), Ok(course_id)) = (
+            std::env::var("VOIRS_TEST_GOOGLE_ACCESS_TOKEN"),
+            std::env::var("VOIRS_TEST_GOOGLE_COURSE_ID"),
+        ) else {
+            eprintln!(
+                "skipping test_get_course_live: set VOIRS_TEST_GOOGLE_ACCESS_TOKEN and \
+                 VOIRS_TEST_GOOGLE_COURSE_ID to run this against a real account"
+            );
+            return;
+        };
+
+        let mut config = create_test_config();
+        config.access_token = Some(token);
         let client = ClassroomClient::new(config);
 
-        let result = client.get_course("test-course").await;
-        assert!(result.is_ok());
+        let course = client
+            .get_course(&course_id)
+            .await
+            .expect("live Google Classroom API call should succeed with a valid token");
+        assert_eq!(course.id, course_id);
+    }
 
-        let course = result.unwrap();
-        assert_eq!(course.id, "test-course");
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_course_from_real_response_shape() {
+        let value = serde_json::json!({
+            "id": "123456789",
+            "name": "Speech Communication 101",
+            "section": "Section A",
+            "descriptionHeading": "Welcome",
+            "description": "Practice pronunciation with VoiRS",
+            "room": "201",
+            "ownerId": "teacher-42",
+            "creationTime": "2024-01-15T09:30:00.000Z",
+            "updateTime": "2024-02-01T12:00:00.000Z",
+            "enrollmentCode": "abc123",
+            "courseState": "ACTIVE",
+            "alternateLink": "https://classroom.google.com/c/123456789",
+            "calendarId": "cal-1"
+        });
+
+        let course = parse_course(&value).unwrap();
+        assert_eq!(course.id, "123456789");
+        assert_eq!(course.name, "Speech Communication 101");
+        assert_eq!(course.section.as_deref(), Some("Section A"));
         assert_eq!(course.state, CourseState::Active);
+        assert_eq!(course.owner_id, "teacher-42");
+        assert_eq!(course.enrollment_code.as_deref(), Some("abc123"));
+        // 2024-01-15T09:30:00Z
+        assert_eq!(course.creation_time, 1_705_310_400);
+
+        // A different response must parse into genuinely different data,
+        // proving this is real parsing rather than a fixed return value.
+        let other = serde_json::json!({
+            "id": "999",
+            "name": "Advanced Pronunciation",
+            "ownerId": "teacher-7",
+            "creationTime": "2025-06-01T00:00:00.000Z",
+            "updateTime": "2025-06-02T00:00:00.000Z",
+            "courseState": "ARCHIVED"
+        });
+        let other_course = parse_course(&other).unwrap();
+        assert_ne!(course.id, other_course.id);
+        assert_ne!(course.name, other_course.name);
+        assert_eq!(other_course.state, CourseState::Archived);
+        assert_eq!(other_course.section, None);
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_course_missing_required_field_fails_closed() {
+        // No 'id' field at all: must error, never silently substitute a
+        // placeholder ID.
+        let value = serde_json::json!({
+            "name": "No ID Course",
+            "ownerId": "teacher-1",
+            "creationTime": "2024-01-01T00:00:00.000Z",
+            "updateTime": "2024-01-01T00:00:00.000Z",
+            "courseState": "ACTIVE"
+        });
+        let result = parse_course(&value);
+        assert!(matches!(result, Err(ClassroomError::ApiError { .. })));
+
+        // Unrecognized courseState must also fail closed rather than
+        // guessing an arbitrary CourseState variant.
+        let value = serde_json::json!({
+            "id": "1",
+            "name": "Weird State",
+            "ownerId": "teacher-1",
+            "creationTime": "2024-01-01T00:00:00.000Z",
+            "updateTime": "2024-01-01T00:00:00.000Z",
+            "courseState": "COURSE_STATE_UNSPECIFIED"
+        });
+        let result = parse_course(&value);
+        assert!(matches!(result, Err(ClassroomError::ApiError { .. })));
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_student_from_real_response_shape() {
+        let value = serde_json::json!({
+            "courseId": "123",
+            "userId": "student-99",
+            "profile": {
+                "id": "student-99",
+                "name": { "givenName": "Ada", "familyName": "Lovelace", "fullName": "Ada Lovelace" },
+                "emailAddress": "ada@example.edu",
+                "photoUrl": "//example.com/photo.jpg"
+            }
+        });
+
+        let student = parse_student(&value).unwrap();
+        assert_eq!(student.course_id, "123");
+        assert_eq!(student.user_id, "student-99");
+        assert_eq!(student.profile.name, "Ada Lovelace");
+        assert_eq!(student.profile.email, "ada@example.edu");
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_submission_from_real_response_shape() {
+        let value = serde_json::json!({
+            "id": "sub-1",
+            "courseId": "123",
+            "courseWorkId": "work-1",
+            "userId": "student-99",
+            "state": "TURNED_IN",
+            "assignedGrade": 95.0,
+            "draftGrade": 90.0,
+            "creationTime": "2024-03-01T00:00:00.000Z",
+            "updateTime": "2024-03-02T00:00:00.000Z",
+            "late": true
+        });
+
+        let submission = parse_submission(&value).unwrap();
+        assert_eq!(submission.id, "sub-1");
+        assert_eq!(submission.state, "TURNED_IN");
+        assert_eq!(submission.assigned_grade, Some(95.0));
+        assert_eq!(submission.draft_grade, Some(90.0));
+        assert!(submission.late);
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_json_id_to_string_accepts_string_and_number() {
+        assert_eq!(
+            json_id_to_string(&serde_json::json!("abc")),
+            Some("abc".to_string())
+        );
+        assert_eq!(
+            json_id_to_string(&serde_json::json!(42)),
+            Some("42".to_string())
+        );
+        assert_eq!(json_id_to_string(&serde_json::json!(null)), None);
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_extract_google_error_message() {
+        let body = r#"{"error": {"code": 404, "message": "Requested entity was not found.", "status": "NOT_FOUND"}}"#;
+        assert_eq!(
+            extract_google_error_message(body).as_deref(),
+            Some("Requested entity was not found.")
+        );
+        assert_eq!(extract_google_error_message("not json"), None);
     }
 
     #[tokio::test]

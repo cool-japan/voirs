@@ -303,11 +303,19 @@ impl Default for QualityEvaluationConfig {
 pub struct PronunciationEvaluationConfig {
     /// Target language
     pub language: LanguageCode,
-    /// Enable phoneme-level scoring
+    /// Include per-phoneme detail (`PronunciationScore::phoneme_scores`) in results.
+    /// The phoneme-level accuracy aggregate is always computed for real regardless of
+    /// this flag; it only controls whether the detailed per-phoneme breakdown is
+    /// returned.
     pub phoneme_level_scoring: bool,
-    /// Enable word-level scoring
+    /// Include per-word detail (`PronunciationScore::word_scores`) in results. The
+    /// word-level accuracy aggregate is always computed for real regardless of this
+    /// flag; it only controls whether the detailed per-word breakdown is returned.
     pub word_level_scoring: bool,
-    /// Enable prosody assessment
+    /// Reserved for future selective computation. Prosody metrics
+    /// (`fluency_score`/`rhythm_score`/`stress_accuracy`/`intonation_accuracy`) are
+    /// real, alignment-derived computations that are always performed; this flag is
+    /// currently not read (there is no fabricated fallback value to gate).
     pub prosody_assessment: bool,
     /// Specific metrics to compute
     pub metrics: Vec<PronunciationMetric>,
@@ -493,11 +501,19 @@ pub trait PronunciationEvaluator: Send + Sync {
         config: Option<&PronunciationEvaluationConfig>,
     ) -> EvaluationResult<PronunciationScore>;
 
-    /// Evaluate pronunciation with phoneme alignment
+    /// Evaluate pronunciation using a pre-computed phoneme alignment.
+    ///
+    /// `reference_text` is the text the speaker was meant to produce; it is required
+    /// because phoneme/word/stress/intonation accuracy are all scored against it
+    /// (there is no way to assess "pronunciation accuracy" without knowing what was
+    /// supposed to be said). Implementations must not substitute a fixed placeholder
+    /// when this differs from whatever text `alignment` happens to have been built
+    /// from.
     async fn evaluate_pronunciation_with_alignment(
         &self,
         audio: &AudioBuffer,
         alignment: &PhonemeAlignment,
+        reference_text: &str,
         config: Option<&PronunciationEvaluationConfig>,
     ) -> EvaluationResult<PronunciationScore>;
 

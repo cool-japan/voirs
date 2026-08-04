@@ -214,6 +214,12 @@ impl AtomicFeedbackStorage {
         (user_count, total_feedback)
     }
 
+    /// List every user ID with at least one stored feedback record.
+    pub async fn user_ids(&self) -> Vec<String> {
+        let storage = self.storage.read().await;
+        storage.keys().cloned().collect()
+    }
+
     /// Remove feedback records older than the given timestamp for all users.
     /// Returns the total number of records removed.
     pub async fn cleanup_older_than(&self, older_than: chrono::DateTime<chrono::Utc>) -> usize {

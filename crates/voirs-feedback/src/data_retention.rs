@@ -42,6 +42,7 @@
 //! # }
 //! ```
 
+use crate::persistence::PersistenceManager;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -279,6 +280,36 @@ impl Default for RetentionConfig {
     }
 }
 
+/// Which underlying persistence store a retention policy's `data_category`
+/// maps to. [`PersistenceManager`] does not track data per named category --
+/// only per session and per feedback record -- so a policy's category string
+/// is classified into one of these before any real query or deletion can be
+/// attempted against it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetentionStore {
+    /// Backed by `PersistenceManager::{save,load}_session` / `cleanup`.
+    Sessions,
+    /// Backed by `PersistenceManager::{save,load}_feedback` / `cleanup`.
+    Feedback,
+    /// No queryable backing store exists for this category yet.
+    Unsupported,
+}
+
+/// Classify a policy's `data_category` string into the real store it maps
+/// to. Matching is intentionally permissive (substring, case-insensitive) so
+/// that categories like `"user_feedback"` or `"feedback"` both resolve to
+/// [`RetentionStore::Feedback`].
+fn classify_category(data_category: &str) -> RetentionStore {
+    let lower = data_category.to_lowercase();
+    if lower.contains("session") {
+        RetentionStore::Sessions
+    } else if lower.contains("feedback") {
+        RetentionStore::Feedback
+    } else {
+        RetentionStore::Unsupported
+    }
+}
+
 /// Main data retention manager
 pub struct RetentionManager {
     /// Configuration
@@ -291,10 +322,19 @@ pub struct RetentionManager {
     stats_history: Arc<RwLock<Vec<RetentionStatistics>>>,
     /// Last cleanup time
     last_cleanup: Arc<RwLock<Option<DateTime<Utc>>>>,
+    /// Real persistence backend queried/mutated by cleanup, expiration
+    /// calculation, and right-to-be-forgotten requests. Without one, those
+    /// operations fail closed with [`RetentionError::StorageError`] instead
+    /// of fabricating results.
+    persistence: Option<Arc<dyn PersistenceManager>>,
 }
 
 impl RetentionManager {
-    /// Create a new retention manager with default configuration
+    /// Create a new retention manager with default configuration and no
+    /// persistence backend attached. Cleanup, deletion-request, and
+    /// expiration-calculation operations will fail closed until
+    /// [`RetentionManager::with_persistence`] is used to attach a real
+    /// backend.
     #[must_use]
     pub fn new() -> Self {
         Self::with_config(RetentionConfig::default())
@@ -309,7 +349,29 @@ impl RetentionManager {
             rules: Arc::new(RwLock::new(HashMap::new())),
             stats_history: Arc::new(RwLock::new(Vec::new())),
             last_cleanup: Arc::new(RwLock::new(None)),
+            persistence: None,
         }
+    }
+
+    /// Attach a real persistence backend. Cleanup, deletion-request, and
+    /// expiration-calculation operations query and mutate this backend
+    /// directly, so they report genuine counts instead of placeholders.
+    #[must_use]
+    pub fn with_persistence(mut self, persistence: Arc<dyn PersistenceManager>) -> Self {
+        self.persistence = Some(persistence);
+        self
+    }
+
+    /// Borrow the configured persistence backend, or a real
+    /// [`RetentionError::StorageError`] if none has been attached.
+    fn require_persistence(&self) -> Result<&Arc<dyn PersistenceManager>> {
+        self.persistence.as_ref().ok_or_else(|| {
+            RetentionError::StorageError(
+                "no persistence backend configured; call RetentionManager::with_persistence \
+                 before running cleanup, expiration calculation, or deletion requests"
+                    .to_string(),
+            )
+        })
     }
 
     /// Add a retention policy
@@ -342,34 +404,70 @@ impl RetentionManager {
         Ok(())
     }
 
-    /// Run cleanup based on retention policies
+    /// Run cleanup based on retention policies.
+    ///
+    /// Requires a persistence backend (see [`RetentionManager::with_persistence`]);
+    /// without one this fails closed rather than fabricating statistics.
     pub async fn run_cleanup(&self) -> Result<RetentionStatistics> {
         let start_time = std::time::Instant::now();
+        let persistence = self.require_persistence()?;
 
         let policies = self.policies.read().await;
         let rules = self.rules.read().await;
 
+        let enabled_policies: Vec<&RetentionPolicy> =
+            policies.values().filter(|p| p.enabled).collect();
+
+        // Real, non-destructive snapshot of current totals, used to report
+        // `processed` counts.
+        let pre_stats = persistence.get_storage_stats().await.map_err(|e| {
+            RetentionError::StorageError(format!("failed to read storage stats: {e}"))
+        })?;
+
+        // `PersistenceManager::cleanup` purges old sessions *and* feedback
+        // together in a single pass -- it is not scoped per data category.
+        // Calling it once per policy with each policy's own (possibly much
+        // shorter) cutoff would let a short-retention policy silently delete
+        // data that a different, longer-retention policy was supposed to
+        // preserve. To avoid that cross-category over-deletion, run at most
+        // one real cleanup pass per `run_cleanup()` call, using the single
+        // most conservative cutoff (the largest `retention_period_days`,
+        // i.e. the one that deletes the *least* data) among every enabled
+        // policy that maps to a real store.
+        let conservative_cutoff = enabled_policies
+            .iter()
+            .filter(|p| classify_category(&p.data_category) != RetentionStore::Unsupported)
+            .map(|p| p.retention_period_days)
+            .max()
+            .map(|days| Utc::now() - Duration::days(days));
+
+        let cleanup_result = match conservative_cutoff {
+            Some(cutoff) => Some(
+                persistence
+                    .cleanup(cutoff)
+                    .await
+                    .map_err(|e| RetentionError::DeletionError(format!("cleanup failed: {e}")))?,
+            ),
+            None => None,
+        };
+
         let mut total_processed = 0;
         let mut total_deleted = 0;
         let mut total_archived = 0;
-        let mut total_anonymized = 0;
+        let total_anonymized = 0;
         let mut errors = 0;
         let mut by_category: HashMap<String, CategoryStats> = HashMap::new();
 
         // Process each policy
-        for policy in policies.values() {
-            if !policy.enabled {
-                continue;
-            }
-
+        for policy in &enabled_policies {
             // Find rules for this policy
             let policy_rules: Vec<&RetentionRule> = rules
                 .values()
                 .filter(|r| r.policy_id == policy.id)
                 .collect();
 
-            // Process data for this policy
-            let result = self.process_policy(policy, &policy_rules).await;
+            let result =
+                self.process_policy(policy, &policy_rules, &pre_stats, cleanup_result.as_ref());
 
             match result {
                 Ok(stats) => {
@@ -411,20 +509,74 @@ impl RetentionManager {
         Ok(statistics)
     }
 
-    /// Process a specific policy
-    async fn process_policy(
+    /// Attribute real cleanup results to a specific policy.
+    ///
+    /// Returns `Err` (counted by the caller into `RetentionStatistics::errors`)
+    /// when the policy's `data_category` has no real backing store to verify
+    /// -- that is honest, not a cleanup call that silently touches the wrong
+    /// data.
+    fn process_policy(
         &self,
         policy: &RetentionPolicy,
         rules: &[&RetentionRule],
+        pre_stats: &crate::persistence::StorageStats,
+        cleanup_result: Option<&crate::persistence::CleanupResult>,
     ) -> Result<CategoryStats> {
-        // In a real implementation, this would query the database
-        // For now, we'll return mock statistics
+        let store = classify_category(&policy.data_category);
 
-        let cutoff_date = Utc::now() - Duration::days(policy.retention_period_days);
+        // A policy with explicit rules that are *all* non-destructive
+        // (anonymize / cold storage / manual review) has not actually
+        // authorized real deletion, even though a shared cleanup pass may
+        // have run for other policies sharing the same store. Only count
+        // data as deleted when no rules are defined (the policy applies on
+        // its own, matching its `archive_before_delete` field) or at least
+        // one rule explicitly requests Delete/ArchiveThenDelete.
+        let deletion_authorized = rules.is_empty()
+            || rules.iter().any(|r| {
+                matches!(
+                    r.action,
+                    RetentionAction::Delete | RetentionAction::ArchiveThenDelete
+                )
+            });
 
-        // Simulate processing
-        let processed = 100;
-        let deleted = if rules.is_empty() { 50 } else { 75 };
+        let (processed, deleted) = match store {
+            RetentionStore::Sessions => {
+                let cleanup = cleanup_result.ok_or_else(|| {
+                    RetentionError::StorageError(format!(
+                        "no cleanup pass was run for category '{}'",
+                        policy.data_category
+                    ))
+                })?;
+                let deleted = if deletion_authorized {
+                    cleanup.sessions_cleaned
+                } else {
+                    0
+                };
+                (pre_stats.total_sessions, deleted)
+            }
+            RetentionStore::Feedback => {
+                let cleanup = cleanup_result.ok_or_else(|| {
+                    RetentionError::StorageError(format!(
+                        "no cleanup pass was run for category '{}'",
+                        policy.data_category
+                    ))
+                })?;
+                let deleted = if deletion_authorized {
+                    cleanup.feedback_records_cleaned
+                } else {
+                    0
+                };
+                (pre_stats.total_feedback_records, deleted)
+            }
+            RetentionStore::Unsupported => {
+                return Err(RetentionError::InvalidPolicy(format!(
+                    "data category '{}' has no queryable backing store in the configured \
+                     persistence backend; retention cannot be verified",
+                    policy.data_category
+                )));
+            }
+        };
+
         let archived = if policy.archive_before_delete {
             deleted
         } else {
@@ -436,7 +588,10 @@ impl RetentionManager {
             processed,
             deleted,
             archived,
-            storage_freed_bytes: deleted as u64 * 1024 * 10, // Estimate 10KB per record
+            // No per-record size is tracked by the persistence layer; this
+            // remains an estimate, applied only to real (non-fabricated)
+            // deletion counts.
+            storage_freed_bytes: deleted as u64 * 1024 * 10,
         })
     }
 
@@ -474,11 +629,19 @@ impl RetentionManager {
             .sum::<f64>()
             / (1024.0 * 1024.0);
 
-        // Compliance summary
+        // Compliance summary, derived from the real cleanup run above rather
+        // than hardcoded. `errors` counts policies whose retention could not
+        // be verified/enforced against a real backing store (see
+        // `process_policy`), so it doubles as an honest proxy for
+        // over-retained/unverified data until the persistence layer exposes
+        // a non-destructive per-category "count records older than X" query.
+        // Deletion requests are processed synchronously by
+        // `process_deletion_request` in this implementation, so there is
+        // never a genuinely "pending" one to report.
         let last_cleanup = self.last_cleanup.read().await;
         let compliance_summary = ComplianceSummary {
-            gdpr_compliant: true,
-            overretained_data_count: 0,
+            gdpr_compliant: statistics.errors == 0,
+            overretained_data_count: statistics.errors,
             pending_deletions: 0,
             last_audit: last_cleanup.unwrap_or_else(Utc::now),
         };
@@ -494,21 +657,45 @@ impl RetentionManager {
         })
     }
 
-    /// Calculate upcoming expirations
+    /// Calculate upcoming expirations.
+    ///
+    /// `record_count` reflects the real, currently-stored total for each
+    /// policy's mapped store (via a non-destructive [`PersistenceManager::get_storage_stats`]
+    /// query), not a hardcoded placeholder. This is an upper bound rather
+    /// than an exact "expiring in the next N days" count: the persistence
+    /// layer does not expose a non-destructive per-category "count records
+    /// older than X" query, so the real current total for the mapped store
+    /// is the most accurate honest figure available. Categories with no
+    /// backing store report `0` rather than a guess. Returns an empty list
+    /// (rather than fabricating data) if no persistence backend is
+    /// attached.
     async fn calculate_upcoming_expirations(
         &self,
         policies: &[RetentionPolicy],
     ) -> Vec<ExpirationNotice> {
         let mut notices = Vec::new();
 
+        let Some(persistence) = self.persistence.as_ref() else {
+            return notices;
+        };
+
+        let Ok(stats) = persistence.get_storage_stats().await else {
+            return notices;
+        };
+
         for policy in policies {
             let expiration_date = Utc::now() + Duration::days(self.config.notification_days_before);
             let days_until = self.config.notification_days_before;
 
-            // In real implementation, query database for records
+            let record_count = match classify_category(&policy.data_category) {
+                RetentionStore::Sessions => stats.total_sessions,
+                RetentionStore::Feedback => stats.total_feedback_records,
+                RetentionStore::Unsupported => 0,
+            };
+
             notices.push(ExpirationNotice {
                 category: policy.data_category.clone(),
-                record_count: 50, // Mock value
+                record_count,
                 expiration_date,
                 days_until_expiration: days_until,
             });
@@ -517,16 +704,52 @@ impl RetentionManager {
         notices
     }
 
-    /// Handle right-to-be-forgotten request
+    /// Handle a right-to-be-forgotten request: really deletes every trace of
+    /// `user_id` (progress, preferences, sessions, feedback history) from
+    /// the configured persistence backend and returns the real number of
+    /// records that were removed.
+    ///
+    /// Returns `Ok(0)` (not an error) when the user has no data on record --
+    /// that is a legitimate, honest outcome for a deletion request. Requires
+    /// a persistence backend (see [`RetentionManager::with_persistence`]).
     pub async fn process_deletion_request(&self, user_id: &str) -> Result<usize> {
-        // In real implementation, this would:
-        // 1. Find all data associated with user
-        // 2. Archive if required
-        // 3. Delete or anonymize
-        // 4. Log the action
+        let persistence = self.require_persistence()?;
 
-        // Mock deletion
-        Ok(100) // Number of records deleted
+        // Count what genuinely exists before deleting, using queries that
+        // reliably distinguish "present" from "absent" across every
+        // persistence backend (unlike `export_user_data`, whose "no data"
+        // behavior differs between backends).
+        let has_progress = persistence.load_user_progress(user_id).await.is_ok();
+        let has_preferences = persistence.load_preferences(user_id).await.is_ok();
+        let feedback_count = persistence
+            .load_feedback_history(user_id, None, None)
+            .await
+            .map(|history| history.len())
+            .unwrap_or(0);
+        // Sessions are only enumerable per-user via `export_user_data`; used
+        // solely for this real (if best-effort) count.
+        let session_count = persistence
+            .export_user_data(user_id)
+            .await
+            .map(|export| export.sessions.len())
+            .unwrap_or(0);
+
+        let deleted_count = usize::from(has_progress)
+            + usize::from(has_preferences)
+            + feedback_count
+            + session_count;
+
+        if deleted_count == 0 {
+            return Ok(0);
+        }
+
+        persistence.delete_user_data(user_id).await.map_err(|e| {
+            RetentionError::DeletionError(format!(
+                "failed to delete data for user '{user_id}': {e}"
+            ))
+        })?;
+
+        Ok(deleted_count)
     }
 
     /// Get list of all policies
@@ -570,6 +793,50 @@ impl Default for RetentionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::backends::memory::MemoryPersistenceManager;
+    use crate::persistence::PersistenceConfig;
+    use crate::traits::{
+        AdaptiveState, FeedbackResponse, FeedbackType, ProgressIndicators, SessionState,
+        SessionStatistics, SessionStats, UserPreferences, UserProgress,
+    };
+    use uuid::Uuid;
+
+    /// Build a `RetentionManager` backed by a real, empty in-memory
+    /// persistence backend.
+    async fn test_manager() -> RetentionManager {
+        let backend = MemoryPersistenceManager::new(PersistenceConfig::default())
+            .await
+            .unwrap();
+        RetentionManager::new().with_persistence(Arc::new(backend))
+    }
+
+    fn test_session(user_id: &str, start_time: DateTime<Utc>) -> SessionState {
+        SessionState {
+            session_id: Uuid::new_v4(),
+            user_id: user_id.to_string(),
+            start_time,
+            last_activity: start_time,
+            current_task: None,
+            stats: SessionStats::default(),
+            preferences: UserPreferences::default(),
+            adaptive_state: AdaptiveState::default(),
+            current_exercise: None,
+            session_stats: SessionStatistics::default(),
+        }
+    }
+
+    fn test_feedback(timestamp: DateTime<Utc>) -> FeedbackResponse {
+        FeedbackResponse {
+            feedback_items: vec![],
+            overall_score: 0.5,
+            immediate_actions: vec![],
+            long_term_goals: vec![],
+            progress_indicators: ProgressIndicators::default(),
+            timestamp,
+            processing_time: std::time::Duration::from_millis(5),
+            feedback_type: FeedbackType::Quality,
+        }
+    }
 
     #[tokio::test]
     async fn test_add_policy() {
@@ -616,9 +883,31 @@ mod tests {
         manager.add_rule(rule).await.unwrap();
     }
 
+    /// Without an attached persistence backend, cleanup must fail closed
+    /// rather than fabricate statistics.
     #[tokio::test]
-    async fn test_run_cleanup() {
+    async fn test_run_cleanup_without_persistence_fails_closed() {
         let manager = RetentionManager::new();
+        let policy = RetentionPolicy {
+            id: "cleanup_test".to_string(),
+            name: "Cleanup Test".to_string(),
+            data_category: "feedback".to_string(),
+            retention_period_days: 30,
+            archive_before_delete: true,
+            enabled: true,
+        };
+        manager.add_policy(policy).await.unwrap();
+
+        assert!(manager.run_cleanup().await.is_err());
+    }
+
+    /// `run_cleanup` must really delete real, seeded feedback records older
+    /// than the policy's retention period from the real persistence
+    /// backend, and report the real (non-hardcoded) counts -- while leaving
+    /// fresh records alone.
+    #[tokio::test]
+    async fn test_run_cleanup_deletes_real_old_feedback() {
+        let manager = test_manager().await;
 
         let policy = RetentionPolicy {
             id: "cleanup_test".to_string(),
@@ -628,23 +917,137 @@ mod tests {
             archive_before_delete: true,
             enabled: true,
         };
-
         manager.add_policy(policy).await.unwrap();
+
+        let persistence = manager.persistence.clone().unwrap();
+        let old_feedback = test_feedback(Utc::now() - Duration::days(90));
+        let fresh_feedback = test_feedback(Utc::now());
+        persistence
+            .save_feedback("user1", &old_feedback)
+            .await
+            .unwrap();
+        persistence
+            .save_feedback("user1", &fresh_feedback)
+            .await
+            .unwrap();
 
         let stats = manager.run_cleanup().await.unwrap();
 
-        assert!(stats.total_processed > 0);
         assert_eq!(stats.by_category.len(), 1);
+        let category_stats = &stats.by_category["feedback"];
+        assert_eq!(
+            category_stats.processed, 2,
+            "processed must reflect the real pre-cleanup total"
+        );
+        assert_eq!(
+            category_stats.deleted, 1,
+            "only the record older than the retention period should be deleted"
+        );
+        assert_eq!(category_stats.archived, 1, "archive_before_delete was true");
+        assert_eq!(stats.total_deleted, 1);
+        assert_eq!(stats.errors, 0);
+
+        // The fresh record must genuinely still be there.
+        let remaining = persistence
+            .load_feedback_history("user1", None, None)
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!((remaining[0].overall_score - fresh_feedback.overall_score).abs() < 1e-6);
+    }
+
+    /// A policy whose `data_category` has no real backing store must be
+    /// reported as an honest error, not silently skipped or fabricated --
+    /// and it must not affect the compliance status of a policy that *does*
+    /// map to a real store.
+    #[tokio::test]
+    async fn test_run_cleanup_unsupported_category_is_an_honest_error() {
+        let manager = test_manager().await;
+
+        let policy = RetentionPolicy {
+            id: "audit_logs".to_string(),
+            name: "Audit Logs".to_string(),
+            data_category: "audit_logs".to_string(),
+            retention_period_days: 30,
+            archive_before_delete: false,
+            enabled: true,
+        };
+        manager.add_policy(policy).await.unwrap();
+
+        let stats = manager.run_cleanup().await.unwrap();
+        assert_eq!(stats.errors, 1);
+        assert!(stats.by_category.is_empty());
+    }
+
+    /// Two policies mapping to the same store with *different* retention
+    /// periods must not let the shorter one delete data the longer one is
+    /// supposed to preserve: only records older than the longer (more
+    /// conservative) cutoff may actually be removed.
+    #[tokio::test]
+    async fn test_run_cleanup_uses_most_conservative_cutoff_across_policies() {
+        let manager = test_manager().await;
+
+        // A short 7-day policy and a long 90-day policy both nominally
+        // target feedback data.
+        manager
+            .add_policy(RetentionPolicy {
+                id: "short".to_string(),
+                name: "Short".to_string(),
+                data_category: "feedback_short".to_string(),
+                retention_period_days: 7,
+                archive_before_delete: false,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+        manager
+            .add_policy(RetentionPolicy {
+                id: "long".to_string(),
+                name: "Long".to_string(),
+                data_category: "feedback_long".to_string(),
+                retention_period_days: 90,
+                archive_before_delete: false,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+
+        let persistence = manager.persistence.clone().unwrap();
+        // 30 days old: newer than the long policy's 90-day cutoff (must
+        // survive) but older than the short policy's 7-day cutoff (would be
+        // deleted if the short cutoff were wrongly applied globally).
+        let middle_aged = test_feedback(Utc::now() - Duration::days(30));
+        persistence
+            .save_feedback("user1", &middle_aged)
+            .await
+            .unwrap();
+
+        let stats = manager.run_cleanup().await.unwrap();
+
+        // Neither policy's reported `deleted` count may exceed what the
+        // shared, most-conservative (90-day) cleanup pass actually removed.
+        assert_eq!(stats.by_category["feedback_short"].deleted, 0);
+        assert_eq!(stats.by_category["feedback_long"].deleted, 0);
+
+        let remaining = persistence
+            .load_feedback_history("user1", None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            remaining.len(),
+            1,
+            "a 30-day-old record must survive when the effective cutoff is 90 days"
+        );
     }
 
     #[tokio::test]
     async fn test_generate_report() {
-        let manager = RetentionManager::new();
+        let manager = test_manager().await;
 
         let policy = RetentionPolicy {
             id: "report_test".to_string(),
             name: "Report Test".to_string(),
-            data_category: "analytics".to_string(),
+            data_category: "feedback".to_string(),
             retention_period_days: 60,
             archive_before_delete: false,
             enabled: true,
@@ -656,25 +1059,116 @@ mod tests {
 
         assert!(!report.active_policies.is_empty());
         assert!(report.compliance_summary.gdpr_compliant);
+        assert_eq!(report.upcoming_expirations.len(), 1);
+        assert_eq!(report.upcoming_expirations[0].category, "feedback");
+    }
+
+    /// An unsupported category must make the compliance report honestly
+    /// report non-compliance (unverifiable retention), not a hardcoded
+    /// always-true.
+    #[tokio::test]
+    async fn test_generate_report_unsupported_category_is_not_compliant() {
+        let manager = test_manager().await;
+
+        manager
+            .add_policy(RetentionPolicy {
+                id: "report_test".to_string(),
+                name: "Report Test".to_string(),
+                data_category: "analytics_events".to_string(),
+                retention_period_days: 60,
+                archive_before_delete: false,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+
+        let report = manager.generate_report(30).await.unwrap();
+        assert!(!report.compliance_summary.gdpr_compliant);
+        assert_eq!(report.compliance_summary.overretained_data_count, 1);
     }
 
     #[tokio::test]
-    async fn test_deletion_request() {
+    async fn test_deletion_request_without_persistence_fails_closed() {
         let manager = RetentionManager::new();
+        assert!(manager.process_deletion_request("user123").await.is_err());
+    }
 
+    /// The right-to-be-forgotten handler must really delete the seeded
+    /// data for the user and report the real count, and must leave a
+    /// different user's data untouched.
+    #[tokio::test]
+    async fn test_deletion_request_deletes_real_seeded_data() {
+        let manager = test_manager().await;
+        let persistence = manager.persistence.clone().unwrap();
+
+        let progress = UserProgress {
+            user_id: "user123".to_string(),
+            ..UserProgress::default()
+        };
+        persistence
+            .save_user_progress("user123", &progress)
+            .await
+            .unwrap();
+        persistence
+            .save_preferences("user123", &UserPreferences::default())
+            .await
+            .unwrap();
+        persistence
+            .save_feedback("user123", &test_feedback(Utc::now()))
+            .await
+            .unwrap();
+        persistence
+            .save_session(&test_session("user123", Utc::now()))
+            .await
+            .unwrap();
+
+        // An untouched second user, to prove deletion is scoped correctly.
+        let other_progress = UserProgress {
+            user_id: "user456".to_string(),
+            ..UserProgress::default()
+        };
+        persistence
+            .save_user_progress("user456", &other_progress)
+            .await
+            .unwrap();
+
+        // progress + preferences + 1 feedback + 1 session = 4 real records.
         let deleted = manager.process_deletion_request("user123").await.unwrap();
+        assert_eq!(deleted, 4);
 
-        assert!(deleted > 0);
+        assert!(persistence.load_user_progress("user123").await.is_err());
+        assert!(persistence.load_preferences("user123").await.is_err());
+        let remaining_feedback = persistence
+            .load_feedback_history("user123", None, None)
+            .await
+            .unwrap();
+        assert!(remaining_feedback.is_empty());
+
+        // The other user's data must be unaffected.
+        assert!(persistence.load_user_progress("user456").await.is_ok());
+    }
+
+    /// A deletion request for a user with no data on record is a
+    /// legitimate, honest `Ok(0)` -- not an error, and not a fabricated
+    /// positive count.
+    #[tokio::test]
+    async fn test_deletion_request_for_unknown_user_returns_zero() {
+        let manager = test_manager().await;
+        let deleted = manager
+            .process_deletion_request("never_existed")
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0);
     }
 
     #[tokio::test]
     async fn test_statistics_history() {
-        let manager = RetentionManager::new();
+        let manager = test_manager().await;
 
         let policy = RetentionPolicy {
             id: "history_test".to_string(),
             name: "History Test".to_string(),
-            data_category: "test".to_string(),
+            data_category: "feedback".to_string(),
             retention_period_days: 30,
             archive_before_delete: true,
             enabled: true,
@@ -682,7 +1176,7 @@ mod tests {
 
         manager.add_policy(policy).await.unwrap();
 
-        // Run cleanup multiple times
+        // Run cleanup multiple times against the real (empty) backend.
         for _ in 0..3 {
             manager.run_cleanup().await.unwrap();
         }

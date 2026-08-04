@@ -14,6 +14,10 @@ use crate::RecognitionError;
 use std::sync::Arc;
 use voirs_sdk::LanguageCode;
 
+// Real inspection/validation of pretrained weight files, shared by all backends that
+// need them.
+pub mod weights;
+
 // Model implementations
 #[cfg(feature = "whisper")]
 pub mod whisper;

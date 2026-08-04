@@ -138,6 +138,12 @@ pub trait PersistenceManager: Send + Sync {
 
     /// Perform cleanup operations
     async fn cleanup(&self, older_than: DateTime<Utc>) -> PersistenceResult<CleanupResult>;
+
+    /// List every user ID with any data on record (session, progress,
+    /// preferences, or feedback). Used for administrative/enumeration
+    /// operations (e.g. a GraphQL `users` listing) that need to discover
+    /// which users exist rather than looking one up by an already-known ID.
+    async fn list_user_ids(&self) -> PersistenceResult<Vec<String>>;
 }
 
 /// User data export structure for GDPR compliance

@@ -390,8 +390,8 @@ mod tests {
 
         // Test with voice switching
         let requests = vec![
-            BatchRequest::new("Hello", Some("voice-1")),
-            BatchRequest::new("World", Some("voice-2")),
+            BatchRequest::new("Hello", Some("en-US-female-calm")),
+            BatchRequest::new("World", Some("en-US-male-news")),
             BatchRequest::new("Test", None), // No voice switch
         ];
 
@@ -519,11 +519,11 @@ mod tests {
 
         // Test with mixed configurations
         let requests = vec![
-            BatchRequest::new("Voice only", Some("voice-1")),
+            BatchRequest::new("Voice only", Some("en-US-female-calm")),
             BatchRequest::new("Speed only", None).with_speed(1.2),
             BatchRequest::new("Pitch only", None).with_pitch(2.0),
-            BatchRequest::new("Voice and speed", Some("voice-2")).with_speed(0.9),
-            BatchRequest::new("All params", Some("voice-3"))
+            BatchRequest::new("Voice and speed", Some("en-US-male-news")).with_speed(0.9),
+            BatchRequest::new("All params", Some("ja-JP-female-neutral"))
                 .with_speed(1.1)
                 .with_pitch(-1.0),
             BatchRequest::new("Default", None), // No custom params
@@ -560,7 +560,8 @@ mod tests {
             BatchRequest::new("Low priority slow", None)
                 .with_priority(1)
                 .with_speed(0.8),
-            BatchRequest::new("Medium priority custom voice", Some("voice-1")).with_priority(5),
+            BatchRequest::new("Medium priority custom voice", Some("en-US-female-calm"))
+                .with_priority(5),
         ];
 
         let results = processor.process(requests).await.unwrap();

@@ -60,6 +60,12 @@ pub struct VoirsPipeline {
 
     /// Voice registry / manager used to resolve voice IDs
     voice_manager: Arc<RwLock<DefaultVoiceManager>>,
+
+    /// Components supplied by the caller at build time.
+    ///
+    /// Retained so that a voice switch reloads only the components the SDK owns
+    /// and never discards an injected custom component.
+    overrides: ComponentOverrides,
 }
 
 impl VoirsPipeline {
@@ -96,10 +102,11 @@ impl VoirsPipeline {
             config,
             test_mode,
             Arc::new(RwLock::new(voice_manager)),
+            ComponentOverrides::default(),
         )
     }
 
-    /// Create pipeline with an explicit voice manager
+    /// Create pipeline with an explicit voice manager and override set
     fn with_components(
         g2p: Arc<dyn G2p>,
         acoustic: Arc<dyn AcousticModel>,
@@ -107,6 +114,7 @@ impl VoirsPipeline {
         config: PipelineConfig,
         test_mode: bool,
         voice_manager: Arc<RwLock<DefaultVoiceManager>>,
+        overrides: ComponentOverrides,
     ) -> Self {
         let state_manager = PipelineStateManager::with_test_mode(config.clone(), test_mode);
 
@@ -121,6 +129,7 @@ impl VoirsPipeline {
             config: Arc::new(RwLock::new(config)),
             current_voice: Arc::new(RwLock::new(None)),
             voice_manager,
+            overrides,
         }
     }
 
@@ -179,7 +188,7 @@ impl VoirsPipeline {
 
         // Initialize components
         let (g2p, acoustic, vocoder) = initializer
-            .initialize_components_with(overrides, test_mode)
+            .initialize_components_with(overrides.clone(), test_mode)
             .await?;
 
         // Create pipeline with test mode
@@ -190,6 +199,7 @@ impl VoirsPipeline {
             config,
             test_mode,
             voice_manager.clone(),
+            overrides,
         );
 
         // Record the already-loaded voice without reloading the components again.
@@ -394,7 +404,7 @@ impl VoirsPipeline {
 
         let initializer = PipelineInitializer::new(config.clone());
         let (g2p, acoustic, vocoder) = initializer
-            .initialize_components_with(ComponentOverrides::default(), false)
+            .initialize_components_with(self.overrides.clone(), false)
             .await?;
 
         {
@@ -489,8 +499,15 @@ impl VoirsPipeline {
         self.state_manager.cleanup().await
     }
 
-    /// Set pipeline state to ready
+    /// Set pipeline state to ready.
+    ///
+    /// Idempotent: a pipeline that is already `Ready` stays `Ready` and this
+    /// returns `Ok`. Only a transition that the state machine genuinely forbids
+    /// (for example from `Shutdown`) is reported as an error.
     pub async fn set_ready(&self) -> Result<()> {
+        if self.state_manager.get_state().await == PipelineState::Ready {
+            return Ok(());
+        }
         self.state_manager.set_state(PipelineState::Ready).await
     }
 }
@@ -547,13 +564,28 @@ fn apply_voice_to_config(config: &mut PipelineConfig, voice: &VoiceConfig) {
         &voice.model_config.acoustic_model,
         "acoustic_model",
     ) {
-        set_local_path_override(config, acoustic_name, path);
+        set_local_path_override(config, acoustic_name.clone(), path);
     }
 
     let vocoder_name = config
         .vocoder_model
         .clone()
         .unwrap_or_else(|| "hifigan".to_string());
+
+    // The overrides map is keyed by model name. If the acoustic and vocoder
+    // backends were configured under the same name, writing both paths would make
+    // one silently load the other's weights, so the vocoder path is skipped and
+    // the collision is reported instead.
+    if vocoder_name == acoustic_name {
+        tracing::warn!(
+            "acoustic_model and vocoder_model are both named '{acoustic_name}'; \
+             not applying the per-voice vocoder path for voice '{}' because it \
+             would override the acoustic weights",
+            voice.id
+        );
+        return;
+    }
+
     if let Some(path) = resolve_voice_model_path(
         &models_dir,
         &voice_dir,
@@ -627,6 +659,79 @@ mod tests {
             PipelineConfig::default(),
             true,
         )
+    }
+
+    /// Outside test mode, switching to a voice in a different language must
+    /// genuinely replace the installed components (in particular the G2P backend,
+    /// whose language is fixed at construction), not merely record metadata.
+    #[tokio::test]
+    async fn test_set_voice_swaps_components_for_real() {
+        let cache_dir = tempfile::tempdir().expect("temp dir");
+
+        // A non-test-mode pipeline whose components are caller-supplied, so no
+        // model weights are needed but the real `set_voice` path still runs.
+        let config = PipelineConfig {
+            device: "cpu".to_string(),
+            use_gpu: false,
+            cache_dir: Some(cache_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+        // Acoustic and vocoder are injected (so no weights file is needed and no
+        // download happens); the G2P is SDK-owned and must therefore really be
+        // rebuilt by the voice switch.
+        let overrides = ComponentOverrides {
+            g2p: None,
+            acoustic: Some(Arc::new(crate::pipeline::DummyAcoustic::new())),
+            vocoder: Some(Arc::new(crate::pipeline::DummyVocoder::new())),
+        };
+        let pipeline = VoirsPipeline::with_components(
+            Arc::new(crate::pipeline::DummyG2p::new()),
+            Arc::new(crate::pipeline::DummyAcoustic::new()),
+            Arc::new(crate::pipeline::DummyVocoder::new()),
+            config,
+            false,
+            Arc::new(RwLock::new({
+                let mut manager = DefaultVoiceManager::new(cache_dir.path());
+                manager.set_test_mode(true);
+                manager
+            })),
+            overrides,
+        );
+
+        let before = pipeline.g2p().await;
+        assert_eq!(before.metadata().name, "DummyG2p");
+
+        // Switching to a Japanese voice must rebuild the G2P backend, which for
+        // the real loader means a rule-based phonemizer for that language.
+        pipeline
+            .set_voice("ja-JP-female-neutral")
+            .await
+            .expect("voice switch");
+
+        let after = pipeline.g2p().await;
+        assert_ne!(
+            after.metadata().name,
+            "DummyG2p",
+            "set_voice must actually reload the G2P component, not just record metadata"
+        );
+        // The SDK has several aliases for one language (`JaJp` / `Ja`), so the
+        // check goes through the backend's own language code.
+        let backend_language =
+            crate::pipeline::init::PipelineInitializer::g2p_language(LanguageCode::JaJp);
+        assert!(
+            after.supported_languages().iter().any(|lang| {
+                crate::pipeline::init::PipelineInitializer::g2p_language(*lang) == backend_language
+            }),
+            "reloaded G2P must support the newly selected voice's language, got {:?}",
+            after.supported_languages()
+        );
+
+        // Phonemization must now really run through the reloaded backend.
+        let phonemes = after
+            .to_phonemes("こんにちは", Some(LanguageCode::JaJp))
+            .await
+            .expect("phonemization");
+        assert!(!phonemes.is_empty());
     }
 
     #[tokio::test]

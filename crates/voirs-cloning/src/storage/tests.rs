@@ -248,6 +248,12 @@ async fn test_lru_cache_evicts_and_tracks_hits() {
     let mut config = test_config(30, 0.999);
     config.max_cache_size = 1; // 1 MB cache budget
     config.enable_compression = false; // keep exact byte sizes for the eviction math
+                                       // `SpeakerProfile::new` gives every profile identical default
+                                       // characteristics, so with deduplication enabled the three
+                                       // stores below would all collapse into a single real model
+                                       // (correct dedup behavior, but not what this test - cache
+                                       // eviction in isolation - wants to exercise).
+    config.enable_deduplication = false;
     let storage = VoiceModelStorage::new(temp_dir.path().to_path_buf(), config)
         .await
         .unwrap();

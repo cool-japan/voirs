@@ -5,10 +5,11 @@
 //!
 //! * a learned embedding table (every token id maps to its own row),
 //! * sinusoidal absolute position encoding,
-//! * `n_layers` transformer blocks with **relative** multi-head self-attention
-//!   (Shaw et al. 2018 form, as used by VITS): the score for a query/key pair is
-//!   `(q·k + q·r_{clip(j-i)}) / sqrt(head_dim)`, followed by a real softmax and a
-//!   relative-value term,
+//! * `n_layers` transformer blocks with multi-head self-attention using one of
+//!   two mutually exclusive relative-position schemes: the learned windowed
+//!   relative bias (Shaw et al. 2018, as used by VITS) — the score for a
+//!   query/key pair is `(q·k + q·r_{clip(j-i)}) / sqrt(head_dim)` — or rotary
+//!   position embeddings; both are followed by a real softmax,
 //! * a convolutional position-wise feed-forward network,
 //! * layer normalization (pre-LN or post-LN) and a final output projection.
 //!
@@ -17,8 +18,8 @@
 //! SafeTensors checkpoint.
 
 use super::params::{
-    count_parameters, load_safetensors_into_varmap, normalize_layernorm_suffix, seed_varmap,
-    split_indexed_prefix, strip_checkpoint_prefixes, WeightLoadReport,
+    count_parameters, load_safetensors_into_varmap_with_mode, normalize_layernorm_suffix,
+    seed_varmap, split_indexed_prefix, strip_checkpoint_prefixes, LoadMode, WeightLoadReport,
 };
 use super::relative_attention::{mask_to_tensor, rows_to_tensor, tensor_to_rows};
 use crate::{Result, VocoderError};
@@ -151,11 +152,33 @@ impl TextEncoderConfig {
             )));
         }
 
+        // RoPE and the learned windowed relative bias are two *alternative*
+        // ways to inject relative position into the attention score. Enabling
+        // both would apply the same signal twice through different mechanisms,
+        // which no reference implementation does and which makes the effective
+        // position prior impossible to reason about — so it is rejected rather
+        // than silently accepted.
+        if self.use_rope && self.window_size.is_some() {
+            return Err(VocoderError::ModelError(
+                "use_rope and window_size are mutually exclusive relative-position schemes: \
+                 set window_size = None for rotary embeddings, or use_rope = false for the \
+                 learned windowed relative bias"
+                    .to_string(),
+            ));
+        }
+
         Ok(())
     }
 
     /// Effective relative-position window actually used by the attention layers.
+    ///
+    /// Zero when [`Self::use_rope`] is set, because rotary embeddings replace
+    /// the learned windowed relative bias (the two are mutually exclusive; see
+    /// [`Self::validate`]).
     pub fn effective_window(&self) -> usize {
+        if self.use_rope {
+            return 0;
+        }
         self.window_size
             .map(|w| (w as usize).min(MAX_RELATIVE_POSITION.max(1) as usize))
             .unwrap_or(0)
@@ -213,7 +236,8 @@ impl TextEncoderConfig {
             n_layers: 8,
             kernel_size: 3,
             p_dropout: 0.05,
-            window_size: Some(8),
+            // Rotary embeddings replace the learned windowed relative bias.
+            window_size: None,
             pre_ln: true,
             use_rope: true,
             max_seq_len: 2000,
@@ -430,8 +454,14 @@ impl EncoderLayer {
             n_heads: config.n_heads,
             hidden_channels: config.hidden_channels,
             head_dim: config.hidden_channels / config.n_heads,
-            window_size: config.window_size,
-            relative_attention: config.window_size.is_some(),
+            // Mutually exclusive by construction: `validate` rejects configs
+            // that request both, and `effective_window` returns 0 under RoPE.
+            window_size: if config.use_rope {
+                None
+            } else {
+                config.window_size
+            },
+            relative_attention: !config.use_rope && config.window_size.is_some(),
             max_relative_position: MAX_RELATIVE_POSITION,
             p_dropout: config.p_dropout,
             use_rope: config.use_rope,
@@ -736,17 +766,47 @@ impl TextEncoder {
     /// `ffn_layers`, `proj`, PyTorch `gamma`/`beta` layer-norm parameters and
     /// 1x1-convolution projections).
     ///
+    /// Fail-closed: the checkpoint must supply **every** encoder parameter. A
+    /// partial checkpoint is rejected rather than leaving some layers at their
+    /// pseudo-random initialization; use [`TextEncoder::load_weights_partial`]
+    /// when a partial load is intended.
+    ///
     /// # Errors
-    /// Returns [`VocoderError::ModelError`] when the file cannot be read/parsed
-    /// or when no tensor matched a model parameter (fail-closed).
+    /// Returns [`VocoderError::ModelError`] when the file cannot be read/parsed,
+    /// when no tensor matched a model parameter, or when the checkpoint left any
+    /// parameter unset.
     pub fn load_weights<P: AsRef<Path>>(&mut self, path: P) -> Result<WeightLoadReport> {
-        let report = load_safetensors_into_varmap(
+        let report = load_safetensors_into_varmap_with_mode(
             &mut self.varmap,
             path.as_ref(),
             &self.device,
             map_text_encoder_weight_name,
+            LoadMode::Strict,
         )?;
         self.weights_loaded = true;
+        Ok(report)
+    }
+
+    /// Load whatever the checkpoint supplies, tolerating uncovered parameters.
+    ///
+    /// Parameters the checkpoint does not cover keep their pseudo-random
+    /// initialization, so the encoder is **not** marked pretrained and
+    /// [`TextEncoder::encode_pretrained`] keeps failing closed.
+    ///
+    /// # Errors
+    /// Returns [`VocoderError::ModelError`] when the file cannot be read/parsed
+    /// or when no tensor matched a model parameter.
+    pub fn load_weights_partial<P: AsRef<Path>>(&mut self, path: P) -> Result<WeightLoadReport> {
+        let report = load_safetensors_into_varmap_with_mode(
+            &mut self.varmap,
+            path.as_ref(),
+            &self.device,
+            map_text_encoder_weight_name,
+            LoadMode::Partial,
+        )?;
+        if report.is_complete() {
+            self.weights_loaded = true;
+        }
         Ok(report)
     }
 
@@ -1301,6 +1361,18 @@ mod tests {
     }
 
     #[test]
+    fn test_attention_rejects_rope_with_relative_window() {
+        let device = Device::Cpu;
+        let varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+        let mut config = attention_config(8, 2, Some(3));
+        config.use_rope = true;
+        let err = RelativeMultiHeadAttention::new(config, vb.pp("attn"))
+            .expect_err("both schemes must be rejected");
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
     fn test_text_encoder_load_fails_closed() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("unrelated.safetensors");
@@ -1387,6 +1459,7 @@ mod tests {
     fn test_rope_requires_even_head_dim() {
         let mut config = TextEncoderConfig::default();
         config.use_rope = true;
+        config.window_size = None;
         config.hidden_channels = 6;
         config.n_heads = 4;
         assert!(config.validate().is_err());
@@ -1396,7 +1469,34 @@ mod tests {
         assert!(hq.use_rope);
         assert!(hq.validate().is_ok());
         let encoder = TextEncoder::new(hq).expect("hq encoder");
-        assert!(encoder.layers()[0].self_attention.uses_rope());
+        let attn = &encoder.layers()[0].self_attention;
+        assert!(attn.uses_rope());
+        assert!(!attn.uses_relative_positions());
+    }
+
+    #[test]
+    fn test_rope_and_relative_window_are_mutually_exclusive() {
+        let mut config = TextEncoderConfig::default();
+        config.use_rope = true;
+        config.window_size = Some(4);
+        let err = config.validate().expect_err("must reject both schemes");
+        assert!(err.to_string().contains("mutually exclusive"));
+        assert!(TextEncoder::new(config).is_err());
+
+        // Exactly one scheme is active in each shipped preset.
+        for preset in [
+            TextEncoderConfig::default(),
+            TextEncoderConfig::high_quality(),
+            TextEncoderConfig::fast(),
+        ] {
+            assert!(preset.validate().is_ok());
+            let encoder = TextEncoder::new(preset).expect("encoder");
+            let attn = &encoder.layers()[0].self_attention;
+            assert!(
+                attn.uses_rope() != attn.uses_relative_positions(),
+                "exactly one relative-position scheme must be active"
+            );
+        }
     }
 
     #[test]

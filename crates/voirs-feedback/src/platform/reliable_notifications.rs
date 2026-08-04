@@ -431,7 +431,7 @@ impl ReliableNotificationManager {
         let mut history = self
             .delivery_history
             .write()
-            .expect("lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         history.insert(id.clone(), delivery);
         drop(history);
 
@@ -444,7 +444,7 @@ impl ReliableNotificationManager {
         let history = self
             .delivery_history
             .read()
-            .expect("lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         history.get(notification_id).map(|d| d.status.clone())
     }
 
@@ -456,7 +456,7 @@ impl ReliableNotificationManager {
         let mut callbacks = self
             .delivery_callbacks
             .write()
-            .expect("lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         callbacks.insert(notification_id, Box::new(callback));
     }
 
@@ -471,7 +471,7 @@ impl ReliableNotificationManager {
         let mut history = self
             .delivery_history
             .write()
-            .expect("lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(delivery) = history.get_mut(notification_id) {
             delivery.status = DeliveryStatus::Cancelled;
         }
@@ -486,7 +486,7 @@ impl ReliableNotificationManager {
             let history = self
                 .delivery_history
                 .read()
-                .expect("lock should not be poisoned");
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let clone = history.clone();
             let total = history.len();
             drop(history); // Explicitly drop lock before awaiting
@@ -499,7 +499,7 @@ impl ReliableNotificationManager {
         let health = self
             .health_status
             .read()
-            .expect("lock should not be poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
 
         let mut stats = ReliableNotificationStats {
@@ -635,7 +635,9 @@ impl ReliableNotificationManager {
                     drop(limiter);
 
                     // Update health
-                    let mut health = health_status.write().expect("lock should not be poisoned");
+                    let mut health = health_status
+                        .write()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     health.successful_deliveries += 1;
                     drop(health);
                 }
@@ -659,8 +661,9 @@ impl ReliableNotificationManager {
                         };
 
                         // Update health
-                        let mut health =
-                            health_status.write().expect("lock should not be poisoned");
+                        let mut health = health_status
+                            .write()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
                         health.failed_deliveries += 1;
                         health.last_error = Some(error.to_string());
                         drop(health);
@@ -671,7 +674,7 @@ impl ReliableNotificationManager {
             // Update history with the processed delivery
             let mut history = delivery_history
                 .write()
-                .expect("lock should not be poisoned");
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             history.insert(delivery.id.clone(), delivery);
             drop(history);
 
@@ -681,66 +684,42 @@ impl ReliableNotificationManager {
         drop(queue);
     }
 
+    /// Attempt real delivery of `delivery` on `platform`.
+    ///
+    /// This is a thin pass-through to the same real backend
+    /// [`super::notifications::deliver_local_notification`] uses (OS-native
+    /// `osascript`/`notify-send` on Desktop; honest
+    /// [`PlatformError::FeatureNotAvailable`] everywhere a real backend
+    /// isn't wired up). The retry/backoff/health-tracking machinery around
+    /// this function now exercises a real channel's real failure modes —
+    /// there is no injected synthetic failure rate here.
     async fn attempt_delivery(
         delivery: &NotificationDelivery,
         platform: Platform,
     ) -> PlatformResult<()> {
-        // Simulate platform-specific delivery
         match platform {
             Platform::Desktop => {
-                // In a real implementation, this would use platform APIs
-                log::info!(
-                    "Delivering desktop notification [{}]: {} - {}",
-                    delivery.id,
-                    delivery.notification.title,
-                    delivery.notification.body
-                );
-
-                // Simulate occasional failure
-                if scirs2_core::random::random::<f32>() < 0.05 {
-                    return Err(PlatformError::NetworkError {
-                        message: "Simulated delivery failure".to_string(),
-                    });
-                }
+                super::notifications::deliver_local_notification(
+                    &delivery.notification.title,
+                    &delivery.notification.body,
+                )
+                .await
             }
-            Platform::Web => {
-                log::info!(
-                    "Delivering web notification [{}]: {} - {}",
-                    delivery.id,
-                    delivery.notification.title,
-                    delivery.notification.body
-                );
-
-                // Simulate permission checking
-                if scirs2_core::random::random::<f32>() < 0.02 {
-                    return Err(PlatformError::ConfigurationError {
-                        message: "Notification permission denied".to_string(),
-                    });
-                }
-            }
-            Platform::Mobile => {
-                log::info!(
-                    "Delivering mobile notification [{}]: {} - {}",
-                    delivery.id,
-                    delivery.notification.title,
-                    delivery.notification.body
-                );
-
-                // Simulate network issues
-                if scirs2_core::random::random::<f32>() < 0.03 {
-                    return Err(PlatformError::NetworkError {
-                        message: "Push notification service unavailable".to_string(),
-                    });
-                }
-            }
-            Platform::Embedded => {
-                return Err(PlatformError::FeatureNotAvailable {
-                    feature: "notifications".to_string(),
-                });
-            }
+            Platform::Web => Err(PlatformError::FeatureNotAvailable {
+                feature: "web notifications (requires a wasm32 build with a working Web \
+                          Notifications API binding; not available in this crate's current \
+                          dependency graph)"
+                    .to_string(),
+            }),
+            Platform::Mobile => Err(PlatformError::FeatureNotAvailable {
+                feature: "mobile notifications (requires native iOS/Android FFI bindings not \
+                          present in this build)"
+                    .to_string(),
+            }),
+            Platform::Embedded => Err(PlatformError::FeatureNotAvailable {
+                feature: "notifications".to_string(),
+            }),
         }
-
-        Ok(())
     }
 
     async fn force_retry_notification(
@@ -751,7 +730,7 @@ impl ReliableNotificationManager {
         let delivery_to_retry = {
             let mut history = delivery_history
                 .write()
-                .expect("lock should not be poisoned");
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(delivery) = history.get_mut(notification_id) {
                 if matches!(delivery.status, DeliveryStatus::Failed { .. }) {
                     delivery.status = DeliveryStatus::Queued;
@@ -783,7 +762,7 @@ impl ReliableNotificationManager {
         // Update status in history
         let mut history = delivery_history
             .write()
-            .expect("lock should not be poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         for delivery in history.values_mut() {
             if delivery.is_expired()
                 && matches!(
@@ -802,7 +781,9 @@ impl ReliableNotificationManager {
         start_time: Instant,
     ) {
         let queue_size = delivery_queue.lock().await.len();
-        let mut health = health_status.write().expect("lock should not be poisoned");
+        let mut health = health_status
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         health.queue_size = queue_size;
         health.uptime = start_time.elapsed();
@@ -965,5 +946,77 @@ mod tests {
 
             assert_eq!(delivery.retry_count(), i);
         }
+    }
+
+    /// `attempt_delivery` must be a deterministic function of its real
+    /// backend's outcome, never a coin flip: calling it many times back to
+    /// back for the same platform/content must always agree with itself
+    /// (this would fail intermittently under the old
+    /// `scirs2_core::random::random::<f32>() < 0.05` injected-failure
+    /// logic).
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn test_attempt_delivery_is_deterministic_not_randomly_flaky() {
+        let notification = create_test_notification(NotificationPriority::Normal);
+        let delivery = NotificationDelivery::new(notification, None);
+
+        let mut outcomes = Vec::new();
+        for _ in 0..8 {
+            outcomes.push(
+                ReliableNotificationManager::attempt_delivery(&delivery, Platform::Desktop)
+                    .await
+                    .is_ok(),
+            );
+        }
+
+        assert!(
+            outcomes.iter().all(|&ok| ok == outcomes[0]),
+            "real local delivery must not flip between success/failure across identical \
+             back-to-back calls: {outcomes:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_attempt_delivery_web_and_mobile_fail_closed() {
+        let notification = create_test_notification(NotificationPriority::Normal);
+        let delivery = NotificationDelivery::new(notification, None);
+
+        let web_result =
+            ReliableNotificationManager::attempt_delivery(&delivery, Platform::Web).await;
+        assert!(matches!(
+            web_result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
+
+        let mobile_result =
+            ReliableNotificationManager::attempt_delivery(&delivery, Platform::Mobile).await;
+        assert!(matches!(
+            mobile_result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
+
+        let embedded_result =
+            ReliableNotificationManager::attempt_delivery(&delivery, Platform::Embedded).await;
+        assert!(matches!(
+            embedded_result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_lock_recovery_helpers_do_not_panic_on_fresh_locks() {
+        // Regression guard for the .expect("lock should not be poisoned")
+        // -> unwrap_or_else(..) migration: normal (non-poisoned) access
+        // must still behave exactly as before.
+        let config = NotificationConfig::default();
+        let rate_config = RateLimitConfig::default();
+        let manager = ReliableNotificationManager::new(Platform::Desktop, config, rate_config);
+
+        let notification = create_test_notification(NotificationPriority::Low);
+        let id = manager
+            .queue_notification(notification, None)
+            .await
+            .unwrap();
+        assert!(manager.get_delivery_status(&id).is_some());
     }
 }

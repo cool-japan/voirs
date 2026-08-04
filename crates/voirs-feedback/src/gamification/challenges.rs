@@ -7,7 +7,7 @@
 //! - Achievement-unlocked challenges and skill improvement targets
 
 use crate::traits::{FocusArea, UserProgress};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -170,6 +170,7 @@ impl ChallengeSystem {
             expires_at: Utc::now() + template.duration,
             rewards: template.rewards.clone(),
             participants: vec![user_id],
+            last_progress_date: None,
         }
     }
 
@@ -189,15 +190,17 @@ impl ChallengeSystem {
             .collect();
 
         for challenge_id in user_challenges {
-            let new_progress = if let Some(challenge) = self.active_challenges.get(&challenge_id) {
-                self.calculate_new_progress(challenge, session_data)
-            } else {
-                continue;
-            };
+            let (new_progress, new_last_progress_date) =
+                if let Some(challenge) = self.active_challenges.get(&challenge_id) {
+                    self.calculate_new_progress(challenge, session_data)
+                } else {
+                    continue;
+                };
 
             if let Some(challenge) = self.active_challenges.get_mut(&challenge_id) {
                 let old_progress = challenge.current_progress;
                 challenge.current_progress = new_progress;
+                challenge.last_progress_date = new_last_progress_date;
 
                 if challenge.current_progress >= challenge.target_value {
                     challenge.status = ChallengeStatus::Completed;
@@ -357,32 +360,64 @@ impl ChallengeSystem {
             .replace("{time_limit}", "120")
     }
 
-    fn calculate_new_progress(&self, challenge: &Challenge, session_data: &SessionData) -> f32 {
+    /// Calculate the new progress value for a challenge given a session.
+    ///
+    /// Returns the new `current_progress` value alongside the new
+    /// `last_progress_date` to store on the challenge (only meaningful --
+    /// and only changed -- for [`ChallengeType::Consistency`]).
+    fn calculate_new_progress(
+        &self,
+        challenge: &Challenge,
+        session_data: &SessionData,
+    ) -> (f32, Option<NaiveDate>) {
         match challenge.challenge_type {
             ChallengeType::SkillImprovement => {
-                if challenge.focus_areas.contains(&FocusArea::Pronunciation) {
+                let progress = if challenge.focus_areas.contains(&FocusArea::Pronunciation) {
                     session_data.pronunciation_accuracy
                 } else {
                     session_data.overall_score
-                }
+                };
+                (progress, challenge.last_progress_date)
             }
             ChallengeType::Performance => {
-                if session_data.duration <= 120.0 {
+                let progress = if session_data.duration <= 120.0 {
                     challenge.current_progress + 1.0
                 } else {
                     challenge.current_progress
-                }
+                };
+                (progress, challenge.last_progress_date)
             }
             ChallengeType::Consistency => {
-                // This would track consecutive days in a real implementation
-                challenge.current_progress + 1.0
+                // Real consecutive-day streak tracking, anchored to the
+                // session's real timestamp (UTC calendar day):
+                // - First-ever counted session: start the streak at 1.
+                // - Same calendar day as the last counted session: no
+                //   change (dedupe multiple sessions within one day rather
+                //   than inflating the streak).
+                // - Exactly the next calendar day: streak continues (+1).
+                // - Any other gap (a day or more was missed, or the
+                //   session's day is not strictly after the last counted
+                //   day): the streak restarts at 1, anchored to this
+                //   session's day.
+                let session_date = session_data.timestamp.date_naive();
+                match challenge.last_progress_date {
+                    None => (1.0, Some(session_date)),
+                    Some(last_date) if last_date == session_date => {
+                        (challenge.current_progress, Some(last_date))
+                    }
+                    Some(last_date) if session_date == last_date + chrono::Duration::days(1) => {
+                        (challenge.current_progress + 1.0, Some(session_date))
+                    }
+                    Some(_) => (1.0, Some(session_date)),
+                }
             }
             ChallengeType::Social => {
-                if session_data.was_collaborative {
+                let progress = if session_data.was_collaborative {
                     challenge.current_progress + 1.0
                 } else {
                     challenge.current_progress
-                }
+                };
+                (progress, challenge.last_progress_date)
             }
         }
     }
@@ -425,6 +460,12 @@ pub struct Challenge {
     pub rewards: Vec<ChallengeReward>,
     /// Users participating in challenge
     pub participants: Vec<Uuid>,
+    /// Calendar date of the most recent session counted toward a
+    /// [`ChallengeType::Consistency`] streak (`None` until the first
+    /// counted session). `#[serde(default)]` so older serialized
+    /// challenges without this field still deserialize.
+    #[serde(default)]
+    pub last_progress_date: Option<NaiveDate>,
 }
 
 /// Challenge template
@@ -561,6 +602,9 @@ pub struct UserChallengeProgress {
 /// Session data for progress calculation
 #[derive(Debug, Clone)]
 pub struct SessionData {
+    /// Real timestamp of the session, used for consistency-streak
+    /// consecutive-day tracking (see [`ChallengeType::Consistency`]).
+    pub timestamp: DateTime<Utc>,
     /// Pronunciation accuracy score
     pub pronunciation_accuracy: f32,
     /// Overall session score
@@ -755,12 +799,14 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(7),
             rewards: Vec::new(),
             participants: vec![user_id],
+            last_progress_date: None,
         };
 
         let challenge_id = challenge.id;
         system.active_challenges.insert(challenge_id, challenge);
 
         let session_data = SessionData {
+            timestamp: Utc::now(),
             pronunciation_accuracy: 0.95,
             overall_score: 0.9,
             duration: 60.0,
@@ -774,5 +820,140 @@ mod tests {
         let update = &updates[0];
         assert_eq!(update.challenge_id, challenge_id);
         assert_eq!(update.update_type, UpdateType::Completed);
+    }
+
+    /// Build a bare Consistency challenge for streak testing, with a
+    /// caller-chosen id so tests can look it up afterward.
+    fn consistency_challenge(id: Uuid, user_id: Uuid) -> Challenge {
+        Challenge {
+            id,
+            template_id: "consistency_streak".to_string(),
+            name: "Test Streak".to_string(),
+            description: "Test streak challenge".to_string(),
+            challenge_type: ChallengeType::Consistency,
+            focus_areas: Vec::new(),
+            target_value: 30.0,
+            current_progress: 0.0,
+            difficulty: ChallengeDifficulty::Beginner,
+            status: ChallengeStatus::Active,
+            created_at: Utc::now(),
+            expires_at: Utc::now() + chrono::Duration::days(30),
+            rewards: Vec::new(),
+            participants: vec![user_id],
+            last_progress_date: None,
+        }
+    }
+
+    /// Fixed reference timestamp (rather than `Utc::now()`) so streak tests
+    /// are never flaky around a UTC day boundary.
+    fn fixed_base_timestamp() -> DateTime<Utc> {
+        NaiveDate::from_ymd_opt(2024, 6, 1)
+            .expect("valid date")
+            .and_hms_opt(12, 0, 0)
+            .expect("valid time")
+            .and_utc()
+    }
+
+    fn session_on(day_offset: i64) -> SessionData {
+        SessionData {
+            timestamp: fixed_base_timestamp() + chrono::Duration::days(day_offset),
+            pronunciation_accuracy: 0.8,
+            overall_score: 0.8,
+            duration: 60.0,
+            was_collaborative: false,
+            focus_areas: Vec::new(),
+        }
+    }
+
+    /// Consecutive real calendar days must increment the streak by exactly
+    /// one each day.
+    #[test]
+    fn test_consistency_streak_increments_on_consecutive_days() {
+        let mut system = ChallengeSystem::new();
+        let user_id = Uuid::new_v4();
+        let challenge_id = Uuid::new_v4();
+        system
+            .active_challenges
+            .insert(challenge_id, consistency_challenge(challenge_id, user_id));
+
+        system.update_progress(user_id, &session_on(0));
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress,
+            1.0
+        );
+
+        system.update_progress(user_id, &session_on(1));
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress,
+            2.0
+        );
+
+        system.update_progress(user_id, &session_on(2));
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress,
+            3.0
+        );
+    }
+
+    /// Two sessions on the same real calendar day must not double-count
+    /// the streak.
+    #[test]
+    fn test_consistency_streak_dedupes_same_day() {
+        let mut system = ChallengeSystem::new();
+        let user_id = Uuid::new_v4();
+        let challenge_id = Uuid::new_v4();
+        system
+            .active_challenges
+            .insert(challenge_id, consistency_challenge(challenge_id, user_id));
+
+        let morning = SessionData {
+            timestamp: fixed_base_timestamp(),
+            ..session_on(0)
+        };
+        let evening = SessionData {
+            timestamp: fixed_base_timestamp() + chrono::Duration::hours(6),
+            ..session_on(0)
+        };
+
+        let updates = system.update_progress(user_id, &morning);
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress,
+            1.0
+        );
+
+        let updates2 = system.update_progress(user_id, &evening);
+        // Progress is unchanged (deduped), but an update record is still
+        // emitted reporting old == new.
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress,
+            1.0
+        );
+        assert_eq!(updates[0].new_progress, updates2[0].new_progress);
+    }
+
+    /// A missed day must reset the streak to 1 rather than continuing to
+    /// accumulate.
+    #[test]
+    fn test_consistency_streak_resets_after_gap() {
+        let mut system = ChallengeSystem::new();
+        let user_id = Uuid::new_v4();
+        let challenge_id = Uuid::new_v4();
+        system
+            .active_challenges
+            .insert(challenge_id, consistency_challenge(challenge_id, user_id));
+
+        system.update_progress(user_id, &session_on(0));
+        system.update_progress(user_id, &session_on(1));
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress,
+            2.0
+        );
+
+        // Skip a day: day 3 instead of day 2.
+        system.update_progress(user_id, &session_on(3));
+        assert_eq!(
+            system.active_challenges[&challenge_id].current_progress, 1.0,
+            "a missed day must reset the streak to 1, not continue accumulating"
+        );
     }
 }

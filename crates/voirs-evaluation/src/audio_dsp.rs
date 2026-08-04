@@ -346,6 +346,218 @@ pub(crate) fn autocorrelation_f0(samples: &[f32], sample_rate: u32) -> f32 {
     (sample_rate as f64 / refined_lag) as f32
 }
 
+/// Root-mean-square amplitude of `samples`. Returns `0.0` for empty input.
+pub(crate) fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    (samples.iter().map(|&x| x * x).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+/// Fraction of adjacent sample pairs that cross zero, in `[0, 1]`. A rough proxy for
+/// spectral noisiness / high-frequency content in the time domain.
+pub(crate) fn zero_crossing_rate(samples: &[f32]) -> f32 {
+    if samples.len() < 2 {
+        return 0.0;
+    }
+    let crossings = samples
+        .windows(2)
+        .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
+        .count();
+    crossings as f32 / (samples.len() - 1) as f32
+}
+
+/// Per-frame magnitude spectra (`|X_k|`, length `n_fft/2+1` each) across
+/// Hann-windowed, 50%-overlapping analysis frames. Companion to
+/// [`averaged_power_spectrum`] that preserves frame-by-frame detail instead of
+/// collapsing it, for measurements that need to see how the spectrum *changes* over
+/// time (e.g. frame-to-frame coherence). Returns an empty vector for input too short
+/// to analyze.
+pub(crate) fn per_frame_magnitude_spectra(samples: &[f32], sample_rate: u32) -> Vec<Vec<f32>> {
+    if samples.len() < 2 || sample_rate == 0 {
+        return Vec::new();
+    }
+    let n_fft = frame_size(sample_rate);
+    let num_bins = n_fft / 2 + 1;
+    let hop = (n_fft / 2).max(1);
+    let mut frames = Vec::new();
+    let mut buffer = vec![0.0f64; n_fft];
+    let mut start = 0usize;
+    loop {
+        let available = (samples.len() - start).min(n_fft);
+        for (i, slot) in buffer.iter_mut().enumerate() {
+            *slot = if i < available {
+                samples[start + i] as f64 * hann(i, n_fft)
+            } else {
+                0.0
+            };
+        }
+        if let Ok(spectrum) = scirs2_fft::rfft(&buffer, Some(n_fft)) {
+            frames.push(
+                spectrum
+                    .iter()
+                    .take(num_bins)
+                    .map(|c| (c.re * c.re + c.im * c.im).sqrt() as f32)
+                    .collect(),
+            );
+        }
+        if available < n_fft {
+            break;
+        }
+        start += hop;
+        if start >= samples.len() {
+            break;
+        }
+    }
+    frames
+}
+
+/// Mean cosine similarity between consecutive frames' magnitude spectra, in `[0, 1]`
+/// (frames with near-zero energy are skipped). A real, audio-dependent proxy for
+/// spectral/temporal coherence: a signal whose spectral shape evolves smoothly frame
+/// to frame (e.g. a sustained vowel or tone) scores near `1.0`, while abrupt spectral
+/// changes or broadband noise (whose shape decorrelates frame to frame) score lower.
+/// Returns `0.5` (neutral: not enough evidence either way) when fewer than two
+/// non-silent frames are available.
+pub(crate) fn spectral_temporal_coherence(samples: &[f32], sample_rate: u32) -> f32 {
+    let frames = per_frame_magnitude_spectra(samples, sample_rate);
+    if frames.len() < 2 {
+        return 0.5;
+    }
+    let mut similarities = Vec::new();
+    for pair in frames.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        let len = a.len().min(b.len());
+        if len == 0 {
+            continue;
+        }
+        let dot: f64 = (0..len).map(|k| a[k] as f64 * b[k] as f64).sum();
+        let norm_a: f64 = a.iter().take(len).map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
+        let norm_b: f64 = b.iter().take(len).map(|&v| (v as f64).powi(2)).sum::<f64>().sqrt();
+        if norm_a > 1e-9 && norm_b > 1e-9 {
+            similarities.push((dot / (norm_a * norm_b)).clamp(0.0, 1.0));
+        }
+    }
+    if similarities.is_empty() {
+        0.5
+    } else {
+        (similarities.iter().sum::<f64>() / similarities.len() as f64) as f32
+    }
+}
+
+/// Fraction of total spectral energy in the low- (`<1 kHz`), mid- (`1–4 kHz`) and
+/// high-frequency (`>4 kHz`) bands, from the averaged power spectrum. The three
+/// fractions sum to `1.0` (or are all `0.0` for silent/degenerate input).
+pub(crate) fn band_energy_fractions(samples: &[f32], sample_rate: u32) -> (f32, f32, f32) {
+    if samples.is_empty() || sample_rate == 0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let n_fft = frame_size(sample_rate);
+    let power = match averaged_power_spectrum(samples, n_fft) {
+        Some(power) => power,
+        None => return (0.0, 0.0, 0.0),
+    };
+    let bin_hz = sample_rate as f64 / n_fft as f64;
+    let mut low = 0.0f64;
+    let mut mid = 0.0f64;
+    let mut high = 0.0f64;
+    for (k, &p) in power.iter().enumerate() {
+        let freq = k as f64 * bin_hz;
+        if freq < 1_000.0 {
+            low += p;
+        } else if freq < 4_000.0 {
+            mid += p;
+        } else {
+            high += p;
+        }
+    }
+    let total = low + mid + high;
+    if total <= 0.0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        ((low / total) as f32, (mid / total) as f32, (high / total) as f32)
+    }
+}
+
+/// Spectral flatness (Wiener entropy): the ratio of the geometric mean to the
+/// arithmetic mean of the averaged power spectrum, in `[0, 1]`. Near `0` for
+/// tonal/harmonic signals (energy concentrated in a few bins), near `1` for
+/// noise-like signals (energy spread evenly across all bins). Returns `0.0` for
+/// silent/degenerate input.
+pub(crate) fn spectral_flatness(samples: &[f32], sample_rate: u32) -> f32 {
+    if samples.is_empty() || sample_rate == 0 {
+        return 0.0;
+    }
+    let n_fft = frame_size(sample_rate);
+    let power = match averaged_power_spectrum(samples, n_fft) {
+        Some(power) => power,
+        None => return 0.0,
+    };
+    let nonzero: Vec<f64> = power.iter().copied().filter(|&p| p > 1e-20).collect();
+    if nonzero.is_empty() {
+        return 0.0;
+    }
+    let log_mean = nonzero.iter().map(|p| p.ln()).sum::<f64>() / nonzero.len() as f64;
+    let geometric_mean = log_mean.exp();
+    let arithmetic_mean = power.iter().sum::<f64>() / power.len() as f64;
+    if arithmetic_mean <= 0.0 {
+        0.0
+    } else {
+        (geometric_mean / arithmetic_mean).clamp(0.0, 1.0) as f32
+    }
+}
+
+/// Per-frame RMS energy envelope across Hann-windowed, 50%-overlapping frames (the
+/// same frame grid as [`per_frame_magnitude_spectra`]). Useful for envelope-based
+/// measurements (onset/segment detection, speaking-rate peak counting) that need
+/// coarse time resolution without a full spectral analysis.
+pub(crate) fn frame_rms_envelope(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+    if samples.is_empty() || sample_rate == 0 {
+        return Vec::new();
+    }
+    let n_fft = frame_size(sample_rate);
+    let hop = (n_fft / 2).max(1);
+    let mut envelope = Vec::new();
+    let mut start = 0usize;
+    loop {
+        let available = (samples.len() - start).min(n_fft);
+        envelope.push(rms(&samples[start..start + available]));
+        if available < n_fft {
+            break;
+        }
+        start += hop;
+        if start >= samples.len() {
+            break;
+        }
+    }
+    envelope
+}
+
+/// Fundamental frequency per analysis frame (200 ms frames, 50% overlap), via
+/// [`autocorrelation_f0`] applied to each frame independently. Unvoiced/silent frames
+/// report `0.0`. Used to build a coarse pitch (F0) contour for prosody-related
+/// measurements without requiring a dedicated pitch tracker.
+pub(crate) fn windowed_f0_track(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+    if samples.is_empty() || sample_rate == 0 {
+        return Vec::new();
+    }
+    let frame_len = ((0.2 * sample_rate as f64).round() as usize).max(64);
+    let hop = (frame_len / 2).max(1);
+    let mut track = Vec::new();
+    let mut start = 0usize;
+    loop {
+        let end = (start + frame_len).min(samples.len());
+        if end > start {
+            track.push(autocorrelation_f0(&samples[start..end], sample_rate));
+        }
+        if end >= samples.len() {
+            break;
+        }
+        start += hop;
+    }
+    track
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +647,67 @@ mod tests {
             centroid_low < centroid_high,
             "centroid of 300 Hz tone ({centroid_low}) should be below 3 kHz tone ({centroid_high})"
         );
+    }
+
+    #[test]
+    fn test_rms_and_zcr() {
+        assert_eq!(rms(&[]), 0.0);
+        assert_eq!(rms(&[2.0, -2.0]), 2.0);
+        assert_eq!(zero_crossing_rate(&[1.0, 1.0, 1.0]), 0.0);
+        assert!(zero_crossing_rate(&[1.0, -1.0, 1.0, -1.0]) > 0.9);
+    }
+
+    #[test]
+    fn test_spectral_temporal_coherence_tone_vs_noise() {
+        let tone = sine(220.0, SAMPLE_RATE as usize, SAMPLE_RATE);
+        let noise = lcg_noise(0x1357_9BDF, SAMPLE_RATE as usize);
+        let coherence_tone = spectral_temporal_coherence(&tone, SAMPLE_RATE);
+        let coherence_noise = spectral_temporal_coherence(&noise, SAMPLE_RATE);
+        assert!(
+            coherence_tone > coherence_noise,
+            "a sustained tone ({coherence_tone}) should be spectrally more coherent \
+             frame-to-frame than broadband noise ({coherence_noise})"
+        );
+    }
+
+    #[test]
+    fn test_band_energy_fractions_low_vs_high_tone() {
+        let low_tone = sine(200.0, SAMPLE_RATE as usize, SAMPLE_RATE);
+        let high_tone = sine(6_000.0, SAMPLE_RATE as usize, SAMPLE_RATE);
+        let (low_l, _mid_l, high_l) = band_energy_fractions(&low_tone, SAMPLE_RATE);
+        let (low_h, _mid_h, high_h) = band_energy_fractions(&high_tone, SAMPLE_RATE);
+        assert!(low_l > high_l, "200 Hz tone should dominate the low band");
+        assert!(high_h > low_h, "6 kHz tone should dominate the high band");
+        // Fractions must sum to ~1 for non-silent input.
+        assert!((low_l + _mid_l + high_l - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_spectral_flatness_tone_vs_noise() {
+        let tone = sine(300.0, SAMPLE_RATE as usize, SAMPLE_RATE);
+        let noise = lcg_noise(0x2468_ACE0, SAMPLE_RATE as usize);
+        let flatness_tone = spectral_flatness(&tone, SAMPLE_RATE);
+        let flatness_noise = spectral_flatness(&noise, SAMPLE_RATE);
+        assert!(
+            flatness_noise > flatness_tone,
+            "broadband noise ({flatness_noise}) should be spectrally flatter than a pure tone ({flatness_tone})"
+        );
+    }
+
+    #[test]
+    fn test_frame_rms_envelope_tracks_amplitude_change() {
+        let mut samples = sine(220.0, SAMPLE_RATE as usize / 2, SAMPLE_RATE);
+        samples.extend(vec![0.0f32; SAMPLE_RATE as usize / 2]);
+        let envelope = frame_rms_envelope(&samples, SAMPLE_RATE);
+        assert!(!envelope.is_empty());
+        assert!(envelope.first().copied().unwrap_or(0.0) > envelope.last().copied().unwrap_or(1.0));
+    }
+
+    #[test]
+    fn test_windowed_f0_track_detects_voiced_region() {
+        let signal = sine(180.0, SAMPLE_RATE as usize, SAMPLE_RATE);
+        let track = windowed_f0_track(&signal, SAMPLE_RATE);
+        assert!(!track.is_empty());
+        assert!(track.iter().any(|&f0| (f0 - 180.0).abs() < 10.0));
     }
 }

@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::time::{Duration, SystemTime};
-use tokio::time::timeout;
+
+#[cfg(feature = "microservices")]
+use reqwest::Client;
 
 /// Video conferencing integration error types
 #[derive(Debug, Clone)]
@@ -130,6 +132,12 @@ pub struct VideoConferencingAuthConfig {
     pub oauth_client_id: Option<String>,
     /// OAuth client secret
     pub oauth_client_secret: Option<String>,
+    /// Zoom Server-to-Server OAuth account ID (required for the
+    /// `account_credentials` grant type).
+    pub account_id: Option<String>,
+    /// Microsoft Entra ID (Azure AD) tenant ID, required for the Microsoft
+    /// identity platform's client-credentials token endpoint.
+    pub tenant_id: Option<String>,
     /// Webhook callback URL
     pub webhook_url: Option<String>,
     /// Webhook secret for verification
@@ -151,6 +159,8 @@ impl Default for VideoConferencingAuthConfig {
             base_url: String::new(),
             oauth_client_id: None,
             oauth_client_secret: None,
+            account_id: None,
+            tenant_id: None,
             webhook_url: None,
             webhook_secret: None,
             timeout_seconds: 30,
@@ -434,6 +444,9 @@ pub struct VideoConferencingIntegrationManager {
     rate_limiter: VideoConferencingRateLimiter,
     /// Active meeting sessions
     active_sessions: HashMap<String, ActiveMeetingSession>,
+    /// HTTP client used for real platform API requests
+    #[cfg(feature = "microservices")]
+    http_client: Client,
 }
 
 /// Active meeting session with real-time feedback
@@ -454,11 +467,18 @@ impl VideoConferencingIntegrationManager {
     /// Create a new video conferencing integration manager
     #[must_use]
     pub fn new(config: VideoConferencingAuthConfig, realtime_config: RealtimeConfig) -> Self {
+        // Install the pure-Rust rustls CryptoProvider before any TLS handshake
+        // (reqwest is built with `rustls-no-provider`). Once-guarded; safe to repeat.
+        #[cfg(feature = "microservices")]
+        voirs_sdk::ensure_crypto_provider();
+
         Self {
             config,
             realtime_config,
             rate_limiter: VideoConferencingRateLimiter::new(100, Duration::from_secs(60)),
             active_sessions: HashMap::new(),
+            #[cfg(feature = "microservices")]
+            http_client: Client::new(),
         }
     }
 
@@ -659,294 +679,359 @@ impl VideoConferencingIntegrationManager {
     }
 
     // Platform-specific authentication methods
+    #[cfg(feature = "microservices")]
     async fn authenticate_zoom(&self) -> Result<(), VideoConferencingError> {
-        let auth_url = format!("{}/oauth/token", self.config.base_url);
-
-        let result = timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            self.make_zoom_oauth_request(&auth_url),
-        )
-        .await;
-
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(VideoConferencingError::AuthenticationFailed(e)),
-            Err(_) => Err(VideoConferencingError::ConnectionTimeout),
-        }
+        self.get_zoom_access_token().await.map(|_token| ())
     }
 
+    #[cfg(not(feature = "microservices"))]
+    async fn authenticate_zoom(&self) -> Result<(), VideoConferencingError> {
+        Err(vc_feature_disabled_error())
+    }
+
+    /// Exchange the configured Server-to-Server OAuth credentials for a
+    /// real Zoom access token via the `account_credentials` grant.
+    ///
+    /// <https://developers.zoom.us/docs/internal-apps/s2s-oauth/>
+    #[cfg(feature = "microservices")]
+    async fn get_zoom_access_token(&self) -> Result<String, VideoConferencingError> {
+        let account_id = self
+            .config
+            .account_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                VideoConferencingError::ConfigurationError(
+                    "Zoom account_id is not configured".to_string(),
+                )
+            })?;
+        let client_id = self
+            .config
+            .oauth_client_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                VideoConferencingError::ConfigurationError(
+                    "Zoom oauth_client_id is not configured".to_string(),
+                )
+            })?;
+        let client_secret = self
+            .config
+            .oauth_client_secret
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                VideoConferencingError::ConfigurationError(
+                    "Zoom oauth_client_secret is not configured".to_string(),
+                )
+            })?;
+
+        let url = format!(
+            "https://zoom.us/oauth/token?grant_type=account_credentials&account_id={}",
+            urlencoding::encode(account_id)
+        );
+
+        let response = self
+            .http_client
+            .post(&url)
+            .basic_auth(client_id, Some(client_secret))
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_vc_reqwest_err)?;
+
+        let response = ensure_vc_success(response).await?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            VideoConferencingError::AuthenticationFailed(format!(
+                "failed to parse Zoom token response: {e}"
+            ))
+        })?;
+
+        data["access_token"]
+            .as_str()
+            .map(std::string::ToString::to_string)
+            .ok_or_else(|| {
+                VideoConferencingError::AuthenticationFailed(
+                    "Zoom token response is missing 'access_token'".to_string(),
+                )
+            })
+    }
+
+    #[cfg(feature = "microservices")]
     async fn authenticate_teams(&self) -> Result<(), VideoConferencingError> {
-        // Microsoft Teams authentication using Graph API
-        let auth_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+        // Microsoft identity platform: app-only client-credentials grant.
+        // NOTE: the client-credentials grant requires a tenant-specific (or
+        // "organizations") endpoint; "common" is only valid for
+        // user-delegated flows and would always be rejected here.
+        let tenant_id = self
+            .config
+            .tenant_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                VideoConferencingError::ConfigurationError(
+                    "Microsoft tenant_id is not configured".to_string(),
+                )
+            })?;
+        let client_id = self
+            .config
+            .oauth_client_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                VideoConferencingError::ConfigurationError(
+                    "Microsoft oauth_client_id is not configured".to_string(),
+                )
+            })?;
+        let client_secret = self
+            .config
+            .oauth_client_secret
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                VideoConferencingError::ConfigurationError(
+                    "Microsoft oauth_client_secret is not configured".to_string(),
+                )
+            })?;
 
-        let result = timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            self.make_teams_oauth_request(auth_url),
-        )
-        .await;
+        let url = format!("https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token");
+        let form = [
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("scope", "https://graph.microsoft.com/.default"),
+            ("grant_type", "client_credentials"),
+        ];
 
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(VideoConferencingError::AuthenticationFailed(e)),
-            Err(_) => Err(VideoConferencingError::ConnectionTimeout),
+        let response = self
+            .http_client
+            .post(&url)
+            .form(&form)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_vc_reqwest_err)?;
+
+        let response = ensure_vc_success(response).await?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            VideoConferencingError::AuthenticationFailed(format!(
+                "failed to parse Microsoft token response: {e}"
+            ))
+        })?;
+
+        if data["access_token"].as_str().is_none() {
+            return Err(VideoConferencingError::AuthenticationFailed(
+                "Microsoft token response is missing 'access_token'".to_string(),
+            ));
         }
+        Ok(())
+    }
+
+    #[cfg(not(feature = "microservices"))]
+    async fn authenticate_teams(&self) -> Result<(), VideoConferencingError> {
+        Err(vc_feature_disabled_error())
     }
 
     async fn authenticate_meet(&self) -> Result<(), VideoConferencingError> {
-        // Google Meet authentication using Google Cloud APIs
-        let auth_url = "https://oauth2.googleapis.com/token";
-
-        let result = timeout(
-            Duration::from_secs(self.config.timeout_seconds),
-            self.make_meet_oauth_request(auth_url),
-        )
-        .await;
-
-        match result {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(VideoConferencingError::AuthenticationFailed(e)),
-            Err(_) => Err(VideoConferencingError::ConnectionTimeout),
-        }
+        // Google does not support the plain OAuth2 `client_credentials`
+        // grant used by the other platforms; server-to-server access to the
+        // Meet REST API requires a signed service-account JWT assertion
+        // (RFC 7523), which is not implemented here.
+        Err(VideoConferencingError::ConfigurationError(
+            "Google Meet server-to-server authentication is not yet implemented (requires \
+             service-account JWT assertion, not a client_credentials grant)"
+                .to_string(),
+        ))
     }
 
     async fn authenticate_webex(&self) -> Result<(), VideoConferencingError> {
-        // Cisco WebEx authentication
-        Ok(()) // Placeholder
+        Err(VideoConferencingError::ConfigurationError(
+            "Cisco WebEx integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_gotomeeting(&self) -> Result<(), VideoConferencingError> {
-        // GoToMeeting authentication
-        Ok(()) // Placeholder
+        Err(VideoConferencingError::ConfigurationError(
+            "GoToMeeting integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_bluejeans(&self) -> Result<(), VideoConferencingError> {
-        // BlueJeans authentication
-        Ok(()) // Placeholder
+        Err(VideoConferencingError::ConfigurationError(
+            "BlueJeans integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_jitsi(&self) -> Result<(), VideoConferencingError> {
-        // Jitsi Meet authentication (usually doesn't require auth for basic usage)
+        // Public Jitsi Meet instances (e.g. meet.jit.si) genuinely accept
+        // anonymous participants with no authentication step, so there is
+        // no request to make here. Self-hosted instances configured to
+        // require JWT authentication are not supported by this client.
         Ok(())
     }
 
     async fn authenticate_skype(&self) -> Result<(), VideoConferencingError> {
-        // Skype authentication
-        Ok(()) // Placeholder
+        Err(VideoConferencingError::ConfigurationError(
+            "Skype integration is not yet implemented".to_string(),
+        ))
     }
 
     async fn authenticate_custom(&self) -> Result<(), VideoConferencingError> {
-        // Custom platform authentication
-        Ok(()) // Placeholder
+        Err(VideoConferencingError::ConfigurationError(
+            "custom video conferencing platforms have no built-in client".to_string(),
+        ))
     }
 
     // Plugin installation methods
+    //
+    // Installing an app/add-on into Zoom Marketplace, the Microsoft Teams
+    // App Store, or the Google Workspace Marketplace is a manual submission
+    // + review workflow on each platform, not a REST call this client can
+    // make on a caller's behalf, so these fail closed rather than claiming
+    // an installation that never happened.
     async fn install_zoom_plugin(
         &self,
-        config: &PluginConfig,
+        _config: &PluginConfig,
     ) -> Result<(), VideoConferencingError> {
-        // Install Zoom app/plugin
-        Ok(()) // Placeholder - would involve Zoom Marketplace API
+        Err(VideoConferencingError::ConfigurationError(
+            "Zoom app installation requires manual Marketplace submission and is not automatable"
+                .to_string(),
+        ))
     }
 
     async fn install_teams_plugin(
         &self,
-        config: &PluginConfig,
+        _config: &PluginConfig,
     ) -> Result<(), VideoConferencingError> {
-        // Install Teams app
-        Ok(()) // Placeholder - would involve Teams App Store API
+        Err(VideoConferencingError::ConfigurationError(
+            "Teams app installation requires manual App Store submission and is not automatable"
+                .to_string(),
+        ))
     }
 
     async fn install_meet_plugin(
         &self,
-        config: &PluginConfig,
+        _config: &PluginConfig,
     ) -> Result<(), VideoConferencingError> {
-        // Install Google Meet add-on
-        Ok(()) // Placeholder - would involve Google Workspace Marketplace
+        Err(VideoConferencingError::ConfigurationError(
+            "Google Meet add-on installation requires manual Workspace Marketplace submission \
+             and is not automatable"
+                .to_string(),
+        ))
     }
 
     // Meeting retrieval methods
+    #[cfg(feature = "microservices")]
     async fn get_zoom_meeting(
         &self,
         meeting_id: &str,
     ) -> Result<MeetingInfo, VideoConferencingError> {
-        // Zoom meeting retrieval
-        Ok(MeetingInfo {
-            meeting_id: meeting_id.to_string(),
-            meeting_uuid: Some(format!("uuid_{meeting_id}")),
-            topic: "VoiRS Speech Training Session".to_string(),
-            start_time: SystemTime::now(),
-            duration_minutes: 60,
-            host_id: "host_123".to_string(),
-            host_name: "Dr. Smith".to_string(),
-            participants: vec![MeetingParticipant {
-                participant_id: "participant_001".to_string(),
-                user_id: Some("user_001".to_string()),
-                name: "John Doe".to_string(),
-                email: Some("john.doe@university.edu".to_string()),
-                join_time: SystemTime::now(),
-                leave_time: None,
-                duration_seconds: 0,
-                camera_on: true,
-                microphone_on: true,
-                role: ParticipantRole::Participant,
-                speech_analytics: None,
-            }],
-            status: MeetingStatus::InProgress,
-            meeting_url: format!("https://zoom.us/j/{meeting_id}"),
-            recording_enabled: self.config.enable_recording,
-        })
+        let token = self.get_zoom_access_token().await?;
+        let url = format!(
+            "https://api.zoom.us/v2/meetings/{}",
+            urlencoding::encode(meeting_id)
+        );
+
+        let response = self
+            .http_client
+            .get(&url)
+            .bearer_auth(&token)
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .send()
+            .await
+            .map_err(map_vc_reqwest_err)?;
+
+        if response.status().as_u16() == 404 {
+            return Err(VideoConferencingError::MeetingNotFound(
+                meeting_id.to_string(),
+            ));
+        }
+        let response = ensure_vc_success(response).await?;
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            VideoConferencingError::NetworkError(format!(
+                "failed to parse Zoom meeting response: {e}"
+            ))
+        })?;
+
+        parse_zoom_meeting(&data, meeting_id, self.config.enable_recording)
+    }
+
+    #[cfg(not(feature = "microservices"))]
+    async fn get_zoom_meeting(
+        &self,
+        _meeting_id: &str,
+    ) -> Result<MeetingInfo, VideoConferencingError> {
+        Err(vc_feature_disabled_error())
     }
 
     async fn get_teams_meeting(
         &self,
-        meeting_id: &str,
+        _meeting_id: &str,
     ) -> Result<MeetingInfo, VideoConferencingError> {
-        // Microsoft Teams meeting retrieval
-        Ok(MeetingInfo {
-            meeting_id: meeting_id.to_string(),
-            meeting_uuid: None,
-            topic: "Team Presentation Practice".to_string(),
-            start_time: SystemTime::now(),
-            duration_minutes: 45,
-            host_id: "host_456".to_string(),
-            host_name: "Prof. Johnson".to_string(),
-            participants: vec![],
-            status: MeetingStatus::InProgress,
-            meeting_url: format!("https://teams.microsoft.com/l/meetup-join/{meeting_id}"),
-            recording_enabled: self.config.enable_recording,
-        })
+        // Microsoft Graph's app-only `onlineMeetings` API is addressed as
+        // `/users/{userId}/onlineMeetings/{meetingId}` — it requires the
+        // organizer's Graph user ID, which this method's signature (a bare
+        // meeting_id) does not provide, so a correct request cannot be
+        // formed here.
+        Err(VideoConferencingError::ConfigurationError(
+            "Teams meeting retrieval is not yet implemented: Graph's onlineMeetings API \
+             requires the organizer's user ID in addition to the meeting ID"
+                .to_string(),
+        ))
     }
 
     async fn get_meet_meeting(
         &self,
-        meeting_id: &str,
+        _meeting_id: &str,
     ) -> Result<MeetingInfo, VideoConferencingError> {
-        // Google Meet meeting retrieval
-        Ok(MeetingInfo {
-            meeting_id: meeting_id.to_string(),
-            meeting_uuid: None,
-            topic: "English Pronunciation Workshop".to_string(),
-            start_time: SystemTime::now(),
-            duration_minutes: 30,
-            host_id: "host_789".to_string(),
-            host_name: "Ms. Williams".to_string(),
-            participants: vec![],
-            status: MeetingStatus::InProgress,
-            meeting_url: format!("https://meet.google.com/{meeting_id}"),
-            recording_enabled: self.config.enable_recording,
-        })
+        Err(VideoConferencingError::ConfigurationError(
+            "Google Meet meeting retrieval is not yet implemented (blocked on Meet \
+             authentication, see authenticate_meet)"
+                .to_string(),
+        ))
     }
 
     // Analytics methods
+    //
+    // VoiRS's `MeetingAnalytics` schema (engagement/quality/interaction
+    // scores) is a bespoke model that none of these platforms' REST APIs
+    // expose directly; deriving it honestly requires running VoiRS's own
+    // audio analysis over captured meeting audio (see
+    // `process_realtime_audio`/`end_realtime_feedback` for the live-session
+    // path), not a single GET request. Fail closed rather than fabricate
+    // plausible-looking numbers.
     async fn get_zoom_analytics(
         &self,
-        meeting_id: &str,
+        _meeting_id: &str,
     ) -> Result<MeetingAnalytics, VideoConferencingError> {
-        // Fetch Zoom meeting analytics
-        Ok(MeetingAnalytics {
-            meeting_id: meeting_id.to_string(),
-            total_duration_minutes: 45,
-            total_participants: 8,
-            average_participation_time: 42.5,
-            speaker_distribution: HashMap::new(),
-            engagement_metrics: EngagementMetrics {
-                overall_engagement_score: 85.2,
-                camera_on_percentage: 87.5,
-                microphone_usage_percentage: 75.0,
-                active_speakers_percentage: 62.5,
-                question_count: 12,
-                interaction_count: 34,
-            },
-            quality_metrics: QualityMetrics {
-                average_audio_quality: 92.3,
-                average_video_quality: 88.7,
-                connection_stability_score: 95.1,
-                technical_issues_count: 2,
-                background_noise_level: 15.2,
-            },
-            interaction_patterns: InteractionPatterns {
-                turn_taking_efficiency: 78.9,
-                interruption_rate: 8.3,
-                simultaneous_speech_percentage: 5.7,
-                silence_periods_count: 15,
-                average_response_time_seconds: 2.8,
-            },
-            generated_at: SystemTime::now(),
-        })
+        Err(VideoConferencingError::ConfigurationError(
+            "VoiRS has no analytics backend for Zoom; use an active real-time feedback session \
+             (start_realtime_feedback/end_realtime_feedback) to derive real analytics instead"
+                .to_string(),
+        ))
     }
 
     async fn get_teams_analytics(
         &self,
-        meeting_id: &str,
+        _meeting_id: &str,
     ) -> Result<MeetingAnalytics, VideoConferencingError> {
-        // Fetch Teams meeting analytics
-        Ok(MeetingAnalytics {
-            meeting_id: meeting_id.to_string(),
-            total_duration_minutes: 30,
-            total_participants: 5,
-            average_participation_time: 28.2,
-            speaker_distribution: HashMap::new(),
-            engagement_metrics: EngagementMetrics {
-                overall_engagement_score: 79.5,
-                camera_on_percentage: 80.0,
-                microphone_usage_percentage: 70.0,
-                active_speakers_percentage: 60.0,
-                question_count: 8,
-                interaction_count: 22,
-            },
-            quality_metrics: QualityMetrics {
-                average_audio_quality: 89.1,
-                average_video_quality: 85.3,
-                connection_stability_score: 92.7,
-                technical_issues_count: 1,
-                background_noise_level: 12.8,
-            },
-            interaction_patterns: InteractionPatterns {
-                turn_taking_efficiency: 82.1,
-                interruption_rate: 6.7,
-                simultaneous_speech_percentage: 4.2,
-                silence_periods_count: 8,
-                average_response_time_seconds: 2.1,
-            },
-            generated_at: SystemTime::now(),
-        })
+        Err(VideoConferencingError::ConfigurationError(
+            "VoiRS has no analytics backend for Microsoft Teams; use an active real-time \
+             feedback session (start_realtime_feedback/end_realtime_feedback) to derive real \
+             analytics instead"
+                .to_string(),
+        ))
     }
 
     async fn get_meet_analytics(
         &self,
-        meeting_id: &str,
+        _meeting_id: &str,
     ) -> Result<MeetingAnalytics, VideoConferencingError> {
-        // Fetch Google Meet analytics
-        Ok(MeetingAnalytics {
-            meeting_id: meeting_id.to_string(),
-            total_duration_minutes: 25,
-            total_participants: 12,
-            average_participation_time: 23.8,
-            speaker_distribution: HashMap::new(),
-            engagement_metrics: EngagementMetrics {
-                overall_engagement_score: 88.3,
-                camera_on_percentage: 91.7,
-                microphone_usage_percentage: 83.3,
-                active_speakers_percentage: 75.0,
-                question_count: 18,
-                interaction_count: 45,
-            },
-            quality_metrics: QualityMetrics {
-                average_audio_quality: 94.2,
-                average_video_quality: 90.8,
-                connection_stability_score: 97.3,
-                technical_issues_count: 0,
-                background_noise_level: 8.5,
-            },
-            interaction_patterns: InteractionPatterns {
-                turn_taking_efficiency: 85.7,
-                interruption_rate: 4.1,
-                simultaneous_speech_percentage: 3.8,
-                silence_periods_count: 6,
-                average_response_time_seconds: 1.9,
-            },
-            generated_at: SystemTime::now(),
-        })
+        Err(VideoConferencingError::ConfigurationError(
+            "VoiRS has no analytics backend for Google Meet; use an active real-time feedback \
+             session (start_realtime_feedback/end_realtime_feedback) to derive real analytics \
+             instead"
+                .to_string(),
+        ))
     }
 
     // Real-time feedback methods
@@ -1011,29 +1096,36 @@ impl VideoConferencingIntegrationManager {
 
     async fn send_zoom_feedback(
         &self,
-        meeting_id: &str,
-        feedback: &RealtimeMeetingFeedback,
+        _meeting_id: &str,
+        _feedback: &RealtimeMeetingFeedback,
     ) -> Result<(), VideoConferencingError> {
-        // Send feedback via Zoom chat or notification
-        Ok(())
+        // Delivering an in-meeting chat message for real requires the Zoom
+        // Team Chat API (`chat_message:write` scope) or the in-meeting SDK;
+        // neither is wired up, so this fails closed instead of silently
+        // dropping the feedback while reporting success.
+        Err(VideoConferencingError::ConfigurationError(
+            "Zoom in-meeting feedback delivery is not yet implemented".to_string(),
+        ))
     }
 
     async fn send_teams_feedback(
         &self,
-        meeting_id: &str,
-        feedback: &RealtimeMeetingFeedback,
+        _meeting_id: &str,
+        _feedback: &RealtimeMeetingFeedback,
     ) -> Result<(), VideoConferencingError> {
-        // Send feedback via Teams chat or notification
-        Ok(())
+        Err(VideoConferencingError::ConfigurationError(
+            "Teams in-meeting feedback delivery is not yet implemented".to_string(),
+        ))
     }
 
     async fn send_meet_feedback(
         &self,
-        meeting_id: &str,
-        feedback: &RealtimeMeetingFeedback,
+        _meeting_id: &str,
+        _feedback: &RealtimeMeetingFeedback,
     ) -> Result<(), VideoConferencingError> {
-        // Send feedback via Meet chat or notification
-        Ok(())
+        Err(VideoConferencingError::ConfigurationError(
+            "Google Meet in-meeting feedback delivery is not yet implemented".to_string(),
+        ))
     }
 
     // Utility methods
@@ -1066,23 +1158,133 @@ impl VideoConferencingIntegrationManager {
         &self,
         analytics: &MeetingAnalytics,
     ) -> Result<(), VideoConferencingError> {
-        // Generate and store meeting report
-        // This could save to database, send email, or trigger webhooks
-        Ok(())
+        // No database/email/webhook destination is configured in this
+        // module, so there is nothing external to persist the report to
+        // yet; still perform the one real piece of work available today
+        // (serialize and emit the real, just-computed analytics) instead of
+        // a bare no-op that claims to have "generated" a report.
+        match serde_json::to_string(analytics) {
+            Ok(json) => {
+                log::info!("Meeting report for {}: {}", analytics.meeting_id, json);
+                Ok(())
+            }
+            Err(e) => Err(VideoConferencingError::WebhookError(format!(
+                "failed to serialize meeting report: {e}"
+            ))),
+        }
     }
+}
 
-    // Placeholder HTTP request methods
-    async fn make_zoom_oauth_request(&self, url: &str) -> Result<String, String> {
-        Ok("Zoom authenticated".to_string())
-    }
+/// Build the error returned by every real-platform method when the crate is
+/// compiled without the `microservices` feature (no HTTP client available).
+#[cfg(feature = "microservices")]
+fn vc_feature_disabled_error() -> VideoConferencingError {
+    VideoConferencingError::ConfigurationError(
+        "the `microservices` feature (reqwest HTTP client) is not enabled".to_string(),
+    )
+}
 
-    async fn make_teams_oauth_request(&self, url: &str) -> Result<String, String> {
-        Ok("Teams authenticated".to_string())
+/// Map a [`reqwest::Error`] to the appropriate [`VideoConferencingError`],
+/// distinguishing timeouts from other transport failures.
+#[cfg(feature = "microservices")]
+fn map_vc_reqwest_err(e: reqwest::Error) -> VideoConferencingError {
+    if e.is_timeout() {
+        VideoConferencingError::ConnectionTimeout
+    } else {
+        VideoConferencingError::NetworkError(e.to_string())
     }
+}
 
-    async fn make_meet_oauth_request(&self, url: &str) -> Result<String, String> {
-        Ok("Meet authenticated".to_string())
+/// Turn a non-2xx response into a typed [`VideoConferencingError`], carrying
+/// the real response body instead of discarding it.
+#[cfg(feature = "microservices")]
+async fn ensure_vc_success(
+    response: reqwest::Response,
+) -> Result<reqwest::Response, VideoConferencingError> {
+    if response.status().is_success() {
+        return Ok(response);
     }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    Err(match status.as_u16() {
+        401 | 403 => VideoConferencingError::AuthenticationFailed(format!("HTTP {status}: {body}")),
+        429 => VideoConferencingError::RateLimitExceeded,
+        _ => VideoConferencingError::NetworkError(format!("HTTP {status}: {body}")),
+    })
+}
+
+/// Convert a JSON id field to a `String`, accepting either a JSON string or
+/// a bare number (Zoom's numeric meeting IDs are sometimes serialized as
+/// JSON numbers rather than strings).
+#[cfg(feature = "microservices")]
+fn json_id_to_string(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(std::string::ToString::to_string)
+        .or_else(|| value.as_u64().map(|n| n.to_string()))
+        .or_else(|| value.as_i64().map(|n| n.to_string()))
+}
+
+/// Parse Zoom's `GET /v2/meetings/{meetingId}` response.
+///
+/// <https://developers.zoom.us/docs/api/meetings/#tag/meetings/GET/meetings/{meetingId}>
+#[cfg(feature = "microservices")]
+fn parse_zoom_meeting(
+    value: &serde_json::Value,
+    fallback_id: &str,
+    recording_enabled: bool,
+) -> Result<MeetingInfo, VideoConferencingError> {
+    let meeting_id = json_id_to_string(&value["id"]).unwrap_or_else(|| fallback_id.to_string());
+    let topic = value["topic"]
+        .as_str()
+        .unwrap_or("Untitled Meeting")
+        .to_string();
+    let host_id = value["host_id"].as_str().unwrap_or_default().to_string();
+    // The basic meeting-get response does not include the host's display
+    // name, only their Zoom user ID and (usually) their email; prefer the
+    // email since it is at least a genuine identifier, not a fabricated name.
+    let host_name = value["host_email"]
+        .as_str()
+        .map(String::from)
+        .unwrap_or_else(|| host_id.clone());
+
+    let start_time = value["start_time"]
+        .as_str()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| SystemTime::UNIX_EPOCH + Duration::from_secs(dt.timestamp().max(0) as u64))
+        // Instant meetings have no scheduled start time in the response.
+        .unwrap_or_else(SystemTime::now);
+
+    let duration_minutes = value["duration"].as_u64().unwrap_or(0) as u32;
+
+    let status = match value["status"].as_str() {
+        Some("started") => MeetingStatus::InProgress,
+        Some("finished" | "ended") => MeetingStatus::Ended,
+        _ => MeetingStatus::Scheduled,
+    };
+
+    let meeting_url = value["join_url"]
+        .as_str()
+        .map(String::from)
+        .unwrap_or_else(|| format!("https://zoom.us/j/{meeting_id}"));
+
+    Ok(MeetingInfo {
+        meeting_id,
+        meeting_uuid: value["uuid"].as_str().map(String::from),
+        topic,
+        start_time,
+        duration_minutes,
+        host_id,
+        host_name,
+        // Zoom's basic meeting-get endpoint does not return a participant
+        // roster; that requires a separate Dashboard/Report API call with
+        // additional scopes not assumed to be granted here. An honestly
+        // empty list, not a fabricated participant.
+        participants: vec![],
+        status,
+        meeting_url,
+        recording_enabled,
+    })
 }
 
 /// Rate limiter for video conferencing API requests
@@ -1226,5 +1428,153 @@ mod tests {
         .unwrap();
 
         assert!(feedback.is_none()); // No feedback needed for normal volume
+    }
+
+    // --- Fail-closed behavior -------------------------------------------
+
+    #[tokio::test]
+    async fn test_unconfigured_zoom_fails_closed_without_network() {
+        // Default config has no account_id/oauth credentials: authenticate
+        // must reject locally, never attempt a request nor fabricate a token.
+        let config = VideoConferencingAuthConfig::default();
+        let mut manager =
+            VideoConferencingIntegrationManager::new(config, RealtimeConfig::default());
+
+        let result = manager.authenticate().await;
+        assert!(matches!(
+            result,
+            Err(VideoConferencingError::ConfigurationError(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_unimplemented_platforms_fail_closed_not_ok() {
+        for platform in [
+            VideoConferencingPlatform::WebEx,
+            VideoConferencingPlatform::GoToMeeting,
+            VideoConferencingPlatform::BlueJeans,
+            VideoConferencingPlatform::Skype,
+            VideoConferencingPlatform::Custom("Acme Meet".to_string()),
+        ] {
+            let config = VideoConferencingAuthConfig {
+                platform,
+                ..VideoConferencingAuthConfig::default()
+            };
+            let mut manager =
+                VideoConferencingIntegrationManager::new(config, RealtimeConfig::default());
+            let result = manager.authenticate().await;
+            assert!(
+                result.is_err(),
+                "unimplemented platform must never report Ok"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_meeting_analytics_without_session_fails_closed() {
+        // No fabricated decimal analytics may be returned for a meeting
+        // that was never tracked through a real-time feedback session.
+        let config = VideoConferencingAuthConfig::default();
+        let manager = VideoConferencingIntegrationManager::new(config, RealtimeConfig::default());
+
+        let result = manager.get_meeting_analytics("meeting-not-tracked").await;
+        assert!(matches!(
+            result,
+            Err(VideoConferencingError::ConfigurationError(_))
+        ));
+    }
+
+    // --- Real response parsing (offline, JSON fixtures) ------------------
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_parse_zoom_meeting_from_real_response_shape() {
+        let value = serde_json::json!({
+            "uuid": "abc123==",
+            "id": 987654321_u64,
+            "host_id": "host-abc",
+            "host_email": "trainer@example.com",
+            "topic": "VoiRS Speech Training Session",
+            "status": "started",
+            "start_time": "2024-05-01T15:00:00Z",
+            "duration": 45,
+            "join_url": "https://zoom.us/j/987654321"
+        });
+
+        let meeting = parse_zoom_meeting(&value, "unused", true).unwrap();
+        assert_eq!(meeting.meeting_id, "987654321");
+        assert_eq!(meeting.meeting_uuid.as_deref(), Some("abc123=="));
+        assert_eq!(meeting.topic, "VoiRS Speech Training Session");
+        assert_eq!(meeting.host_name, "trainer@example.com");
+        assert_eq!(meeting.duration_minutes, 45);
+        assert_eq!(meeting.status, MeetingStatus::InProgress);
+        assert_eq!(meeting.meeting_url, "https://zoom.us/j/987654321");
+        assert!(meeting.recording_enabled);
+        // Honestly empty: the basic meeting-get response never includes a
+        // participant roster.
+        assert!(meeting.participants.is_empty());
+
+        // A different response must parse into genuinely different data.
+        let other = serde_json::json!({
+            "id": 111,
+            "topic": "Other Meeting",
+            "status": "waiting",
+            "duration": 15
+        });
+        let other_meeting = parse_zoom_meeting(&other, "unused", false).unwrap();
+        assert_ne!(meeting.topic, other_meeting.topic);
+        assert_eq!(other_meeting.status, MeetingStatus::Scheduled);
+        assert!(!other_meeting.recording_enabled);
+    }
+
+    #[cfg(feature = "microservices")]
+    #[test]
+    fn test_json_id_to_string_accepts_string_and_number() {
+        assert_eq!(
+            json_id_to_string(&serde_json::json!(42)),
+            Some("42".to_string())
+        );
+        assert_eq!(
+            json_id_to_string(&serde_json::json!("abc")),
+            Some("abc".to_string())
+        );
+        assert_eq!(json_id_to_string(&serde_json::json!(null)), None);
+    }
+
+    /// Live end-to-end test against the real Zoom API. Gated behind
+    /// environment variables so the default offline test run never makes a
+    /// network call.
+    #[cfg(feature = "microservices")]
+    #[tokio::test]
+    async fn test_zoom_get_meeting_live() {
+        let (Ok(account_id), Ok(client_id), Ok(client_secret), Ok(meeting_id)) = (
+            std::env::var("VOIRS_TEST_ZOOM_ACCOUNT_ID"),
+            std::env::var("VOIRS_TEST_ZOOM_CLIENT_ID"),
+            std::env::var("VOIRS_TEST_ZOOM_CLIENT_SECRET"),
+            std::env::var("VOIRS_TEST_ZOOM_MEETING_ID"),
+        ) else {
+            eprintln!(
+                "skipping test_zoom_get_meeting_live: set VOIRS_TEST_ZOOM_ACCOUNT_ID, \
+                 VOIRS_TEST_ZOOM_CLIENT_ID, VOIRS_TEST_ZOOM_CLIENT_SECRET and \
+                 VOIRS_TEST_ZOOM_MEETING_ID to run this against a real Zoom account"
+            );
+            return;
+        };
+
+        let config = VideoConferencingAuthConfig {
+            platform: VideoConferencingPlatform::Zoom,
+            account_id: Some(account_id),
+            oauth_client_id: Some(client_id),
+            oauth_client_secret: Some(client_secret),
+            ..VideoConferencingAuthConfig::default()
+        };
+        let mut manager =
+            VideoConferencingIntegrationManager::new(config, RealtimeConfig::default());
+
+        let meeting = manager
+            .get_meeting(&meeting_id)
+            .await
+            .expect("live Zoom API call should succeed with valid credentials");
+        assert_eq!(meeting.meeting_id, meeting_id);
     }
 }

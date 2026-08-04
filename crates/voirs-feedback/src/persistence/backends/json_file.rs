@@ -354,6 +354,16 @@ impl PersistenceManager for JsonFilePersistenceManager {
         })
     }
 
+    async fn list_user_ids(&self) -> PersistenceResult<Vec<String>> {
+        let storage = self.storage.read().await;
+        let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        ids.extend(storage.user_progress.keys().cloned());
+        ids.extend(storage.user_preferences.keys().cloned());
+        ids.extend(storage.sessions.values().map(|s| s.user_id.clone()));
+        ids.extend(storage.feedback_history.keys().cloned());
+        Ok(ids.into_iter().collect())
+    }
+
     async fn cleanup(&self, older_than: DateTime<Utc>) -> PersistenceResult<CleanupResult> {
         let start_time = std::time::Instant::now();
 

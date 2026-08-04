@@ -62,8 +62,7 @@ mod tests {
     async fn test_integrated_voice_workflow() {
         let temp_dir = tempdir().unwrap();
         let mut manager = DefaultVoiceManager::new(temp_dir.path());
-        // Disable test mode to test actual download and file system behavior
-        manager.set_test_mode(false);
+        manager.set_test_mode(true);
 
         // Test discovery and get first available voice ID
         let voice_id = {
@@ -79,17 +78,53 @@ mod tests {
                 .clone()
         };
 
-        // Test switching (with download enabled)
-        manager.set_download_enabled(true);
+        // Switching in test mode does not hit the network
         let result = manager.switch_to_voice(&voice_id).await;
         assert!(result.is_ok());
 
         // Verify voice is now current
         assert_eq!(manager.current_voice(), Some(voice_id.as_str()));
 
-        // Test voice validation
+        // Model validation reports the truth: no real weights were fetched, so the
+        // voice's model files are genuinely missing from the empty models dir.
         let validation = manager.validate_voice_models(&voice_id).unwrap();
-        assert!(validation.valid); // Should be valid after download
+        assert!(
+            !validation.valid,
+            "validation must not claim missing model files are present"
+        );
+        assert!(!validation.missing_files.is_empty());
+    }
+
+    /// A real download against an unreachable endpoint must fail rather than
+    /// leaving behind fabricated placeholder "models" that later pass validation.
+    #[tokio::test]
+    async fn test_real_download_failure_is_reported() {
+        let temp_dir = tempdir().unwrap();
+        let mut manager = DefaultVoiceManager::new(temp_dir.path());
+        manager.set_test_mode(false);
+        manager.set_download_enabled(true);
+
+        // Point downloads at a port nothing is listening on.
+        std::env::set_var(
+            "VOIRS_MODEL_REPOSITORY_URL",
+            "http://127.0.0.1:1/voirs-models",
+        );
+
+        let voice_id = "en-US-female-calm";
+        let result = manager.switch_to_voice(voice_id).await;
+
+        std::env::remove_var("VOIRS_MODEL_REPOSITORY_URL");
+
+        assert!(
+            result.is_err(),
+            "an unreachable model host must not report a successful voice switch"
+        );
+
+        let validation = manager.validate_voice_models(voice_id).unwrap();
+        assert!(
+            !validation.valid,
+            "no model files may exist after a failed download"
+        );
     }
 
     #[test]

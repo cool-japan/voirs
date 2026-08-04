@@ -350,67 +350,95 @@ impl PipelineInitializer {
 
     /// Get list of required models based on configuration.
     ///
-    /// Only models that the load path actually opens are listed: the rule-based
-    /// G2P backend and the HiFi-GAN vocoder are constructed in-process and do not
-    /// consume a downloaded file, so requiring them would fail-close on downloads
-    /// nothing ever reads.
+    /// Only weights files that the load path actually opens are listed: the
+    /// rule-based G2P backend is constructed in-process and consumes no file, so
+    /// requiring it would fail-close on a download nothing ever reads.
+    ///
+    /// The filenames listed here are exactly the ones the loaders search for
+    /// (see [`Self::get_acoustic_model_path`] / [`Self::get_vocoder_model_path`]),
+    /// so a completed download is guaranteed to be found afterwards.
     fn get_required_models(&self, overrides: &ComponentOverrides) -> Vec<ModelInfo> {
         let mut models = Vec::new();
 
-        if overrides.acoustic.is_some() {
-            return models;
-        }
-
-        // The acoustic model is the one component loaded from a weights file.
         let language = self
             .config
             .language_code
             .unwrap_or(self.config.default_synthesis.language);
         let quality = &self.config.default_synthesis.quality;
-        let acoustic_name = self.config.acoustic_model.as_deref().unwrap_or("candle");
+        let base_url = self.download_base_url();
+        let cache_dir = self.config.effective_cache_dir();
 
-        // A configured local path takes precedence and needs no download.
-        if let Some(override_config) = self
-            .config
-            .model_loading
-            .model_overrides
-            .get(acoustic_name)
-            .filter(|entry| entry.local_path.is_some())
-        {
-            if override_config
-                .local_path
-                .as_ref()
-                .is_some_and(|path| path.exists())
-            {
-                return models;
+        if overrides.acoustic.is_none() {
+            let acoustic_name = self.config.acoustic_model.as_deref().unwrap_or("candle");
+            if !self.has_local_weights(acoustic_name, &cache_dir, "acoustic", language, quality) {
+                let filename = format!("{language:?}-acoustic-{quality:?}.safetensors");
+                models.push(ModelInfo {
+                    name: format!("{language:?}-acoustic-{quality:?}"),
+                    url: self
+                        .model_override(acoustic_name)
+                        .and_then(|entry| entry.url.clone())
+                        .unwrap_or_else(|| format!("{base_url}/acoustic/{filename}")),
+                    checksum: self
+                        .model_override(acoustic_name)
+                        .and_then(|entry| entry.checksum.clone())
+                        .unwrap_or_default(),
+                    filename,
+                });
             }
         }
 
-        let base_url = self.download_base_url();
-        let filename = format!("{language:?}-acoustic-{quality:?}.safetensors");
-        let checksum = self
-            .config
-            .model_loading
-            .model_overrides
-            .get(acoustic_name)
-            .and_then(|entry| entry.checksum.clone())
-            .unwrap_or_default();
-        let url = self
-            .config
-            .model_loading
-            .model_overrides
-            .get(acoustic_name)
-            .and_then(|entry| entry.url.clone())
-            .unwrap_or_else(|| format!("{base_url}/acoustic/{filename}"));
-
-        models.push(ModelInfo {
-            name: format!("{language:?}-acoustic-{quality:?}"),
-            filename,
-            url,
-            checksum,
-        });
+        if overrides.vocoder.is_none() {
+            let vocoder_name = self.config.vocoder_model.as_deref().unwrap_or("hifigan");
+            if !self.has_local_weights(vocoder_name, &cache_dir, "vocoder", language, quality) {
+                let filename = format!("{language:?}-vocoder-{quality:?}.safetensors");
+                models.push(ModelInfo {
+                    name: format!("{language:?}-vocoder-{quality:?}"),
+                    url: self
+                        .model_override(vocoder_name)
+                        .and_then(|entry| entry.url.clone())
+                        .unwrap_or_else(|| format!("{base_url}/vocoder/{filename}")),
+                    checksum: self
+                        .model_override(vocoder_name)
+                        .and_then(|entry| entry.checksum.clone())
+                        .unwrap_or_default(),
+                    filename,
+                });
+            }
+        }
 
         models
+    }
+
+    /// Look up a per-model configuration override
+    fn model_override(&self, model_name: &str) -> Option<&crate::config::ModelOverride> {
+        self.config.model_loading.model_overrides.get(model_name)
+    }
+
+    /// Whether the weights for a component are already present locally, either at
+    /// a configured local path or under one of the cache filenames the loaders
+    /// search for.
+    fn has_local_weights(
+        &self,
+        model_name: &str,
+        cache_dir: &std::path::Path,
+        kind: &str,
+        language: crate::types::LanguageCode,
+        quality: &crate::types::QualityLevel,
+    ) -> bool {
+        if let Some(path) = self
+            .model_override(model_name)
+            .and_then(|entry| entry.local_path.as_ref())
+        {
+            if path.exists() {
+                return true;
+            }
+        }
+
+        ["safetensors", "bin"].iter().any(|extension| {
+            cache_dir
+                .join(format!("{language:?}-{kind}-{quality:?}.{extension}"))
+                .exists()
+        })
     }
 
     /// Download a single model file over HTTPS.
@@ -658,6 +686,33 @@ impl PipelineInitializer {
         Ok(hex::encode(hasher.finalize()))
     }
 
+    /// Map an SDK language code onto the `voirs-g2p` language code.
+    ///
+    /// Returns `None` for languages the G2P backend has no ruleset for, so callers
+    /// can fail loudly instead of falling back to a different language's rules.
+    pub(crate) fn g2p_language(
+        language: crate::types::LanguageCode,
+    ) -> Option<voirs_g2p::LanguageCode> {
+        use crate::types::LanguageCode as Sdk;
+        use voirs_g2p::LanguageCode as G2p;
+
+        Some(match language {
+            Sdk::EnUs => G2p::EnUs,
+            Sdk::EnGb => G2p::EnGb,
+            Sdk::JaJp | Sdk::Ja => G2p::Ja,
+            Sdk::DeDe | Sdk::De => G2p::De,
+            Sdk::FrFr | Sdk::Fr => G2p::Fr,
+            Sdk::EsEs | Sdk::EsMx | Sdk::Es => G2p::Es,
+            Sdk::ItIt | Sdk::It => G2p::It,
+            Sdk::PtBr | Sdk::Pt => G2p::Pt,
+            Sdk::ZhCn => G2p::ZhCn,
+            Sdk::KoKr | Sdk::Ko => G2p::Ko,
+            Sdk::RuRu | Sdk::Ru => G2p::Ru,
+            Sdk::Ar => G2p::Ar,
+            _ => return None,
+        })
+    }
+
     /// Load G2P component
     async fn load_g2p(&self) -> Result<Arc<dyn G2p>> {
         info!("Loading G2P component");
@@ -670,22 +725,21 @@ impl PipelineInitializer {
             "rule_based" => {
                 info!("Loading rule-based G2P model");
 
-                // Determine language from config or use default
-                let language = self
+                // Determine the language to phonemize in. A language the backend
+                // cannot handle is an error: silently phonemizing e.g. Japanese
+                // with English rules would produce plausible-looking nonsense.
+                let requested = self
                     .config
                     .language_code
-                    .and_then(|lang| match lang {
-                        crate::types::LanguageCode::EnUs => Some(G2pLanguageCode::EnUs),
-                        crate::types::LanguageCode::EnGb => Some(G2pLanguageCode::EnGb),
-                        crate::types::LanguageCode::De => Some(G2pLanguageCode::De),
-                        crate::types::LanguageCode::Fr => Some(G2pLanguageCode::Fr),
-                        crate::types::LanguageCode::Es => Some(G2pLanguageCode::Es),
-                        crate::types::LanguageCode::It => Some(G2pLanguageCode::It),
-                        crate::types::LanguageCode::Pt => Some(G2pLanguageCode::Pt),
-                        crate::types::LanguageCode::Ja => Some(G2pLanguageCode::Ja),
-                        _ => None,
-                    })
-                    .unwrap_or(G2pLanguageCode::EnUs); // Default to English (US)
+                    .unwrap_or(self.config.default_synthesis.language);
+                let language =
+                    Self::g2p_language(requested).ok_or_else(|| VoirsError::ModelError {
+                        model_type: crate::error::types::ModelType::G2p,
+                        message: format!(
+                            "Rule-based G2P has no ruleset for language {requested:?}"
+                        ),
+                        source: None,
+                    })?;
 
                 let rule_based_g2p = Arc::new(RuleBasedG2p::new(language));
                 let adapter = G2pAdapter::new(rule_based_g2p);
@@ -787,30 +841,35 @@ impl PipelineInitializer {
 
                 use voirs_vocoder::HiFiGanVocoder;
 
-                // The vocoder must be built from real weights. `voirs-vocoder`
-                // currently only exposes `initialize_inference_for_testing`, which
-                // populates the generator with a freshly initialized (untrained)
-                // VarMap; using that outside test mode would emit fabricated audio,
-                // so the SDK fails closed instead.
+                // The vocoder is built from real weights on disk: the generator
+                // graph is populated from the tensors in the weights file. There is
+                // deliberately no fallback to randomly initialized weights, which
+                // would emit a fabricated waveform.
+                //
+                // NOTE: `HiFiGanVocoder::load_from_file` is deliberately not used —
+                // it spins up its own tokio runtime and `block_on`s, which panics
+                // when called from inside an async context, and it silently falls
+                // back to a default configuration when the file cannot be read.
                 let weights_path = self.get_vocoder_model_path()?;
+                let variant = Self::hifigan_variant_for(&weights_path);
+                let mut hifigan = HiFiGanVocoder::with_variant(variant);
 
-                let hifigan = HiFiGanVocoder::load_from_file(&weights_path).map_err(|e| {
-                    VoirsError::ModelError {
+                let var_builder = self.vocoder_var_builder(&weights_path)?;
+                hifigan
+                    .initialize_inference(var_builder)
+                    .map_err(|e| VoirsError::ModelError {
                         model_type: crate::error::types::ModelType::Vocoder,
                         message: format!(
-                            "Failed to load HiFi-GAN vocoder from {weights_path}: {e}"
+                            "Failed to bind HiFi-GAN weights from {weights_path} into the inference graph: {e}"
                         ),
                         source: Some(Box::new(e)),
-                    }
-                })?;
+                    })?;
 
                 if !hifigan.is_initialized() {
                     return Err(VoirsError::ModelError {
                         model_type: crate::error::types::ModelType::Vocoder,
                         message: format!(
-                            "HiFi-GAN weights at {weights_path} could not be bound to the inference \
-                             graph: voirs-vocoder does not yet expose a real weight-loading entry \
-                             point. Refusing to synthesize with untrained weights."
+                            "HiFi-GAN inference graph was not initialized from {weights_path}"
                         ),
                         source: None,
                     });
@@ -827,6 +886,141 @@ impl PipelineInitializer {
                 ),
                 source: None,
             }),
+        }
+    }
+
+    /// Pick the HiFi-GAN architecture variant implied by a weights file name.
+    ///
+    /// The variant determines the tensor shapes of the generator graph; if the
+    /// weights do not match the selected variant, binding them fails loudly rather
+    /// than producing a silently wrong model.
+    fn hifigan_variant_for(weights_path: &str) -> voirs_vocoder::HiFiGanVariant {
+        let name = std::path::Path::new(weights_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(weights_path)
+            .to_ascii_lowercase();
+
+        if name.contains("v3") {
+            voirs_vocoder::HiFiGanVariant::V3
+        } else if name.contains("v2") {
+            voirs_vocoder::HiFiGanVariant::V2
+        } else {
+            voirs_vocoder::HiFiGanVariant::V1
+        }
+    }
+
+    /// Select the Candle device used for vocoder weight binding.
+    ///
+    /// CUDA and Metal construction are wrapped in [`std::panic::catch_unwind`]
+    /// because the backing driver crates panic (rather than returning an error)
+    /// when the platform library is absent. Falling back to CPU only changes
+    /// *where* the real weights execute, never *what* executes, so it is logged and
+    /// allowed. A device string the vocoder has no backend for is an error rather
+    /// than a silent CPU substitution, so callers are not misled about what ran.
+    fn vocoder_device(&self) -> Result<candle_core::Device> {
+        let unsupported = |device: &str| VoirsError::ModelError {
+            model_type: crate::error::types::ModelType::Vocoder,
+            message: format!(
+                "Vocoder inference is not implemented for device '{device}'. \
+                 Supported devices: cpu, cuda, metal"
+            ),
+            source: None,
+        };
+
+        match self.config.device.as_str() {
+            "cpu" => Ok(candle_core::Device::Cpu),
+            "cuda" => Ok(
+                match std::panic::catch_unwind(|| candle_core::Device::new_cuda(0)) {
+                    Ok(Ok(device)) => device,
+                    Ok(Err(e)) => {
+                        tracing::warn!("CUDA device unavailable for vocoder ({e}), using CPU");
+                        candle_core::Device::Cpu
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "CUDA runtime not installed; running vocoder inference on CPU"
+                        );
+                        candle_core::Device::Cpu
+                    }
+                },
+            ),
+            "metal" => Ok(
+                match std::panic::catch_unwind(|| candle_core::Device::new_metal(0)) {
+                    Ok(Ok(device)) => device,
+                    Ok(Err(e)) => {
+                        tracing::warn!("Metal device unavailable for vocoder ({e}), using CPU");
+                        candle_core::Device::Cpu
+                    }
+                    Err(_) => {
+                        tracing::warn!("Metal runtime unavailable; running vocoder on CPU");
+                        candle_core::Device::Cpu
+                    }
+                },
+            ),
+            other => Err(unsupported(other)),
+        }
+    }
+
+    /// Build a Candle [`VarBuilder`](candle_nn::VarBuilder) over the real tensors
+    /// stored in a vocoder weights file.
+    ///
+    /// Supports `.safetensors` and PyTorch `.pth`/`.pt`/`.bin` checkpoints. Any
+    /// missing or mismatched tensor surfaces as an error while the generator graph
+    /// is constructed, so an incompatible checkpoint can never be silently accepted.
+    fn vocoder_var_builder(&self, weights_path: &str) -> Result<candle_nn::VarBuilder<'static>> {
+        let device = self.vocoder_device()?;
+        let path = std::path::Path::new(weights_path);
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        let model_error =
+            |message: String, source: Option<Box<candle_core::Error>>| VoirsError::ModelError {
+                model_type: crate::error::types::ModelType::Vocoder,
+                message,
+                source: source.map(|e| e as Box<dyn std::error::Error + Send + Sync>),
+            };
+
+        match extension.as_str() {
+            "safetensors" => {
+                let tensors = candle_core::safetensors::load(path, &device).map_err(|e| {
+                    model_error(
+                        format!("Failed to read safetensors weights {weights_path}: {e}"),
+                        Some(Box::new(e)),
+                    )
+                })?;
+                Ok(candle_nn::VarBuilder::from_tensors(
+                    tensors,
+                    candle_core::DType::F32,
+                    &device,
+                ))
+            }
+            // `.bin` is ambiguous in the wild; it is attempted as a PyTorch
+            // checkpoint and a parse failure is reported as such rather than
+            // being papered over with default-initialized weights.
+            "pth" | "pt" | "bin" => {
+                candle_nn::VarBuilder::from_pth(path, candle_core::DType::F32, &device).map_err(
+                    |e| {
+                        model_error(
+                            format!(
+                                "Failed to read {weights_path} as a PyTorch checkpoint: {e}. \
+                                 Convert the weights to .safetensors if they are in another format."
+                            ),
+                            Some(Box::new(e)),
+                        )
+                    },
+                )
+            }
+            other => Err(model_error(
+                format!(
+                    "Unsupported vocoder weights format '{other}' for {weights_path}. \
+                     Supported formats: safetensors, pth, pt, bin"
+                ),
+                None,
+            )),
         }
     }
 
@@ -1095,17 +1289,93 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let initializer = PipelineInitializer::new(cpu_config(dir.path()));
 
+        // Exactly the weights files the loaders open: acoustic and vocoder.
+        // The rule-based G2P is built in-process and must not be required.
         let models = initializer.get_required_models(&ComponentOverrides::default());
-        assert_eq!(models.len(), 1);
-        assert!(models[0].filename.contains("acoustic"));
-        assert!(models[0].url.starts_with("https://"));
+        assert_eq!(models.len(), 2, "unexpected required models: {models:?}");
+        assert!(models.iter().any(|m| m.filename.contains("acoustic")));
+        assert!(models.iter().any(|m| m.filename.contains("vocoder")));
+        assert!(!models.iter().any(|m| m.filename.contains("g2p")));
+        assert!(models.iter().all(|m| m.url.starts_with("https://")));
 
-        // A caller-supplied acoustic model needs no download at all.
+        // Every required filename must be one the loaders actually search for,
+        // otherwise a successful download would still fail to load.
+        let cache_dir = dir.path();
+        for model in &models {
+            std::fs::write(cache_dir.join(&model.filename), b"weights").expect("write");
+        }
+        assert!(
+            initializer.get_acoustic_model_path().is_ok(),
+            "downloaded acoustic filename must be found by the loader"
+        );
+        assert!(
+            initializer.get_vocoder_model_path().is_ok(),
+            "downloaded vocoder filename must be found by the loader"
+        );
+        // Now that both files exist, nothing further is required.
+        assert!(initializer
+            .get_required_models(&ComponentOverrides::default())
+            .is_empty());
+
+        // Caller-supplied components need no download at all.
+        let fresh = tempfile::tempdir().expect("temp dir");
+        let initializer = PipelineInitializer::new(cpu_config(fresh.path()));
         let overrides = ComponentOverrides {
+            g2p: None,
             acoustic: Some(Arc::new(crate::pipeline::DummyAcoustic::new())),
-            ..Default::default()
+            vocoder: Some(Arc::new(crate::pipeline::DummyVocoder::new())),
         };
         assert!(initializer.get_required_models(&overrides).is_empty());
+    }
+
+    /// A weights file that does not contain the generator's tensors must be
+    /// rejected: the vocoder must never silently fall back to random weights.
+    #[tokio::test]
+    async fn test_vocoder_rejects_incompatible_weights() {
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = cpu_config(dir.path());
+        let language = config.default_synthesis.language;
+        let quality = config.default_synthesis.quality;
+        let weights_path = dir
+            .path()
+            .join(format!("{language:?}-vocoder-{quality:?}.safetensors"));
+
+        // A real safetensors file, but with tensors the generator does not expect.
+        let device = candle_core::Device::Cpu;
+        let mut tensors: HashMap<String, candle_core::Tensor> = HashMap::new();
+        tensors.insert(
+            "not_a_hifigan_tensor".to_string(),
+            candle_core::Tensor::zeros((2, 2), candle_core::DType::F32, &device).expect("tensor"),
+        );
+        candle_core::safetensors::save(&tensors, &weights_path).expect("save weights");
+
+        let initializer = PipelineInitializer::new(config);
+        let result = initializer.load_vocoder().await;
+
+        assert!(
+            result.is_err(),
+            "incompatible vocoder weights must not produce a usable vocoder"
+        );
+    }
+
+    /// Unsupported weight formats are reported rather than silently ignored.
+    #[test]
+    fn test_vocoder_var_builder_rejects_unknown_format() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("weights.onnxlike");
+        std::fs::write(&path, b"not weights").expect("write");
+
+        let initializer = PipelineInitializer::new(cpu_config(dir.path()));
+        let err = initializer
+            .vocoder_var_builder(&path.to_string_lossy())
+            .err()
+            .expect("unsupported format must error");
+        assert!(
+            format!("{err}").contains("Unsupported vocoder weights format"),
+            "unexpected error: {err}"
+        );
     }
 
     /// Test mode must be an explicit opt-in that yields the documented stubs.

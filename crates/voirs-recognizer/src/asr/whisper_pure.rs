@@ -325,10 +325,18 @@ impl PureRustWhisper {
         self.error_recovery.get_memory_stats().await
     }
 
-    /// Run performance benchmark
+    /// Run a real performance benchmark against this model instance.
+    ///
+    /// Every figure returned is measured by timing real [`ASRModel::transcribe`] calls
+    /// on this machine — the benchmark used to be handed a `&()` placeholder and slept
+    /// instead of running the model.
+    ///
+    /// # Errors
+    /// Propagates any transcription error, including the fail-closed error returned when
+    /// no pretrained weights are loaded.
     pub async fn benchmark(&self) -> Result<OverallPerformance, RecognitionError> {
         let benchmark = WhisperBenchmark::new(BenchmarkConfig::default());
-        benchmark.quick_benchmark(&()).await
+        benchmark.quick_benchmark(self).await
     }
 
     /// Check if memory manager is enabled

@@ -11,6 +11,94 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::{sleep, timeout};
 
+/// Deliver a real local desktop notification via the OS-native mechanism:
+///
+/// - macOS: `osascript`'s `display notification`, which surfaces a genuine
+///   Notification Center banner. Title/body are passed as `argv` to an
+///   `on run argv` handler so arbitrary text (quotes, backslashes,
+///   newlines) never needs AppleScript string escaping.
+/// - Linux: `notify-send`, the CLI front-end for the freedesktop.org
+///   `org.freedesktop.Notifications` D-Bus service.
+///
+/// There is no dependency-free, universally-installed mechanism on Windows
+/// or any other target, so those honestly return
+/// [`PlatformError::FeatureNotAvailable`] rather than printing a line and
+/// claiming success.
+pub(crate) async fn deliver_local_notification(title: &str, body: &str) -> PlatformResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = tokio::process::Command::new("osascript")
+            .arg("-e")
+            .arg("on run argv")
+            .arg("-e")
+            .arg("display notification (item 2 of argv) with title (item 1 of argv)")
+            .arg("-e")
+            .arg("end run")
+            .arg(title)
+            .arg(body)
+            .output()
+            .await
+            .map_err(|e| notification_spawn_error("osascript", &e))?;
+
+        if !output.status.success() {
+            return Err(PlatformError::ConfigurationError {
+                message: format!(
+                    "osascript notification delivery failed (exit {:?}): {}",
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let output = tokio::process::Command::new("notify-send")
+            .arg(title)
+            .arg(body)
+            .output()
+            .await
+            .map_err(|e| notification_spawn_error("notify-send", &e))?;
+
+        if !output.status.success() {
+            return Err(PlatformError::ConfigurationError {
+                message: format!(
+                    "notify-send notification delivery failed (exit {:?}): {}",
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (title, body);
+        Err(PlatformError::FeatureNotAvailable {
+            feature: "desktop notifications (no local delivery backend implemented for this OS; \
+                      supported: macOS via osascript, Linux via notify-send)"
+                .to_string(),
+        })
+    }
+}
+
+/// Map a notification-backend spawn failure to a typed error, distinguishing
+/// "the binary isn't installed" from other OS-level launch failures.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn notification_spawn_error(program: &str, e: &std::io::Error) -> PlatformError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        PlatformError::FeatureNotAvailable {
+            feature: format!("desktop notifications ({program} binary not found in PATH)"),
+        }
+    } else {
+        PlatformError::ConfigurationError {
+            message: format!("failed to launch {program}: {e}"),
+        }
+    }
+}
+
 /// Pending notification with tracking information
 #[derive(Debug, Clone)]
 pub struct PendingNotification {
@@ -408,133 +496,62 @@ impl NotificationManager {
     }
 
     /// Show desktop notification
+    ///
+    /// Delivers a real OS-native notification via [`deliver_local_notification`].
     async fn show_desktop_notification(
         &self,
         id: &str,
         notification: &Notification,
     ) -> PlatformResult<()> {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-        {
-            // On desktop platforms, we would use platform-specific notification APIs
-            // Windows: Windows Runtime API (WinRT)
-            // macOS: NSUserNotification or UNUserNotificationCenter
-            // Linux: D-Bus notification service
-
-            println!(
-                "Desktop Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-
-            // Simulate platform-specific notification display
-            if let Some(icon_path) = &notification.icon {
-                println!("  Icon: {icon_path}");
-            }
-
-            if let Some(duration) = notification.auto_dismiss_after {
-                println!("  Auto-dismiss after: {duration:?}");
-            }
-        }
-
-        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-        {
-            // Fallback for non-desktop platforms
-            println!(
-                "Desktop Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-        }
-
+        deliver_local_notification(&notification.title, &notification.body).await?;
+        log::debug!(
+            "Delivered desktop notification {id} ({} bytes body)",
+            notification.body.len()
+        );
         Ok(())
     }
 
     /// Show web notification
+    ///
+    /// Real browser notifications require the Web Notifications API
+    /// (`web_sys::Notification`), reachable only from a `wasm32` target
+    /// running inside an actual browser. This crate's dependency graph does
+    /// not currently compile for `wasm32-unknown-unknown` at all (`tokio`'s
+    /// unconditional `full` feature pulls in `mio`'s socket registration
+    /// code, which fails to build for that target — verified directly, not
+    /// assumed), so there is no compiled, verifiable browser code path to
+    /// ship here; this honestly reports the feature as unavailable rather
+    /// than printing a line and claiming a notification was shown.
     async fn show_web_notification(
         &self,
-        id: &str,
-        notification: &Notification,
+        _id: &str,
+        _notification: &Notification,
     ) -> PlatformResult<()> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // In WASM environment, this would use the Web Notifications API
-            // First check if notifications are supported
-            // Then request permission if needed
-            // Finally create and show the notification
-
-            // let permission = web_sys::Notification::permission();
-            // if permission == web_sys::NotificationPermission::Default {
-            //     let permission_result = web_sys::Notification::request_permission()
-            //         .await
-            //         .map_err(|e| PlatformError::FeatureNotAvailable {
-            //             feature: format!("notification permission: {:?}", e),
-            //         })?;
-            // }
-            //
-            // if permission == web_sys::NotificationPermission::Granted {
-            //     let notification_options = web_sys::NotificationOptions::new();
-            //     notification_options.set_body(&notification.body);
-            //     if let Some(icon) = &notification.icon {
-            //         notification_options.set_icon(icon);
-            //     }
-            //
-            //     let web_notification = web_sys::Notification::new_with_options(
-            //         &notification.title,
-            //         &notification_options
-            //     ).map_err(|e| PlatformError::NetworkError {
-            //         message: format!("Failed to create notification: {:?}", e),
-            //     })?;
-            // }
-
-            println!(
-                "Web Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-        }
-
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            println!(
-                "Web Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-        }
-
-        Ok(())
+        Err(PlatformError::FeatureNotAvailable {
+            feature: "web notifications (requires a wasm32 build with a working Web \
+                      Notifications API binding; not available in this crate's current \
+                      dependency graph)"
+                .to_string(),
+        })
     }
 
     /// Show mobile notification
+    ///
+    /// Real mobile notifications require native FFI bindings
+    /// (`UNUserNotificationCenter` on iOS, `NotificationManager` on
+    /// Android) that this library does not link against, so this honestly
+    /// reports the feature as unavailable instead of printing a line and
+    /// claiming a notification was shown.
     async fn show_mobile_notification(
         &self,
-        id: &str,
-        notification: &Notification,
+        _id: &str,
+        _notification: &Notification,
     ) -> PlatformResult<()> {
-        #[cfg(target_os = "ios")]
-        {
-            // iOS notifications would use UNUserNotificationCenter
-            // Request authorization first, then create notification content
-            println!(
-                "iOS Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-        }
-
-        #[cfg(target_os = "android")]
-        {
-            // Android notifications would use NotificationManager and NotificationChannel
-            println!(
-                "Android Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-        }
-
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
-            println!(
-                "Mobile Notification [{}]: {} - {}",
-                id, notification.title, notification.body
-            );
-        }
-
-        Ok(())
+        Err(PlatformError::FeatureNotAvailable {
+            feature: "mobile notifications (requires native iOS/Android FFI bindings not \
+                      present in this build)"
+                .to_string(),
+        })
     }
 
     /// Cancel a notification
@@ -941,5 +958,82 @@ mod tests {
 
         assert!(!notification_id.is_empty());
         assert!(elapsed >= Duration::from_millis(100));
+    }
+
+    /// Exercises the real OS-native delivery path directly. On macOS/Linux
+    /// this is a genuine end-to-end call into `osascript`/`notify-send`;
+    /// title/body containing quotes, backslashes, and newlines must not
+    /// break the command (proves the argv-based escaping actually works,
+    /// not just a happy-path string).
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn test_deliver_local_notification_handles_adversarial_text() {
+        let result = deliver_local_notification(
+            "Title with \"quotes\" and \\backslash\\",
+            "Body with \"quotes\", \\backslashes\\, and a\nnewline",
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "real local delivery should succeed with adversarial text: {result:?}"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn test_notification_spawn_error_distinguishes_missing_binary() {
+        let not_found = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let err = notification_spawn_error("notify-send", &not_found);
+        assert!(matches!(err, PlatformError::FeatureNotAvailable { .. }));
+
+        let other = std::io::Error::other("boom");
+        let err = notification_spawn_error("notify-send", &other);
+        assert!(matches!(err, PlatformError::ConfigurationError { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_web_notification_fails_closed_not_fake_success() {
+        let config = NotificationConfig::default();
+        let manager = NotificationManager::new(Platform::Web, config);
+
+        let notification = Notification {
+            title: "Web Test".to_string(),
+            body: "Should not fabricate delivery".to_string(),
+            priority: NotificationPriority::Normal,
+            category: NotificationCategory::System,
+            icon: None,
+            auto_dismiss_after: None,
+            actions: vec![],
+            data: HashMap::new(),
+        };
+
+        let result = manager.deliver_notification("test-id", &notification).await;
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_mobile_notification_fails_closed_not_fake_success() {
+        let config = NotificationConfig::default();
+        let manager = NotificationManager::new(Platform::Mobile, config);
+
+        let notification = Notification {
+            title: "Mobile Test".to_string(),
+            body: "Should not fabricate delivery".to_string(),
+            priority: NotificationPriority::Normal,
+            category: NotificationCategory::System,
+            icon: None,
+            auto_dismiss_after: None,
+            actions: vec![],
+            data: HashMap::new(),
+        };
+
+        let result = manager.deliver_notification("test-id", &notification).await;
+        assert!(matches!(
+            result,
+            Err(PlatformError::FeatureNotAvailable { .. })
+        ));
     }
 }

@@ -1,48 +1,258 @@
-//! Extended pronunciation evaluator implementation (mock alignment, emotional prosody, cross-linguistic)
+//! Extended pronunciation evaluator implementation (forced alignment, emotional prosody, cross-linguistic)
 
 use crate::traits::{
     PronunciationEvaluationConfig, PronunciationEvaluatorMetadata, PronunciationMetric,
 };
 use crate::EvaluationError;
 use scirs2_core::parallel_ops::*;
-use voirs_recognizer::traits::{AlignedPhoneme, PhonemeAlignment};
+use voirs_recognizer::traits::{AlignedPhoneme, PhonemeAlignment, WordAlignment};
 use voirs_sdk::{AudioBuffer, LanguageCode, Phoneme};
 
 use super::evaluator_core::PronunciationEvaluatorImpl;
 use super::extended_types::{
     EmotionalDynamics, EmotionalProsodicFeatures, EmotionalState, EmotionalTransition,
     IntonationFunction, IntonationPattern, LanguageComparisonDetails, LanguageProsodicProfile,
-    PauseCharacteristics, PausePlacement, ProsodicFeature, ProsodyAdaptation, RhythmNorms,
-    TimingType,
+    MannerOfArticulation, PauseCharacteristics, PausePlacement, ProsodicFeature,
+    ProsodyAdaptation, RhythmNorms, TimingType,
 };
+use super::forced_alignment;
 
 impl PronunciationEvaluatorImpl {
-    /// Create a mock alignment for testing purposes
-    pub(crate) async fn create_mock_alignment(
+    /// Force-align the reference `text`'s phoneme sequence onto `audio`.
+    ///
+    /// This is a genuine forced alignment: as in standard forced-alignment systems
+    /// (e.g. Montreal Forced Aligner / HTK), the *identity* of each phoneme is fixed
+    /// by the reference text (via [`PronunciationEvaluatorImpl::text_to_phonemes`]) —
+    /// only the *timing* is determined from the audio. Timing is found with a
+    /// dynamic-programming search over a real acoustic boundary-evidence function
+    /// (frame energy + spectral flux; see [`forced_alignment::segment_via_dp`])
+    /// instead of dividing the duration evenly. Each resulting segment is additionally
+    /// scored against the acoustic profile expected for its phoneme (voicing, energy
+    /// level, spectral noisiness) to produce a real, audio-dependent confidence — a
+    /// Goodness-of-Pronunciation (GOP) style proxy consumed by
+    /// [`PronunciationEvaluatorImpl::calculate_phoneme_accuracy`]. Because the
+    /// aligner places the *reference* phonemes onto the audio, per-phoneme
+    /// pronunciation-correctness evidence necessarily comes from this acoustic
+    /// confidence, not from comparing phoneme symbols (which are identical to the
+    /// reference by construction).
+    ///
+    /// When `audio` has no samples (or an invalid sample rate) every phoneme is
+    /// reported with `confidence: 0.0` and zero duration rather than a fabricated
+    /// uniform placement, since there is no acoustic evidence to place it from.
+    pub(crate) async fn align_phonemes_to_audio(
         &self,
         audio: &AudioBuffer,
         text: &str,
     ) -> Result<PhonemeAlignment, EvaluationError> {
         let phonemes = self.text_to_phonemes(text).await?;
-        let total_duration = audio.samples().len() as f32 / audio.sample_rate() as f32;
-        let mut aligned_phonemes = Vec::new();
-        let phoneme_duration = total_duration / phonemes.len() as f32;
-        for (i, phoneme) in phonemes.into_iter().enumerate() {
-            let start_time = i as f32 * phoneme_duration;
-            let end_time = start_time + phoneme_duration;
-            aligned_phonemes.push(AlignedPhoneme {
-                phoneme,
-                start_time,
-                end_time,
-                confidence: 0.9,
+        let samples = audio.samples();
+        let sample_rate = audio.sample_rate();
+        let total_duration = if sample_rate > 0 {
+            samples.len() as f32 / sample_rate as f32
+        } else {
+            0.0
+        };
+
+        if phonemes.is_empty() {
+            return Ok(PhonemeAlignment {
+                phonemes: Vec::new(),
+                total_duration,
+                alignment_confidence: 0.0,
+                word_alignments: Vec::new(),
             });
         }
+
+        if samples.is_empty() || sample_rate == 0 {
+            let aligned_phonemes: Vec<AlignedPhoneme> = phonemes
+                .into_iter()
+                .map(|phoneme| AlignedPhoneme {
+                    phoneme,
+                    start_time: 0.0,
+                    end_time: 0.0,
+                    confidence: 0.0,
+                })
+                .collect();
+            let word_alignments = self.build_word_alignments(text, &aligned_phonemes).await?;
+            return Ok(PhonemeAlignment {
+                phonemes: aligned_phonemes,
+                total_duration: 0.0,
+                alignment_confidence: 0.0,
+                word_alignments,
+            });
+        }
+
+        let grid = forced_alignment::extract_frame_grid(samples, sample_rate);
+        // Require at least 2 frames per segment where possible, so each segment's
+        // acoustic features (RMS/ZCR/voicing) are estimated from more than a single
+        // analysis window; relax to 1 when the audio is too short for that.
+        let min_len = if grid.frames.len() >= phonemes.len() * 2 {
+            2
+        } else {
+            1
+        };
+        let dp_boundaries = if grid.frames.len() >= phonemes.len() && grid.frames.len() >= 2 {
+            let novelty = forced_alignment::compute_novelty(&grid.frames);
+            let hi = novelty.iter().cloned().fold(f64::MIN, f64::max);
+            let lo = novelty.iter().cloned().fold(f64::MAX, f64::min);
+            // A flat novelty function (e.g. silence or a constant signal) carries no
+            // boundary evidence; fall back to uniform division rather than let the DP
+            // arbitrarily collapse boundaries at the first tied index.
+            if hi - lo > 1e-9 {
+                forced_alignment::segment_via_dp(&novelty, phonemes.len(), min_len)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let sample_boundaries: Vec<usize> = match dp_boundaries {
+            Some(frame_boundaries) => frame_boundaries
+                .iter()
+                .map(|&b| {
+                    if b >= grid.frames.len() {
+                        samples.len()
+                    } else {
+                        (b * grid.hop_len).min(samples.len())
+                    }
+                })
+                .collect(),
+            None => forced_alignment::uniform_sample_boundaries(samples.len(), phonemes.len()),
+        };
+
+        let global_peak_rms =
+            forced_alignment::peak_rms(samples, forced_alignment::frame_len_for(sample_rate));
+
+        let mut aligned_phonemes = Vec::with_capacity(phonemes.len());
+        for (i, phoneme) in phonemes.into_iter().enumerate() {
+            let start = sample_boundaries[i].min(samples.len());
+            let end = sample_boundaries[i + 1].clamp(start, samples.len());
+            let segment = &samples[start..end];
+            let confidence =
+                self.acoustic_phoneme_confidence(segment, sample_rate, &phoneme, global_peak_rms);
+            aligned_phonemes.push(AlignedPhoneme {
+                phoneme,
+                start_time: start as f32 / sample_rate as f32,
+                end_time: end as f32 / sample_rate as f32,
+                confidence,
+            });
+        }
+
+        let alignment_confidence = if aligned_phonemes.is_empty() {
+            0.0
+        } else {
+            aligned_phonemes.iter().map(|p| p.confidence).sum::<f32>()
+                / aligned_phonemes.len() as f32
+        };
+
+        let word_alignments = self.build_word_alignments(text, &aligned_phonemes).await?;
+
         Ok(PhonemeAlignment {
             phonemes: aligned_phonemes,
             total_duration,
-            alignment_confidence: 0.9,
-            word_alignments: Vec::new(),
+            alignment_confidence,
+            word_alignments,
         })
+    }
+
+    /// Score how well an audio segment matches the acoustic profile expected for
+    /// `phoneme`: a real, audio-dependent Goodness-of-Pronunciation (GOP) style proxy
+    /// combining voicing (normalized-autocorrelation strength vs. the phoneme's
+    /// expected voicing), energy level (segment RMS relative to the utterance peak vs.
+    /// the phoneme's expected sonority tier) and spectral noisiness (zero-crossing
+    /// rate vs. the phoneme's expected tier). Every input is measured directly from
+    /// `segment`'s samples, so the score genuinely varies with the audio content; the
+    /// phoneme-class -> expected-tier mapping is a documented acoustic-phonetic
+    /// heuristic (obstruents are lower-energy and spectrally noisier than sonorants),
+    /// not a trained classifier.
+    fn acoustic_phoneme_confidence(
+        &self,
+        segment: &[f32],
+        sample_rate: u32,
+        phoneme: &Phoneme,
+        global_peak_rms: f32,
+    ) -> f32 {
+        if segment.len() < 2 {
+            return 0.0;
+        }
+        let features = self.get_phonetic_features(&phoneme.symbol);
+
+        let measured_voicing = forced_alignment::voicing_strength(segment, sample_rate);
+        let measured_energy = forced_alignment::rms(segment) / global_peak_rms.max(1e-6);
+        let measured_zcr = forced_alignment::zero_crossing_rate(segment);
+
+        let expected_voicing = if features.voiced { 1.0 } else { 0.0 };
+        let expected_energy = if features.is_vowel {
+            0.8
+        } else {
+            match features.manner {
+                MannerOfArticulation::Approximant => 0.65,
+                MannerOfArticulation::Nasal | MannerOfArticulation::Lateral => 0.6,
+                MannerOfArticulation::Fricative | MannerOfArticulation::Affricate => 0.45,
+                MannerOfArticulation::Stop => 0.25,
+            }
+        };
+        let expected_zcr = if features.is_vowel {
+            0.15
+        } else {
+            match (features.voiced, features.manner) {
+                (
+                    true,
+                    MannerOfArticulation::Nasal
+                    | MannerOfArticulation::Lateral
+                    | MannerOfArticulation::Approximant,
+                ) => 0.15,
+                (true, MannerOfArticulation::Fricative | MannerOfArticulation::Affricate) => 0.45,
+                (true, MannerOfArticulation::Stop) => 0.3,
+                (false, _) => 0.75,
+            }
+        };
+
+        let voicing_match = 1.0 - (measured_voicing - expected_voicing).abs();
+        let energy_match = 1.0 - (measured_energy.min(1.5) - expected_energy).abs().min(1.0);
+        let zcr_match = 1.0 - (measured_zcr - expected_zcr).abs();
+
+        (voicing_match * 0.4 + energy_match * 0.35 + zcr_match * 0.25).clamp(0.0, 1.0)
+    }
+
+    /// Build word-level alignment spans by phonemizing each whitespace-delimited word
+    /// individually and consuming that many phonemes sequentially from
+    /// `aligned_phonemes`. This mirrors how the rule-based G2P backends used by
+    /// [`PronunciationEvaluatorImpl::text_to_phonemes`] phonemize the full text (a
+    /// concatenation of per-word phonemizations), so the counts line up in the common
+    /// case. If the aligned sequence runs out early the remaining words are simply
+    /// omitted rather than padded with fabricated entries.
+    pub(crate) async fn build_word_alignments(
+        &self,
+        text: &str,
+        aligned_phonemes: &[AlignedPhoneme],
+    ) -> Result<Vec<WordAlignment>, EvaluationError> {
+        let mut word_alignments = Vec::new();
+        let mut cursor = 0usize;
+        for word in text.split_whitespace() {
+            if cursor >= aligned_phonemes.len() {
+                break;
+            }
+            let word_len = self.text_to_phonemes(word).await?.len().max(1);
+            let end = (cursor + word_len).min(aligned_phonemes.len());
+            let span = &aligned_phonemes[cursor..end];
+            if span.is_empty() {
+                cursor = end;
+                continue;
+            }
+            let start_time = span.first().map_or(0.0, |p| p.start_time);
+            let end_time = span.last().map_or(start_time, |p| p.end_time);
+            let confidence = span.iter().map(|p| p.confidence).sum::<f32>() / span.len() as f32;
+            word_alignments.push(WordAlignment {
+                word: word.to_string(),
+                start_time,
+                end_time,
+                phonemes: span.to_vec(),
+                confidence,
+            });
+            cursor = end;
+        }
+        Ok(word_alignments)
     }
     pub(crate) fn get_expected_stress_pattern(&self, word: &str) -> Vec<u8> {
         let syllable_count = word
@@ -59,8 +269,9 @@ impl PronunciationEvaluatorImpl {
     pub(crate) async fn extract_actual_stress_pattern(
         &self,
         alignment: &PhonemeAlignment,
-        _word_idx: usize,
+        word_idx: usize,
         word: &str,
+        total_words: usize,
     ) -> Result<Vec<u8>, EvaluationError> {
         let syllable_count = word
             .chars()
@@ -68,16 +279,20 @@ impl PronunciationEvaluatorImpl {
             .count()
             .max(1);
         let mut pattern = vec![0; syllable_count];
-        if !alignment.phonemes.is_empty() {
-            let total_duration: f32 = alignment
-                .phonemes
+        // Scope the analysis to just this word's own aligned phonemes (real timing
+        // from `align_phonemes_to_audio`), not the whole utterance, so that each word
+        // in a multi-word sentence gets its own stress evidence instead of all words
+        // sharing one whole-sentence duration profile.
+        let word_phonemes = forced_alignment::word_phoneme_span(alignment, word_idx, word, total_words);
+        if !word_phonemes.is_empty() {
+            let total_duration: f32 = word_phonemes
                 .iter()
                 .map(|p| p.end_time - p.start_time)
                 .sum();
-            let avg_duration = total_duration / alignment.phonemes.len() as f32;
-            for (i, phoneme) in alignment.phonemes.iter().enumerate() {
+            let avg_duration = total_duration / word_phonemes.len() as f32;
+            for (i, phoneme) in word_phonemes.iter().enumerate() {
                 let duration = phoneme.end_time - phoneme.start_time;
-                let syllable_idx = (i * syllable_count) / alignment.phonemes.len();
+                let syllable_idx = (i * syllable_count) / word_phonemes.len();
                 if syllable_idx < pattern.len() && duration > avg_duration * 1.2 {
                     pattern[syllable_idx] = 1;
                 }

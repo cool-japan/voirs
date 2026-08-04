@@ -16,9 +16,11 @@ use std::sync::Arc;
 pub mod analysis;
 pub mod confidence;
 pub mod phoneme_sets;
+pub mod textgrid;
 pub use analysis::*;
 pub use confidence::*;
 pub use phoneme_sets::*;
+pub use textgrid::{TextGrid, TextGridError};
 
 // Alignment implementations
 #[cfg(feature = "forced-align")]
@@ -28,6 +30,8 @@ pub use forced_align::ForcedAlignModel;
 
 #[cfg(feature = "mfa")]
 pub mod mfa;
+#[cfg(feature = "mfa")]
+pub mod mfa_cli;
 #[cfg(feature = "mfa")]
 pub use mfa::MFAModel;
 

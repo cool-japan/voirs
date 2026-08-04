@@ -52,6 +52,11 @@ pub struct WhisperConfig {
     pub sample_rate: u32,
     /// Quantization mode for the model
     pub quantization: QuantizationMode,
+    /// Real pretrained assets (checkpoint + vocabulary).
+    ///
+    /// `None` means no trained parameters are available, in which case every
+    /// constructor fails closed rather than building a zero-initialised network.
+    pub assets: Option<super::assets::WhisperAssets>,
 }
 
 /// Quantization mode for model optimization
@@ -92,6 +97,7 @@ impl Default for WhisperConfig {
             hop_length: 160,
             sample_rate: 16000,
             quantization: QuantizationMode::default(),
+            assets: None,
         }
     }
 }
@@ -117,6 +123,7 @@ impl WhisperConfig {
             hop_length: 160,
             sample_rate: 16000,
             quantization: QuantizationMode::default(),
+            assets: None,
         }
     }
 
@@ -146,6 +153,7 @@ impl WhisperConfig {
             hop_length: 160,
             sample_rate: 16000,
             quantization: QuantizationMode::default(),
+            assets: None,
         }
     }
 
@@ -169,6 +177,7 @@ impl WhisperConfig {
             hop_length: 160,
             sample_rate: 16000,
             quantization: QuantizationMode::default(),
+            assets: None,
         }
     }
 
@@ -192,6 +201,7 @@ impl WhisperConfig {
             hop_length: 160,
             sample_rate: 16000,
             quantization: QuantizationMode::default(),
+            assets: None,
         }
     }
 
@@ -297,6 +307,22 @@ impl WhisperConfig {
         }
     }
 
+    /// Attach real pretrained assets (checkpoint + vocabulary).
+    ///
+    /// Without them every Whisper constructor fails closed, because this
+    /// implementation refuses to run inference on untrained parameters.
+    #[must_use]
+    pub fn with_assets(mut self, assets: super::assets::WhisperAssets) -> Self {
+        self.assets = Some(assets);
+        self
+    }
+
+    /// Whether real pretrained assets are configured.
+    #[must_use]
+    pub fn has_assets(&self) -> bool {
+        self.assets.is_some()
+    }
+
     /// Enable quantization for the model
     #[must_use]
     pub fn with_quantization(mut self, quantization: QuantizationMode) -> Self {
@@ -369,19 +395,30 @@ impl WhisperEncoder {
     /// # Returns
     /// A new encoder instance or an error if initialization fails
     pub async fn new(config: &WhisperConfig, device: &Device) -> Result<Self, RecognitionError> {
-        // Create positional embedding
-        let positional_embedding = Tensor::zeros(
-            (config.n_audio_ctx, config.n_audio_state),
-            DType::F32,
+        // Real trained parameters, or a typed error. Never a zero-initialised network:
+        // conv and linear layers with all-zero weights emit zeros for any input, so the
+        // encoder would be degenerate while still reporting success.
+        let vs = super::assets::var_builder_from_assets(
+            config.assets.as_ref(),
+            &config.model_size,
             device,
-        )
-        .map_err(|e| RecognitionError::ModelLoadError {
-            message: format!("Failed to create positional embedding: {e}"),
-            source: Some(Box::new(e)),
-        })?;
+        )?
+        .pp("encoder");
 
-        // Create variable builder for weight initialization
-        let vs = VarBuilder::zeros(DType::F32, device);
+        // Positional embedding comes from the checkpoint.
+        let positional_embedding = vs
+            .get(
+                (config.n_audio_ctx, config.n_audio_state),
+                "positional_embedding",
+            )
+            .map_err(|e| RecognitionError::ModelLoadError {
+                message: format!(
+                    "Whisper checkpoint has no usable encoder.positional_embedding \
+                     [{}, {}]: {e}",
+                    config.n_audio_ctx, config.n_audio_state
+                ),
+                source: Some(Box::new(e)),
+            })?;
 
         // Create convolutional layers
         let conv1 = candle_nn::conv1d(

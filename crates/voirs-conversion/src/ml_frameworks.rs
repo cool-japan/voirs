@@ -500,13 +500,16 @@ impl MLFrameworkManager {
             },
         );
 
-        // Initialize other frameworks (placeholder implementations)
+        // ONNX Runtime is listed for discoverability (list_frameworks /
+        // get_framework_capabilities) but honestly marked `initialized: false`:
+        // no ONNX Runtime bindings are linked into this manager (see
+        // create_onnx_session), so select_framework will never choose it.
         frameworks.insert(
             MLFramework::OnnxRuntime,
             FrameworkInfo {
                 version: "1.16.0".to_string(),
                 providers: vec!["CPU".to_string(), "CUDA".to_string()],
-                initialized: false, // Would check if ONNX Runtime is available
+                initialized: false,
                 capabilities: FrameworkCapabilities {
                     gpu_support: true,
                     quantization_support: true,

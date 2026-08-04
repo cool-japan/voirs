@@ -561,9 +561,12 @@ impl VoiceModelStorage {
         // Update metadata index
         self.update_metadata_index(&metadata).await?;
 
-        // Update cache if there's space
+        // Update cache if there's space. The cache always holds
+        // *decompressed* bytes (matching what `retrieve_model` returns on a
+        // cache hit) - `model_data` (the caller's original bytes), not
+        // `final_data` (the possibly-compressed on-disk bytes).
         if self.should_cache_model(&metadata).await {
-            self.cache_model(&model_id, &final_data, &metadata).await?;
+            self.cache_model(&model_id, model_data, &metadata).await?;
         }
 
         let processing_time = start_time.elapsed();
@@ -1238,11 +1241,7 @@ impl VoiceModelStorage {
             )
         };
 
-        let avg_model_size = if total_models > 0 {
-            total_size / total_models
-        } else {
-            0
-        };
+        let avg_model_size = total_size.checked_div(total_models).unwrap_or(0);
         let avg_compression_ratio = if total_original > 0 {
             total_compressed as f32 / total_original as f32
         } else {
@@ -1566,7 +1565,7 @@ fn characteristics_similarity(
     b: &VoiceCharacteristicsSummary,
 ) -> f32 {
     let f0_sim = 1.0 - ((a.average_f0 - b.average_f0).abs() / 400.0).min(1.0);
-    let quality_sim = cosine_similarity(&a.quality_indicators, &b.quality_indicators);
+    let quality_sim = elementwise_similarity(&a.quality_indicators, &b.quality_indicators);
     let centroid_sim = 1.0 - ((a.spectral_centroid - b.spectral_centroid).abs() / 4000.0).min(1.0);
     let energy_scale = a
         .energy_stats
@@ -1580,19 +1579,22 @@ fn characteristics_similarity(
     (f0_sim * 0.4 + quality_sim * 0.3 + centroid_sim * 0.2 + energy_sim * 0.1).clamp(0.0, 1.0)
 }
 
-/// Cosine similarity between two equal-length feature vectors, in `[-1, 1]`.
-/// Returns `0.0` for empty, mismatched-length, or zero-norm inputs.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+/// Elementwise similarity between two equal-length feature vectors, in
+/// `[0, 1]`: `1.0` minus the mean absolute per-element difference. Unlike
+/// cosine similarity, this is sensitive to differences in absolute
+/// magnitude, not just direction - two parallel vectors at very different
+/// scales (e.g. `[0.1, 0.1, 0.1, 0.1]` vs `[0.9, 0.9, 0.9, 0.9]`, both
+/// quality-indicator vectors in `[0, 1]`) correctly score as dissimilar
+/// rather than as a perfect cosine match. Returns `0.0` for empty or
+/// mismatched-length inputs.
+fn elementwise_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.is_empty() || a.len() != b.len() {
         return 0.0;
     }
-    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
-    let norm_a = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a < 1e-9 || norm_b < 1e-9 {
-        return 0.0;
-    }
-    (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)
+    let mean_abs_diff = a.iter().zip(b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32;
+    // Quality indicators are normalized to [0, 1], so a difference of 1.0
+    // (the maximum possible per element) maps to zero similarity.
+    (1.0 - mean_abs_diff).clamp(0.0, 1.0)
 }
 
 /// Model filtering options

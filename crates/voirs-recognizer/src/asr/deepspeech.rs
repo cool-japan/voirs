@@ -1,17 +1,95 @@
-//! Mozilla DeepSpeech ASR implementation
+//! Mozilla `DeepSpeech` ASR model container.
 //!
-//! This module provides integration with Mozilla's DeepSpeech model for automatic speech recognition.
-//! DeepSpeech is primarily focused on English but can be trained for other languages.
+//! `DeepSpeech` ships its acoustic model as a TensorFlow graph (`.pb` / `.pbmm`) or a
+//! TensorFlow Lite flatbuffer (`.tflite`), and its language model as a KenLM-backed
+//! `.scorer` package. Executing either of those formats requires the TensorFlow /
+//! KenLM C++ runtimes, which VoiRS deliberately does not link (pure-Rust policy).
+//!
+//! This module therefore does the part it *can* do honestly:
+//!
+//! * it opens and parses the supplied model and scorer files for real, reporting their
+//!   detected container format and real on-disk size, and
+//! * it refuses to transcribe, returning [`RecognitionError::FeatureNotSupported`],
+//!   because no pure-Rust `DeepSpeech` acoustic decoder exists in this crate.
+//!
+//! For a working local ASR backend, use the ONNX backends
+//! ([`crate::asr::wav2vec2_onnx::OnnxWav2Vec2`], [`crate::asr::whisper_onnx::OnnxWhisper`]),
+//! which run real exported weights through `OxiONNX`.
 
 use crate::traits::*;
 use crate::RecognitionError;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use voirs_sdk::{AudioBuffer, LanguageCode};
+
+/// Container format detected for a `DeepSpeech` model file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepSpeechModelFormat {
+    /// TensorFlow Lite flatbuffer (`.tflite`), identified by the `TFL3` magic at
+    /// byte offset 4.
+    TensorFlowLite,
+    /// TensorFlow `GraphDef` protobuf (`.pb` / memory-mapped `.pbmm`).
+    TensorFlowGraphDef,
+    /// Content did not match any known `DeepSpeech` container.
+    Unknown,
+}
+
+impl DeepSpeechModelFormat {
+    /// Human-readable name of the detected container format.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TensorFlowLite => "TensorFlow Lite (.tflite)",
+            Self::TensorFlowGraphDef => "TensorFlow GraphDef (.pb/.pbmm)",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Read the leading bytes of a file, returning fewer than `max` bytes at EOF.
+fn read_file_header(path: &Path, max: usize) -> Result<Vec<u8>, RecognitionError> {
+    let mut file =
+        std::fs::File::open(path).map_err(|e| RecognitionError::ModelLoadError {
+            message: format!("Failed to open {}: {e}", path.display()),
+            source: Some(Box::new(e)),
+        })?;
+    let mut buf = vec![0_u8; max];
+    let mut filled = 0;
+    while filled < max {
+        let n = file
+            .read(&mut buf[filled..])
+            .map_err(|e| RecognitionError::ModelLoadError {
+                message: format!("Failed to read {}: {e}", path.display()),
+                source: Some(Box::new(e)),
+            })?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    buf.truncate(filled);
+    Ok(buf)
+}
+
+/// Detect the container format of a `DeepSpeech` acoustic model from its real bytes.
+///
+/// TFLite flatbuffers carry the ASCII identifier `TFL3` at offset 4. TensorFlow
+/// `GraphDef` files are protobufs whose first field is `node` (field 1, wire type 2),
+/// i.e. a leading `0x0A` byte.
+fn detect_model_format(header: &[u8]) -> DeepSpeechModelFormat {
+    if header.len() >= 8 && &header[4..8] == b"TFL3" {
+        return DeepSpeechModelFormat::TensorFlowLite;
+    }
+    if header.first() == Some(&0x0A) {
+        return DeepSpeechModelFormat::TensorFlowGraphDef;
+    }
+    DeepSpeechModelFormat::Unknown
+}
 
 /// Mozilla DeepSpeech ASR model implementation
 pub struct DeepSpeechModel {
@@ -75,6 +153,12 @@ struct DeepSpeechState {
     inference_count: usize,
     /// Total inference time
     total_inference_time: Duration,
+    /// Container format detected by reading the model file
+    model_format: DeepSpeechModelFormat,
+    /// Real on-disk size of the model file in bytes
+    model_size_bytes: u64,
+    /// Real on-disk size of the scorer file in bytes (if a scorer was supplied)
+    scorer_size_bytes: Option<u64>,
 }
 
 impl DeepSpeechState {
@@ -86,6 +170,9 @@ impl DeepSpeechState {
             load_time: None,
             inference_count: 0,
             total_inference_time: Duration::ZERO,
+            model_format: DeepSpeechModelFormat::Unknown,
+            model_size_bytes: 0,
+            scorer_size_bytes: None,
         }
     }
 }
@@ -126,17 +213,19 @@ impl DeepSpeechModel {
         let metadata = ASRMetadata {
             name: "Mozilla DeepSpeech".to_string(),
             version: "0.9.3".to_string(),
-            description: "Mozilla DeepSpeech automatic speech recognition model".to_string(),
+            description: "Mozilla DeepSpeech model container. Inference is unavailable: the \
+                          acoustic model is a TensorFlow graph and VoiRS links no TensorFlow \
+                          runtime. Use an ONNX backend instead."
+                .to_string(),
             supported_languages: supported_languages.clone(),
             architecture: "RNN".to_string(),
+            // Real on-disk size of the supplied model file.
             model_size_mb: Self::estimate_model_size(&model_path),
-            inference_speed: 1.5, // Typically slower than Whisper
+            // 0.0 == no measured value; this backend never runs inference.
+            inference_speed: 0.0,
             wer_benchmarks: Self::create_wer_benchmarks(),
-            supported_features: vec![
-                ASRFeature::WordTimestamps,
-                ASRFeature::StreamingInference,
-                ASRFeature::CustomVocabulary,
-            ],
+            // Inference is unavailable, so no inference-time feature is advertised.
+            supported_features: Vec::new(),
         };
 
         let state = Arc::new(RwLock::new(DeepSpeechState::new(model_path, scorer_path)));
@@ -154,60 +243,134 @@ impl DeepSpeechModel {
         Self::new(config.model_path.clone(), config.scorer_path.clone()).await
     }
 
-    /// Load the model if not already loaded
+    /// Inspect the model (and scorer) files for real.
+    ///
+    /// This performs genuine I/O: it stats each file for its true size and reads the
+    /// leading bytes to detect the container format. It does **not** build a runnable
+    /// decoder — see the module documentation for why.
+    ///
+    /// # Errors
+    /// Returns [`RecognitionError::ModelLoadError`] if a file cannot be read, or if the
+    /// model file is empty or is not a recognised `DeepSpeech` container.
     async fn ensure_loaded(&self) -> Result<(), RecognitionError> {
         let mut state = self.state.write().await;
 
-        if !state.loaded {
-            let start_time = Instant::now();
-
-            // Load model (placeholder implementation)
-            tracing::info!("Loading DeepSpeech model: {}", state.model_path);
-
-            // Simulate loading time (DeepSpeech models are typically smaller)
-            tokio::time::sleep(Duration::from_millis(50)).await;
-
-            if let Some(ref scorer_path) = state.scorer_path {
-                tracing::info!("Loading DeepSpeech scorer: {}", scorer_path);
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-
-            state.loaded = true;
-            state.load_time = Some(start_time.elapsed());
-
-            tracing::info!(
-                "DeepSpeech model loaded in {:?}",
-                state.load_time.expect("load_time was just set to Some")
-            );
+        if state.loaded {
+            return Ok(());
         }
+
+        let start_time = Instant::now();
+        let model_path = Path::new(&state.model_path).to_path_buf();
+
+        tracing::info!("Inspecting DeepSpeech model: {}", state.model_path);
+
+        let model_size = std::fs::metadata(&model_path)
+            .map_err(|e| RecognitionError::ModelLoadError {
+                message: format!("Failed to stat model file {}: {e}", model_path.display()),
+                source: Some(Box::new(e)),
+            })?
+            .len();
+
+        if model_size == 0 {
+            return Err(RecognitionError::ModelLoadError {
+                message: format!("DeepSpeech model file is empty: {}", model_path.display()),
+                source: None,
+            });
+        }
+
+        let header = read_file_header(&model_path, 16)?;
+        let format = detect_model_format(&header);
+        if format == DeepSpeechModelFormat::Unknown {
+            return Err(RecognitionError::ModelLoadError {
+                message: format!(
+                    "{} is not a recognised DeepSpeech model container \
+                     (expected a TensorFlow Lite flatbuffer or a TensorFlow GraphDef protobuf)",
+                    model_path.display()
+                ),
+                source: None,
+            });
+        }
+
+        let scorer_size = match state.scorer_path.clone() {
+            Some(scorer_path) => {
+                let path = Path::new(&scorer_path).to_path_buf();
+                let size = std::fs::metadata(&path)
+                    .map_err(|e| RecognitionError::ModelLoadError {
+                        message: format!("Failed to stat scorer file {}: {e}", path.display()),
+                        source: Some(Box::new(e)),
+                    })?
+                    .len();
+                tracing::info!("Inspected DeepSpeech scorer {} ({size} bytes)", path.display());
+                Some(size)
+            }
+            None => None,
+        };
+
+        state.model_format = format;
+        state.model_size_bytes = model_size;
+        state.scorer_size_bytes = scorer_size;
+        state.loaded = true;
+        state.load_time = Some(start_time.elapsed());
+
+        tracing::info!(
+            "DeepSpeech model inspected in {:?}: format={}, size={} bytes",
+            start_time.elapsed(),
+            format.as_str(),
+            model_size
+        );
 
         Ok(())
     }
 
-    /// Estimate model size from file
+    /// Real on-disk model size in MB, or `0.0` when the file cannot be stat'ed.
     fn estimate_model_size(model_path: &str) -> f32 {
+        #[allow(clippy::cast_precision_loss)]
         std::fs::metadata(model_path)
-            .map(|metadata| metadata.len() as f32 / 1_024_000.0) // Convert to MB
-            .unwrap_or(50.0) // Default estimate
+            .map(|metadata| metadata.len() as f32 / (1024.0 * 1024.0))
+            .unwrap_or(0.0)
     }
 
-    /// Create WER benchmarks
+    /// Word Error Rate benchmarks.
+    ///
+    /// Empty: this backend cannot run inference, so VoiRS has no measured WER for it.
+    /// Publishing a number here would be a fabrication.
     fn create_wer_benchmarks() -> HashMap<LanguageCode, f32> {
-        let mut benchmarks = HashMap::new();
-        benchmarks.insert(LanguageCode::EnUs, 0.065); // Slightly higher WER than Whisper
-        benchmarks.insert(LanguageCode::EnGb, 0.07);
-        benchmarks
+        HashMap::new()
     }
 
-    /// Process audio with DeepSpeech
+    /// Report the container format detected when the model file was inspected.
+    ///
+    /// # Errors
+    /// Propagates any error from inspecting the model file.
+    pub async fn model_format(&self) -> Result<DeepSpeechModelFormat, RecognitionError> {
+        self.ensure_loaded().await?;
+        Ok(self.state.read().await.model_format)
+    }
+
+    /// Build the typed error returned by every inference entry point.
+    fn unsupported_backend_error(format: DeepSpeechModelFormat) -> RecognitionError {
+        RecognitionError::FeatureNotSupported {
+            feature: format!(
+                "DeepSpeech inference: the acoustic model is a {} graph, which requires the \
+                 TensorFlow runtime; VoiRS links no C/C++ runtimes. Use an ONNX backend \
+                 (OnnxWhisper / OnnxWav2Vec2, `onnx` feature) with exported weights instead.",
+                format.as_str()
+            ),
+        }
+    }
+
+    /// Validate the request against the inspected model, then fail closed.
+    ///
+    /// Audio preprocessing, sample-rate validation and language support checks are all
+    /// performed for real so that callers get precise diagnostics, but the final step
+    /// returns [`RecognitionError::FeatureNotSupported`] rather than a fabricated
+    /// transcript.
     async fn process_audio(
         &self,
         audio: &AudioBuffer,
         config: Option<&ASRConfig>,
     ) -> Result<Transcript, RecognitionError> {
         self.ensure_loaded().await?;
-
-        let start_time = Instant::now();
 
         // Preprocess audio for DeepSpeech (requires 16kHz mono)
         let processed_audio = super::utils::preprocess_audio(audio).map_err(|e| {
@@ -238,71 +401,15 @@ impl DeepSpeechModel {
             });
         }
 
-        // Perform inference (placeholder implementation)
-        let transcript = self
-            .mock_inference(&processed_audio, language, config)
-            .await?;
-
-        // Update statistics
-        let mut state = self.state.write().await;
-        state.inference_count += 1;
-        state.total_inference_time += start_time.elapsed();
-
-        Ok(transcript)
-    }
-
-    /// Mock inference for demonstration
-    async fn mock_inference(
-        &self,
-        audio: &AudioBuffer,
-        language: LanguageCode,
-        _config: Option<&ASRConfig>,
-    ) -> Result<Transcript, RecognitionError> {
-        // Simulate processing time (DeepSpeech is typically slower)
-        let processing_time = Duration::from_millis(
-            (audio.samples().len() as f64 / audio.sample_rate() as f64 * 1000.0
-                / self.metadata.inference_speed as f64) as u64,
+        // The audio is valid and the model file was really inspected, but no pure-Rust
+        // DeepSpeech acoustic decoder exists. Fail closed instead of inventing text.
+        let format = self.state.read().await.model_format;
+        tracing::warn!(
+            "DeepSpeech transcription requested for {:.3}s of {language:?} audio, but no \
+             pure-Rust DeepSpeech decoder is available",
+            processed_audio.duration()
         );
-        tokio::time::sleep(processing_time).await;
-
-        // Generate mock transcript (DeepSpeech style - often lowercase, no punctuation)
-        let text = match language {
-            LanguageCode::EnUs | LanguageCode::EnGb => {
-                "hello this is a test transcription from deep speech"
-            }
-            _ => "hello this is a test transcription from deep speech",
-        };
-
-        let words = text.split_whitespace().collect::<Vec<&str>>();
-        let mut word_timestamps = Vec::new();
-        let mut current_time = 0.0;
-
-        for word in &words {
-            let word_duration = word.len() as f32 * 0.08; // Slightly different timing than Whisper
-            word_timestamps.push(WordTimestamp {
-                word: word.to_string(),
-                start_time: current_time,
-                end_time: current_time + word_duration,
-                confidence: 0.88, // Slightly lower confidence than Whisper
-            });
-            current_time += word_duration + 0.06; // Add pause between words
-        }
-
-        let sentence_boundaries = vec![SentenceBoundary {
-            start_time: 0.0,
-            end_time: current_time,
-            text: text.to_string(),
-            confidence: 0.88,
-        }];
-
-        Ok(Transcript {
-            text: text.to_string(),
-            language,
-            confidence: 0.88,
-            word_timestamps,
-            sentence_boundaries,
-            processing_duration: Some(processing_time),
-        })
+        Err(Self::unsupported_backend_error(format))
     }
 
     /// Get model statistics
@@ -322,27 +429,38 @@ impl DeepSpeechModel {
         }
     }
 
-    /// Set custom vocabulary
+    /// Set a custom decoding vocabulary.
+    ///
+    /// # Errors
+    /// Always returns [`RecognitionError::FeatureNotSupported`]: the vocabulary is
+    /// consumed by the KenLM scorer inside the `DeepSpeech` CTC beam decoder, which this
+    /// crate cannot execute. Reporting success would imply a decoder configuration that
+    /// does not exist.
     pub async fn set_custom_vocabulary(&self, words: Vec<String>) -> Result<(), RecognitionError> {
         self.ensure_loaded().await?;
-
-        // In a real implementation, this would update the DeepSpeech model's vocabulary
-        tracing::info!("Setting custom vocabulary with {} words", words.len());
-
-        // Simulate processing time
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        Ok(())
+        tracing::warn!(
+            "Rejecting custom vocabulary of {} words: no DeepSpeech decoder to apply it to",
+            words.len()
+        );
+        Err(Self::unsupported_backend_error(
+            self.state.read().await.model_format,
+        ))
     }
 
-    /// Set language model parameters
+    /// Set the language-model interpolation parameters (`alpha`, `beta`).
+    ///
+    /// # Errors
+    /// Always returns [`RecognitionError::FeatureNotSupported`], for the same reason as
+    /// [`Self::set_custom_vocabulary`].
     pub async fn set_lm_params(&self, alpha: f32, beta: f32) -> Result<(), RecognitionError> {
         self.ensure_loaded().await?;
-
-        // In a real implementation, this would update the language model parameters
-        tracing::info!("Setting LM parameters: alpha={}, beta={}", alpha, beta);
-
-        Ok(())
+        tracing::warn!(
+            "Rejecting LM parameters alpha={alpha}, beta={beta}: no DeepSpeech decoder to apply \
+             them to"
+        );
+        Err(Self::unsupported_backend_error(
+            self.state.read().await.model_format,
+        ))
     }
 }
 
@@ -375,67 +493,21 @@ impl ASRModel for DeepSpeechModel {
             .map_err(|e| e.into())
     }
 
+    /// Streaming transcription.
+    ///
+    /// # Errors
+    /// Always returns [`RecognitionError::FeatureNotSupported`]: streaming would only
+    /// chunk audio into the unavailable batch decoder, so it fails at the same point.
     async fn transcribe_streaming(
         &self,
-        mut audio_stream: AudioStream,
-        config: Option<&ASRConfig>,
+        _audio_stream: AudioStream,
+        _config: Option<&ASRConfig>,
     ) -> RecognitionResult<TranscriptStream> {
-        // DeepSpeech supports streaming inference
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        let model = self.clone();
-        let config = config.cloned();
-
-        tokio::spawn(async move {
-            use futures::StreamExt;
-
-            let mut chunk_index = 0;
-            let mut accumulated_text = String::new();
-
-            while let Some(audio_chunk) = audio_stream.next().await {
-                let transcript_result = model.process_audio(&audio_chunk, config.as_ref()).await;
-
-                match transcript_result {
-                    Ok(transcript) => {
-                        // For streaming DeepSpeech, we typically get partial results
-                        accumulated_text.push_str(&transcript.text);
-                        accumulated_text.push(' ');
-
-                        let chunk = TranscriptChunk {
-                            text: transcript.text,
-                            is_final: false, // Intermediate result
-                            start_time: chunk_index as f32 * 1.0,
-                            end_time: (chunk_index + 1) as f32 * 1.0,
-                            confidence: transcript.confidence,
-                        };
-
-                        if sender.send(Ok(chunk)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        if sender.send(Err(e.into())).is_err() {
-                            break;
-                        }
-                    }
-                }
-
-                chunk_index += 1;
-            }
-
-            // Send final result
-            let final_chunk = TranscriptChunk {
-                text: accumulated_text.trim().to_string(),
-                is_final: true,
-                start_time: 0.0,
-                end_time: chunk_index as f32 * 1.0,
-                confidence: 0.88,
-            };
-            let _ = sender.send(Ok(final_chunk));
-        });
-
-        Ok(Box::pin(
-            tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
-        ))
+        self.ensure_loaded().await?;
+        Err(
+            Self::unsupported_backend_error(self.state.read().await.model_format)
+                .into(),
+        )
     }
 
     fn supported_languages(&self) -> Vec<LanguageCode> {
@@ -450,9 +522,21 @@ impl ASRModel for DeepSpeechModel {
         self.metadata.supported_features.contains(&feature)
     }
 
+    /// Detect the spoken language.
+    ///
+    /// # Errors
+    /// Always returns [`RecognitionError::FeatureNotSupported`]. `DeepSpeech` has no
+    /// language-identification head, and this backend cannot run the acoustic model at
+    /// all, so there is nothing to detect *from*. Previously this returned
+    /// `Ok(LanguageCode::EnUs)` unconditionally, which reported a "detection" that never
+    /// looked at the audio.
     async fn detect_language(&self, _audio: &AudioBuffer) -> RecognitionResult<LanguageCode> {
-        // DeepSpeech doesn't support language detection - it's primarily English
-        Ok(LanguageCode::EnUs)
+        Err(RecognitionError::FeatureNotSupported {
+            feature: "DeepSpeech language detection: the model has no language-identification \
+                      head and this backend cannot execute the acoustic model"
+                .to_string(),
+        }
+        .into())
     }
 }
 
@@ -473,18 +557,66 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn create_mock_model_file() -> NamedTempFile {
+    /// Write a minimal file whose bytes really look like a TFLite flatbuffer
+    /// (4-byte root-table offset followed by the `TFL3` file identifier).
+    fn create_tflite_model_file() -> NamedTempFile {
         let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "mock model data").unwrap();
+        let mut bytes = vec![0x18, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(b"TFL3");
+        bytes.extend_from_slice(&[0_u8; 64]);
+        file.write_all(&bytes).unwrap();
+        file.flush().unwrap();
         file
+    }
+
+    /// Write a file whose leading byte matches a TensorFlow `GraphDef` protobuf
+    /// (field 1, wire type 2 => tag byte 0x0A).
+    fn create_graphdef_model_file() -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+        let mut bytes = vec![0x0A, 0x04];
+        bytes.extend_from_slice(b"node");
+        bytes.extend_from_slice(&[0_u8; 32]);
+        file.write_all(&bytes).unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    fn create_garbage_model_file() -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "definitely not a model").unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    async fn tflite_model() -> (NamedTempFile, DeepSpeechModel) {
+        let model_file = create_tflite_model_file();
+        let model_path = model_file.path().to_string_lossy().to_string();
+        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+        (model_file, model)
+    }
+
+    #[test]
+    fn test_detect_model_format_reads_real_magic() {
+        let mut tflite = vec![0x18, 0x00, 0x00, 0x00];
+        tflite.extend_from_slice(b"TFL3");
+        assert_eq!(
+            detect_model_format(&tflite),
+            DeepSpeechModelFormat::TensorFlowLite
+        );
+        assert_eq!(
+            detect_model_format(&[0x0A, 0x04, b'n', b'o', b'd', b'e']),
+            DeepSpeechModelFormat::TensorFlowGraphDef
+        );
+        assert_eq!(
+            detect_model_format(b"definitely not a model"),
+            DeepSpeechModelFormat::Unknown
+        );
+        assert_eq!(detect_model_format(&[]), DeepSpeechModelFormat::Unknown);
     }
 
     #[tokio::test]
     async fn test_deepspeech_model_creation() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
-
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+        let (_guard, model) = tflite_model().await;
         assert_eq!(model.metadata.name, "Mozilla DeepSpeech");
         assert!(model.supported_languages().contains(&LanguageCode::EnUs));
     }
@@ -495,26 +627,76 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Regression test for the removed `mock_inference`: transcription must fail
+    /// closed with a typed error instead of returning a canned English sentence.
     #[tokio::test]
-    async fn test_deepspeech_transcribe() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
-
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+    async fn test_deepspeech_transcribe_fails_closed() {
+        let (_guard, model) = tflite_model().await;
         let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
 
-        let result = model.transcribe(&audio, None).await.unwrap();
-        assert!(!result.text.is_empty());
-        assert!(result.confidence > 0.0);
-        assert_eq!(result.language, LanguageCode::EnUs);
+        let err = model
+            .process_audio(&audio, None)
+            .await
+            .expect_err("DeepSpeech inference must not fabricate a transcript");
+        match err {
+            RecognitionError::FeatureNotSupported { feature } => {
+                assert!(
+                    feature.contains("DeepSpeech inference"),
+                    "unexpected error text: {feature}"
+                );
+                assert!(feature.contains("TensorFlow Lite"), "format should be reported: {feature}");
+            }
+            other => panic!("expected FeatureNotSupported, got {other:?}"),
+        }
+
+        // The trait entry point must fail closed too.
+        assert!(model.transcribe(&audio, None).await.is_err());
+    }
+
+    /// The old code returned the same canned string for every input. Verify no
+    /// input at all can produce an `Ok(Transcript)`.
+    #[tokio::test]
+    async fn test_deepspeech_never_returns_ok_transcript() {
+        let (_guard, model) = tflite_model().await;
+        for len in [16_usize, 1600, 16000] {
+            let samples: Vec<f32> = (0..len).map(|i| ((i as f32) * 0.01).sin()).collect();
+            let audio = AudioBuffer::new(samples, 16000, 1);
+            assert!(
+                model.transcribe(&audio, None).await.is_err(),
+                "transcribe returned Ok for {len} samples"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deepspeech_rejects_unrecognised_container() {
+        let model_file = create_garbage_model_file();
+        let model_path = model_file.path().to_string_lossy().to_string();
+        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+
+        // `new` only checks existence; the real read happens on first use.
+        let err = model
+            .model_format()
+            .await
+            .expect_err("garbage bytes must be rejected");
+        assert!(matches!(err, RecognitionError::ModelLoadError { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_deepspeech_detects_graphdef_container() {
+        let model_file = create_graphdef_model_file();
+        let model_path = model_file.path().to_string_lossy().to_string();
+        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+
+        assert_eq!(
+            model.model_format().await.unwrap(),
+            DeepSpeechModelFormat::TensorFlowGraphDef
+        );
     }
 
     #[tokio::test]
     async fn test_deepspeech_unsupported_language() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
-
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+        let (_guard, model) = tflite_model().await;
         let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
 
         let config = ASRConfig {
@@ -526,58 +708,83 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// The metadata must not advertise inference-time features or a WER benchmark
+    /// for a backend that cannot run inference.
     #[tokio::test]
-    async fn test_deepspeech_features() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
+    async fn test_deepspeech_metadata_is_honest() {
+        let (guard, model) = tflite_model().await;
+        let metadata = model.metadata();
 
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
-
-        assert!(model.supports_feature(ASRFeature::WordTimestamps));
-        assert!(model.supports_feature(ASRFeature::StreamingInference));
-        assert!(model.supports_feature(ASRFeature::CustomVocabulary));
+        assert!(metadata.wer_benchmarks.is_empty(), "WER must not be fabricated");
+        assert!(metadata.supported_features.is_empty());
+        assert!(!model.supports_feature(ASRFeature::WordTimestamps));
+        assert!(!model.supports_feature(ASRFeature::StreamingInference));
+        assert!(!model.supports_feature(ASRFeature::CustomVocabulary));
         assert!(!model.supports_feature(ASRFeature::LanguageDetection));
+
+        // model_size_mb is derived from the file that really exists on disk.
+        let real_bytes = std::fs::metadata(guard.path()).unwrap().len();
+        #[allow(clippy::cast_precision_loss)]
+        let expected_mb = real_bytes as f32 / (1024.0 * 1024.0);
+        assert!((metadata.model_size_mb - expected_mb).abs() < f32::EPSILON);
     }
 
     #[tokio::test]
-    async fn test_deepspeech_custom_vocabulary() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
-
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+    async fn test_deepspeech_custom_vocabulary_fails_closed() {
+        let (_guard, model) = tflite_model().await;
         let custom_words = vec!["tensorflow".to_string(), "pytorch".to_string()];
 
         let result = model.set_custom_vocabulary(custom_words).await;
-        assert!(result.is_ok());
+        assert!(matches!(
+            result,
+            Err(RecognitionError::FeatureNotSupported { .. })
+        ));
     }
 
     #[tokio::test]
-    async fn test_deepspeech_lm_params() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
-
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+    async fn test_deepspeech_lm_params_fails_closed() {
+        let (_guard, model) = tflite_model().await;
 
         let result = model.set_lm_params(0.8, 2.0).await;
-        assert!(result.is_ok());
+        assert!(matches!(
+            result,
+            Err(RecognitionError::FeatureNotSupported { .. })
+        ));
     }
 
     #[tokio::test]
-    async fn test_deepspeech_stats() {
-        let model_file = create_mock_model_file();
-        let model_path = model_file.path().to_string_lossy().to_string();
+    async fn test_deepspeech_streaming_fails_closed() {
+        use futures::stream;
 
-        let model = DeepSpeechModel::new(model_path, None).await.unwrap();
+        let (_guard, model) = tflite_model().await;
+        let audio_stream: AudioStream =
+            Box::pin(stream::iter(vec![AudioBuffer::new(vec![0.0; 160], 16000, 1)]));
+
+        assert!(model.transcribe_streaming(audio_stream, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_deepspeech_detect_language_fails_closed() {
+        let (_guard, model) = tflite_model().await;
         let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
 
-        // Initial stats
+        assert!(model.detect_language(&audio).await.is_err());
+    }
+
+    /// Inference never succeeds, so the inference counter must stay at zero
+    /// rather than counting fabricated runs. Load time, by contrast, is real.
+    #[tokio::test]
+    async fn test_deepspeech_stats() {
+        let (_guard, model) = tflite_model().await;
+        let audio = AudioBuffer::new(vec![0.1, 0.2, 0.3, 0.4], 16000, 1);
+
         let stats = model.get_stats().await;
         assert_eq!(stats.inference_count, 0);
 
-        // After inference
-        let _result = model.transcribe(&audio, None).await.unwrap();
+        assert!(model.transcribe(&audio, None).await.is_err());
         let stats = model.get_stats().await;
-        assert_eq!(stats.inference_count, 1);
-        assert!(stats.total_inference_time > Duration::ZERO);
+        assert_eq!(stats.inference_count, 0);
+        assert_eq!(stats.total_inference_time, Duration::ZERO);
+        assert!(stats.load_time.is_some(), "file inspection time must be recorded");
     }
 }

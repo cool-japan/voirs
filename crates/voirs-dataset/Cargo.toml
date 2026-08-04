@@ -70,8 +70,12 @@ chrono.workspace = true
 # UUID generation
 uuid.workspace = true
 
-# Hashing
+# Hashing and request signing (real AWS SigV4 request signing for cloud
+# storage integration; md5 is also used by versioning.rs)
 md5.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true
 
 # Futures and async utilities
 futures.workspace = true

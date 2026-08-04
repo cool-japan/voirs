@@ -130,6 +130,13 @@ pub struct ShardingConfig {
     pub shards: Vec<ShardConfig>,
     /// Consistency level
     pub consistency_level: ConsistencyLevel,
+    /// Explicit `user_id -> region` assignments consulted by
+    /// [`ShardingStrategy::Geographic`] routing (e.g. populated from an
+    /// IP-geolocation lookup performed by the caller before registering a
+    /// user). A user with no entry here has no known geographic routing
+    /// signal, and `route_geographic` fails closed rather than guessing.
+    #[serde(default)]
+    pub user_region_overrides: HashMap<String, String>,
 }
 
 /// Consistency levels for distributed operations
@@ -282,23 +289,61 @@ impl ShardingManager {
         })
     }
 
-    /// Geographic routing (simplified implementation)
-    fn route_geographic(&self, _user_id: &str) -> PersistenceResult<ShardRoute> {
-        // For now, route to the first available shard
-        // In practice, this would use user's geographic location
-        let primary_shard = self
+    /// Geographic routing: routes a user to a shard tagged for their
+    /// assigned region (`ShardConfig::region`), using
+    /// `ShardingConfig::user_region_overrides` as the region signal.
+    ///
+    /// If more than one active shard serves the same region, the user is
+    /// distributed across them deterministically by hashing `user_id` (the
+    /// same technique [`Self::route_hash_based`] uses), so repeated calls
+    /// for the same user always land on the same shard while still spreading
+    /// load within the region. A user with no configured region assignment
+    /// fails closed with a configuration error instead of silently
+    /// defaulting to an arbitrary shard -- for data-residency-motivated
+    /// geographic sharding, guessing a region would be worse than refusing.
+    fn route_geographic(&self, user_id: &str) -> PersistenceResult<ShardRoute> {
+        let region = self
+            .config
+            .user_region_overrides
+            .get(user_id)
+            .ok_or_else(|| PersistenceError::ConfigError {
+                message: format!(
+                    "no region assignment configured for user '{user_id}'; geographic \
+                     sharding requires an explicit entry in \
+                     ShardingConfig::user_region_overrides"
+                ),
+            })?;
+
+        let mut region_shards: Vec<&ShardConfig> = self
             .config
             .shards
             .iter()
-            .find(|s| s.status == ShardStatus::Active)
-            .ok_or_else(|| PersistenceError::ConnectionError {
-                message: "No active shards available".to_string(),
-            })?;
+            .filter(|s| {
+                s.status == ShardStatus::Active && s.region.as_deref() == Some(region.as_str())
+            })
+            .collect();
+
+        if region_shards.is_empty() {
+            return Err(PersistenceError::ConnectionError {
+                message: format!("no active shard is configured for region '{region}'"),
+            });
+        }
+
+        // Deterministic (same user_id -> same shard every call) distribution
+        // across the shards serving this region.
+        region_shards.sort_by(|a, b| a.shard_id.cmp(&b.shard_id));
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        user_id.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let shard_index = (hash % region_shards.len() as u64) as usize;
+        let primary_shard = region_shards[shard_index];
 
         Ok(ShardRoute {
             primary_shard: primary_shard.shard_id.clone(),
             read_replicas: primary_shard.read_replicas.clone(),
-            routing_hash: 0,
+            routing_hash: hash,
         })
     }
 
@@ -757,6 +802,15 @@ impl PersistenceManager for ShardedPersistenceManager {
         })
     }
 
+    async fn list_user_ids(&self) -> PersistenceResult<Vec<String>> {
+        let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for manager in self.sharding_manager.shard_managers.values() {
+            let shard_ids = manager.list_user_ids().await?;
+            ids.extend(shard_ids);
+        }
+        Ok(ids.into_iter().collect())
+    }
+
     async fn cleanup(&self, older_than: DateTime<Utc>) -> PersistenceResult<super::CleanupResult> {
         let mut total_sessions_cleaned = 0;
         let mut total_feedback_records_cleaned = 0;
@@ -802,11 +856,15 @@ mod tests {
     use std::collections::HashMap;
 
     fn create_test_shard_config(id: &str) -> ShardConfig {
+        create_test_shard_config_with_region(id, "us-east-1")
+    }
+
+    fn create_test_shard_config_with_region(id: &str, region: &str) -> ShardConfig {
         ShardConfig {
             shard_id: id.to_string(),
             connection_string: format!("test://{}", id),
             weight: 1.0,
-            region: Some("us-east-1".to_string()),
+            region: Some(region.to_string()),
             read_replicas: vec![],
             status: ShardStatus::Active,
             capacity: ShardCapacity {
@@ -815,6 +873,15 @@ mod tests {
                 current_users: 0,
                 current_storage_bytes: 0,
             },
+        }
+    }
+
+    fn test_sharding_manager(config: ShardingConfig) -> ShardingManager {
+        ShardingManager {
+            hash_ring: ConsistentHashRing::new(&config.shards, config.virtual_nodes),
+            config,
+            shard_managers: HashMap::new(),
+            migration_state: None,
         }
     }
 
@@ -847,6 +914,7 @@ mod tests {
                 create_test_shard_config("shard2"),
             ],
             consistency_level: ConsistencyLevel::Eventual,
+            user_region_overrides: HashMap::new(),
         };
 
         let shard_managers = HashMap::new();
@@ -867,6 +935,7 @@ mod tests {
                 create_test_shard_config("shard2"),
             ],
             consistency_level: ConsistencyLevel::Eventual,
+            user_region_overrides: HashMap::new(),
         };
 
         let shard_managers = HashMap::new();
@@ -885,6 +954,103 @@ mod tests {
         assert_eq!(route.primary_shard, route2.primary_shard);
     }
 
+    /// A user with no configured region assignment must fail closed rather
+    /// than silently landing on an arbitrary "first available" shard.
+    #[test]
+    fn test_geographic_routing_without_assignment_fails_closed() {
+        let config = ShardingConfig {
+            strategy: ShardingStrategy::Geographic,
+            virtual_nodes: 3,
+            replication_factor: 1,
+            auto_rebalancing: false,
+            shards: vec![
+                create_test_shard_config_with_region("shard_us", "us-east-1"),
+                create_test_shard_config_with_region("shard_eu", "eu-west-1"),
+            ],
+            consistency_level: ConsistencyLevel::Eventual,
+            user_region_overrides: HashMap::new(),
+        };
+        let manager = test_sharding_manager(config);
+
+        let result = manager.route_user("user_without_region");
+        assert!(
+            result.is_err(),
+            "geographic routing must not guess a shard for an unassigned user"
+        );
+    }
+
+    /// A user's real region assignment must route them only to shards
+    /// tagged for that region -- never to a shard in a different region,
+    /// even if that other shard happens to be first in the config.
+    #[test]
+    fn test_geographic_routing_honors_real_region_assignment() {
+        let mut user_region_overrides = HashMap::new();
+        user_region_overrides.insert("eu_user".to_string(), "eu-west-1".to_string());
+        user_region_overrides.insert("us_user".to_string(), "us-east-1".to_string());
+
+        let config = ShardingConfig {
+            strategy: ShardingStrategy::Geographic,
+            virtual_nodes: 3,
+            replication_factor: 1,
+            auto_rebalancing: false,
+            shards: vec![
+                create_test_shard_config_with_region("shard_us", "us-east-1"),
+                create_test_shard_config_with_region("shard_eu", "eu-west-1"),
+            ],
+            consistency_level: ConsistencyLevel::Eventual,
+            user_region_overrides,
+        };
+        let manager = test_sharding_manager(config);
+
+        let eu_route = manager.route_user("eu_user").unwrap();
+        assert_eq!(eu_route.primary_shard, "shard_eu");
+
+        let us_route = manager.route_user("us_user").unwrap();
+        assert_eq!(us_route.primary_shard, "shard_us");
+
+        // Routing must be deterministic across repeated calls for the same user.
+        let eu_route_again = manager.route_user("eu_user").unwrap();
+        assert_eq!(eu_route.primary_shard, eu_route_again.primary_shard);
+    }
+
+    /// When multiple active shards share a region, users must be spread
+    /// across them deterministically (by hashing user_id) rather than all
+    /// piling onto a single shard.
+    #[test]
+    fn test_geographic_routing_distributes_within_a_shared_region() {
+        let mut user_region_overrides = HashMap::new();
+        for i in 0..20 {
+            user_region_overrides.insert(format!("user_{i}"), "apac".to_string());
+        }
+
+        let config = ShardingConfig {
+            strategy: ShardingStrategy::Geographic,
+            virtual_nodes: 3,
+            replication_factor: 1,
+            auto_rebalancing: false,
+            shards: vec![
+                create_test_shard_config_with_region("shard_apac_a", "apac"),
+                create_test_shard_config_with_region("shard_apac_b", "apac"),
+            ],
+            consistency_level: ConsistencyLevel::Eventual,
+            user_region_overrides,
+        };
+        let manager = test_sharding_manager(config);
+
+        let mut distinct_shards = std::collections::HashSet::new();
+        for i in 0..20 {
+            let route = manager.route_user(&format!("user_{i}")).unwrap();
+            assert!(route.primary_shard == "shard_apac_a" || route.primary_shard == "shard_apac_b");
+            distinct_shards.insert(route.primary_shard);
+        }
+
+        assert_eq!(
+            distinct_shards.len(),
+            2,
+            "20 distinct users hashed across 2 same-region shards should hit both, not always the same one"
+        );
+    }
+
     #[test]
     fn test_cluster_health() {
         let config = ShardingConfig {
@@ -897,6 +1063,7 @@ mod tests {
                 create_test_shard_config("shard2"),
             ],
             consistency_level: ConsistencyLevel::Eventual,
+            user_region_overrides: HashMap::new(),
         };
 
         let shard_managers = HashMap::new();

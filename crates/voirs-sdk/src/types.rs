@@ -369,10 +369,39 @@ pub struct MelSpectrogram {
 }
 
 impl MelSpectrogram {
-    /// Create new mel spectrogram
+    /// Create new mel spectrogram.
+    ///
+    /// `n_frames` is derived from the **shortest** row rather than trusting row 0, and
+    /// every row is truncated to that length. This enforces the `data[i].len() ==
+    /// n_frames` invariant that `frame()` and downstream consumers (e.g.
+    /// `StreamingPipeline::apply_windowing`) rely on, so a ragged mel matrix returned by
+    /// a malformed/third-party `AcousticModel` implementation can never cause an
+    /// index-out-of-bounds panic here. Truncation only ever removes already-computed
+    /// values (never fabricates new ones); a warning is logged when it actually changes
+    /// the input.
     pub fn new(data: Vec<Vec<f32>>, sample_rate: u32, hop_length: u32) -> Self {
         let n_mels = data.len() as u32;
-        let n_frames = data.first().map(|row| row.len()).unwrap_or(0) as u32;
+        let n_frames = data.iter().map(|row| row.len()).min().unwrap_or(0) as u32;
+
+        let is_ragged = data.iter().any(|row| row.len() != n_frames as usize);
+        if is_ragged {
+            tracing::warn!(
+                "MelSpectrogram::new received a ragged mel matrix (row lengths differ); \
+                 truncating every row to the shortest row's length ({n_frames} frames) to \
+                 preserve indexing invariants"
+            );
+        }
+
+        let data = if is_ragged {
+            data.into_iter()
+                .map(|mut row| {
+                    row.truncate(n_frames as usize);
+                    row
+                })
+                .collect()
+        } else {
+            data
+        };
 
         Self {
             data,
@@ -388,13 +417,19 @@ impl MelSpectrogram {
         (self.n_frames * self.hop_length) as f32 / self.sample_rate as f32
     }
 
-    /// Get mel values at specific frame
+    /// Get mel values at specific frame.
+    ///
+    /// Returns `None` both when `frame_idx` is out of the advertised `n_frames` range
+    /// and, defensively, if any row turns out to be shorter than `frame_idx` (e.g. a
+    /// `MelSpectrogram` built via direct struct-literal construction rather than
+    /// [`Self::new`], bypassing the rectangularity normalization above) — this can never
+    /// panic on a ragged matrix.
     pub fn frame(&self, frame_idx: usize) -> Option<Vec<f32>> {
         if frame_idx >= self.n_frames as usize {
             return None;
         }
 
-        Some(self.data.iter().map(|row| row[frame_idx]).collect())
+        self.data.iter().map(|row| row.get(frame_idx).copied()).collect()
     }
 }
 
@@ -1163,5 +1198,79 @@ impl FromStr for QualityLevel {
             "ultra" => Ok(QualityLevel::Ultra),
             _ => Err(format!("Unknown quality level: {s}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod mel_spectrogram_tests {
+    use super::MelSpectrogram;
+
+    #[test]
+    fn new_rectangular_input_is_unchanged() {
+        let data = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let mel = MelSpectrogram::new(data.clone(), 22050, 256);
+        assert_eq!(mel.n_frames, 3);
+        assert_eq!(mel.n_mels, 2);
+        assert_eq!(mel.data, data);
+    }
+
+    #[test]
+    fn new_ragged_input_is_truncated_to_shortest_row_not_row_zero() {
+        // Row 0 is the longest row here, which is the exact case the old
+        // `data.first().map(|row| row.len())` logic got wrong: it would have trusted
+        // n_frames = 3 even though row 1 only has 2 real values.
+        let data = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0]];
+        let mel = MelSpectrogram::new(data, 22050, 256);
+
+        assert_eq!(mel.n_frames, 2, "n_frames must reflect the shortest row");
+        for row in &mel.data {
+            assert_eq!(row.len(), 2);
+        }
+        // Values are real (not fabricated padding) - truncated from the front-most
+        // real measurements.
+        assert_eq!(mel.data[0], vec![1.0, 2.0]);
+        assert_eq!(mel.data[1], vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn frame_never_panics_on_ragged_input_and_returns_none_past_bounds() {
+        let data = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0]];
+        let mel = MelSpectrogram::new(data, 22050, 256);
+
+        // In-bounds frame indices succeed with real per-row values.
+        assert_eq!(mel.frame(0), Some(vec![1.0, 4.0]));
+        assert_eq!(mel.frame(1), Some(vec![2.0, 5.0]));
+        // Out-of-bounds returns None rather than panicking (this used to index
+        // `row[frame_idx]` directly and would have panicked on a hand-built ragged
+        // struct literal even after the constructor fix).
+        assert_eq!(mel.frame(2), None);
+        assert_eq!(mel.frame(100), None);
+    }
+
+    #[test]
+    fn frame_defends_even_against_direct_struct_literal_raggedness() {
+        // `data`/`n_frames` are public fields, so callers can bypass `new()`'s
+        // normalization entirely. `frame()` must still never panic.
+        let mel = MelSpectrogram {
+            data: vec![vec![1.0, 2.0, 3.0], vec![4.0]],
+            sample_rate: 22050,
+            hop_length: 256,
+            n_mels: 2,
+            n_frames: 3, // Lies about row 1's real length (1).
+        };
+
+        assert_eq!(mel.frame(0), Some(vec![1.0, 4.0]));
+        // frame_idx=1 is within the (dishonest) advertised n_frames, but row 1 only has
+        // 1 element - must degrade to None, not panic.
+        assert_eq!(mel.frame(1), None);
+        assert_eq!(mel.frame(2), None);
+    }
+
+    #[test]
+    fn new_empty_input_has_zero_frames() {
+        let mel = MelSpectrogram::new(Vec::new(), 22050, 256);
+        assert_eq!(mel.n_frames, 0);
+        assert_eq!(mel.n_mels, 0);
+        assert!(mel.frame(0).is_none());
     }
 }

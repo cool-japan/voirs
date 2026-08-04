@@ -10,11 +10,13 @@
 //! - `analytics`: Comprehensive analytics framework and related types  
 //! - `metrics`: Core metrics calculation and measurement utilities
 //! - `dashboard`: Dashboard generation and real-time data
+//! - `significance`: Real two-sample statistical significance testing (Welch's t-test)
 
 pub mod analytics;
 pub mod core;
 pub mod dashboard;
 pub mod metrics;
+pub mod significance;
 pub mod skills;
 pub mod types;
 

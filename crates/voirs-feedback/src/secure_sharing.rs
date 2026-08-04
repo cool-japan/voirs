@@ -3,6 +3,7 @@
 //! This module provides enterprise-grade secure data sharing capabilities with
 //! cryptographic verification, access control, audit logging, and GDPR compliance.
 
+use crate::persistence::PersistenceManager;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use scirs2_core::random::{thread_rng, Rng};
@@ -262,6 +263,11 @@ pub struct SecureSharingManager {
     encryption_key: [u8; 32],
     /// Configuration
     config: SharingManagerConfig,
+    /// Real data source consulted by [`SecureSharingManager::access_data`] to
+    /// fetch each share owner's actual progress/session/feedback/profile
+    /// data. Without one, `access_data` fails closed instead of packaging
+    /// placeholder bytes.
+    persistence: Option<Arc<dyn PersistenceManager>>,
 }
 
 /// Sharing manager configuration
@@ -295,7 +301,9 @@ impl Default for SharingManagerConfig {
 }
 
 impl SecureSharingManager {
-    /// Create a new secure sharing manager
+    /// Create a new secure sharing manager with no data source attached.
+    /// [`SecureSharingManager::access_data`] will fail closed until
+    /// [`SecureSharingManager::with_persistence`] attaches a real one.
     #[must_use]
     pub fn new(config: SharingManagerConfig) -> Self {
         #[cfg(feature = "privacy")]
@@ -310,7 +318,16 @@ impl SecureSharingManager {
             #[cfg(feature = "privacy")]
             encryption_key,
             config,
+            persistence: None,
         }
+    }
+
+    /// Attach the real persistence backend that [`SecureSharingManager::access_data`]
+    /// fetches share owners' real data from.
+    #[must_use]
+    pub fn with_persistence(mut self, persistence: Arc<dyn PersistenceManager>) -> Self {
+        self.persistence = Some(persistence);
+        self
     }
 
     /// Create a new data share
@@ -489,16 +506,35 @@ impl SecureSharingManager {
         }
         drop(shares);
 
-        // Generate data packages (mock implementation - would fetch real data)
-        let packages = vec![
-            self.create_data_package(
-                share.share_id,
-                DataCategory::Progress,
-                vec![1, 2, 3, 4, 5], // Mock data
-                &share,
-            )
-            .await?,
-        ];
+        // Fetch and package the owner's real data for every category this
+        // share actually grants access to. If any category's real payload
+        // cannot be fetched, log the failure and fail closed rather than
+        // silently omitting it or substituting placeholder bytes.
+        let mut packages = Vec::with_capacity(share.data_categories.len());
+        for category in &share.data_categories {
+            let payload = match self.fetch_category_payload(&share.owner_id, category).await {
+                Ok(payload) => payload,
+                Err(e) => {
+                    self.log_access(
+                        share.share_id,
+                        accessor_id.clone(),
+                        ip_address.clone(),
+                        vec![category.clone()],
+                        AccessResult::Error {
+                            message: e.to_string(),
+                        },
+                        user_agent.clone(),
+                    )
+                    .await;
+                    return Err(e);
+                }
+            };
+
+            packages.push(
+                self.create_data_package(share.share_id, category.clone(), payload, &share)
+                    .await?,
+            );
+        }
 
         // Log access
         self.log_access(
@@ -512,6 +548,77 @@ impl SecureSharingManager {
         .await;
 
         Ok(packages)
+    }
+
+    /// Fetch the real payload for one shared data category, straight from
+    /// the configured persistence backend for `owner_id`. Serialized as
+    /// JSON so the resulting bytes are genuinely derived from (and vary
+    /// with) the owner's real stored data.
+    async fn fetch_category_payload(
+        &self,
+        owner_id: &str,
+        category: &DataCategory,
+    ) -> SecureSharingResult<Vec<u8>> {
+        let persistence =
+            self.persistence
+                .as_ref()
+                .ok_or_else(|| SecureSharingError::ConfigError {
+                    message: "no persistence backend configured for secure sharing; call \
+                          SecureSharingManager::with_persistence before access_data"
+                        .to_string(),
+                })?;
+
+        let value = match category {
+            DataCategory::Progress => {
+                let progress = persistence
+                    .load_user_progress(owner_id)
+                    .await
+                    .map_err(|e| SecureSharingError::ValidationFailed {
+                        message: format!("failed to load progress data for '{owner_id}': {e}"),
+                    })?;
+                serde_json::to_vec(&progress)
+            }
+            DataCategory::Profile => {
+                let preferences = persistence.load_preferences(owner_id).await.map_err(|e| {
+                    SecureSharingError::ValidationFailed {
+                        message: format!("failed to load profile data for '{owner_id}': {e}"),
+                    }
+                })?;
+                serde_json::to_vec(&preferences)
+            }
+            DataCategory::Feedback => {
+                let history = persistence
+                    .load_feedback_history(owner_id, None, None)
+                    .await
+                    .map_err(|e| SecureSharingError::ValidationFailed {
+                        message: format!("failed to load feedback data for '{owner_id}': {e}"),
+                    })?;
+                serde_json::to_vec(&history)
+            }
+            DataCategory::Sessions => {
+                let export = persistence.export_user_data(owner_id).await.map_err(|e| {
+                    SecureSharingError::ValidationFailed {
+                        message: format!("failed to load session data for '{owner_id}': {e}"),
+                    }
+                })?;
+                serde_json::to_vec(&export.sessions)
+            }
+            DataCategory::Analytics
+            | DataCategory::Achievements
+            | DataCategory::TrainingHistory
+            | DataCategory::Custom { .. } => {
+                return Err(SecureSharingError::ConfigError {
+                    message: format!(
+                        "data category {category:?} has no real backing data source yet; \
+                         refusing to share placeholder data"
+                    ),
+                });
+            }
+        };
+
+        value.map_err(|e| SecureSharingError::ValidationFailed {
+            message: format!("failed to serialize {category:?} data for '{owner_id}': {e}"),
+        })
     }
 
     /// Revoke a share
@@ -885,9 +992,43 @@ mod tests {
         ));
     }
 
+    /// Build a manager with encryption disabled (so packaged bytes are
+    /// plaintext, portable across whether the `privacy` feature happens to
+    /// be enabled) and a real in-memory persistence backend attached.
+    async fn manager_with_plaintext_persistence() -> SecureSharingManager {
+        let backend = crate::persistence::backends::memory::MemoryPersistenceManager::new(
+            crate::persistence::PersistenceConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        let config = SharingManagerConfig {
+            require_encryption: false,
+            ..SharingManagerConfig::default()
+        };
+
+        SecureSharingManager::new(config).with_persistence(std::sync::Arc::new(backend))
+    }
+
+    /// `access_data` must package the owner's real, seeded progress data --
+    /// not the literal `vec![1, 2, 3, 4, 5]` placeholder -- and that payload
+    /// must genuinely reflect what was actually stored for the owner.
     #[tokio::test]
-    async fn test_access_data() {
-        let manager = SecureSharingManager::new(SharingManagerConfig::default());
+    async fn test_access_data_returns_real_owner_payload() {
+        use crate::traits::UserProgress;
+
+        let manager = manager_with_plaintext_persistence().await;
+        let persistence = manager.persistence.clone().unwrap();
+
+        let owner_progress = UserProgress {
+            user_id: "user1".to_string(),
+            overall_skill_level: 0.42,
+            ..UserProgress::default()
+        };
+        persistence
+            .save_user_progress("user1", &owner_progress)
+            .await
+            .unwrap();
 
         let share = manager
             .create_share(
@@ -913,12 +1054,71 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(packages.len(), 1);
+        let expected_bytes = serde_json::to_vec(&owner_progress).unwrap();
+        assert_eq!(
+            packages[0].data, expected_bytes,
+            "the shared payload must be the owner's real progress data, not a placeholder"
+        );
+
         assert!(!packages.is_empty());
 
         // Check access count was incremented
         let shares = manager.shares.read().await;
         let updated_share = shares.get(&share.share_id).unwrap();
         assert_eq!(updated_share.access_count, 1);
+    }
+
+    /// Without a persistence backend attached, `access_data` must fail
+    /// closed rather than package placeholder bytes.
+    #[tokio::test]
+    async fn test_access_data_without_persistence_fails_closed() {
+        let manager = SecureSharingManager::new(SharingManagerConfig::default());
+
+        let share = manager
+            .create_share(
+                "user1".to_string(),
+                "user2".to_string(),
+                AccessLevel::ReadOnly,
+                SharingProtocol::DirectApi,
+                vec![DataCategory::Progress],
+                None,
+            )
+            .await
+            .unwrap();
+        let token = manager.generate_token(share.share_id).await.unwrap();
+
+        let result = manager
+            .access_data(&token.token_value, "user2".to_string(), None, None)
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    /// A category with no real backing data source (e.g. `Analytics`) must
+    /// fail closed instead of silently substituting placeholder bytes.
+    #[tokio::test]
+    async fn test_access_data_unsupported_category_fails_closed() {
+        let manager = manager_with_plaintext_persistence().await;
+
+        let share = manager
+            .create_share(
+                "user1".to_string(),
+                "user2".to_string(),
+                AccessLevel::ReadOnly,
+                SharingProtocol::DirectApi,
+                vec![DataCategory::Analytics],
+                None,
+            )
+            .await
+            .unwrap();
+        let token = manager.generate_token(share.share_id).await.unwrap();
+
+        let result = manager
+            .access_data(&token.token_value, "user2".to_string(), None, None)
+            .await;
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]

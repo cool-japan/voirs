@@ -203,7 +203,13 @@ pub struct DecoderBlock {
 impl WhisperDecoder {
     /// Creates a new Whisper decoder with the given configuration and device
     pub async fn new(config: &WhisperConfig, device: &Device) -> Result<Self, RecognitionError> {
-        let vs = VarBuilder::zeros(DType::F32, device);
+        // Real trained parameters, or a typed error — never a zero-initialised network.
+        let vs = super::assets::var_builder_from_assets(
+            config.assets.as_ref(),
+            &config.model_size,
+            device,
+        )?
+        .pp("decoder");
 
         // Create token embedding
         let token_embedding = candle_nn::embedding(
@@ -216,14 +222,16 @@ impl WhisperDecoder {
             source: Some(Box::new(e)),
         })?;
 
-        // Create positional embedding
-        let positional_embedding =
-            Tensor::zeros((config.n_text_ctx, config.n_text_state), DType::F32, device).map_err(
-                |e| RecognitionError::ModelLoadError {
-                    message: format!("Failed to create positional embedding: {e}"),
-                    source: Some(Box::new(e)),
-                },
-            )?;
+        // Positional embedding comes from the checkpoint.
+        let positional_embedding = vs
+            .get((config.n_text_ctx, config.n_text_state), "positional_embedding")
+            .map_err(|e| RecognitionError::ModelLoadError {
+                message: format!(
+                    "Whisper checkpoint has no usable decoder.positional_embedding [{}, {}]: {e}",
+                    config.n_text_ctx, config.n_text_state
+                ),
+                source: Some(Box::new(e)),
+            })?;
 
         // Create decoder blocks
         let mut blocks = Vec::new();

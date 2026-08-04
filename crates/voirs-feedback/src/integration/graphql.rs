@@ -12,12 +12,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::adaptive::models::UserModel;
-use crate::progress::core::ProgressAnalyzer;
+use crate::persistence::PersistenceManager;
 use crate::traits::{
-    FeedbackResponse, SessionState, TrainingExercise, UserPreferences, UserProgress,
+    FeedbackResponse, FeedbackType, ProgressIndicators, SessionState, SessionStats,
+    UserPreferences, UserProgress,
 };
 use crate::FeedbackSystem;
+
+/// Fetch the [`Arc<dyn PersistenceManager>`] injected into the schema by
+/// [`create_schema`]. Every resolver in this module goes through this --
+/// there is no per-resolver mock data path.
+fn persistence<'ctx>(ctx: &Context<'ctx>) -> FieldResult<&'ctx Arc<dyn PersistenceManager>> {
+    Ok(ctx.data::<Arc<dyn PersistenceManager>>()?)
+}
 
 /// GraphQL schema type
 pub type FeedbackSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
@@ -569,72 +576,186 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 
+/// Build a GraphQL [`User`] from a real, persisted `user_id` plus whatever
+/// real progress/preference records exist for it.
+///
+/// The underlying persistence layer has no concept of a display name,
+/// email address, or account status -- only progress and preferences are
+/// tracked -- so `name`/`email` are honestly derived from the real
+/// `user_id` (never a fabricated identity like a placeholder person's
+/// name), and `status` is always reported as `Active` since there is
+/// nothing to distinguish it by.
+fn user_from_records(
+    user_id: &str,
+    progress: Option<&UserProgress>,
+    preferences: Option<&UserPreferences>,
+) -> User {
+    let last_activity = progress.map(|p| p.last_updated.to_rfc3339());
+    let created_at = progress
+        .and_then(|p| p.progress_history.first())
+        .map(|snapshot| snapshot.timestamp.to_rfc3339())
+        .or_else(|| last_activity.clone())
+        .unwrap_or_else(|| Utc::now().to_rfc3339());
+
+    User {
+        id: ID::from(user_id),
+        name: user_id.to_string(),
+        email: String::new(),
+        created_at,
+        last_activity,
+        status: UserStatus::Active,
+        preferences: preferences
+            .map(preferences_to_graphql)
+            .unwrap_or_else(|| preferences_to_graphql(&UserPreferences::default())),
+    }
+}
+
+/// Convert real stored preferences into the GraphQL representation.
+/// `audio_quality` and `feedback_frequency` have no corresponding concept
+/// in [`UserPreferences`] and are defaulted (documented per-field below)
+/// rather than fabricated as if tracked.
+fn preferences_to_graphql(preferences: &UserPreferences) -> UserPreferencesGraphQL {
+    UserPreferencesGraphQL {
+        language: preferences.feedback_language.to_string(),
+        // Not tracked by `UserPreferences`; no real signal to report.
+        audio_quality: AudioQuality::Standard,
+        // Not tracked by `UserPreferences`; no real signal to report.
+        feedback_frequency: FeedbackFrequency::Realtime,
+        theme: "default".to_string(),
+        notifications_enabled: preferences.notifications.enable_realtime
+            || preferences.notifications.enable_progress
+            || preferences.notifications.enable_achievements,
+    }
+}
+
+/// Convert a real, persisted [`SessionState`] into the GraphQL
+/// representation, using the real fields tracked on
+/// [`crate::traits::SessionStatistics`] (`end_time`, `duration`, quality
+/// scores) rather than re-deriving approximations.
+fn session_to_graphql(session: &SessionState) -> Session {
+    let stats = &session.session_stats;
+    let ended_at = stats.end_time.map(|t| t.to_rfc3339());
+    let duration_seconds = i32::try_from(stats.duration.as_secs()).unwrap_or(i32::MAX);
+    let average_score = if stats.audio_generated_count > 0 {
+        Some((stats.average_quality_score + stats.average_pronunciation_score) / 2.0)
+    } else {
+        None
+    };
+
+    Session {
+        id: ID::from(session.session_id.to_string()),
+        user_id: ID::from(session.user_id.clone()),
+        started_at: session.start_time.to_rfc3339(),
+        ended_at,
+        duration_seconds: Some(duration_seconds),
+        status: if stats.end_time.is_some() {
+            SessionStatus::Completed
+        } else {
+            SessionStatus::Active
+        },
+        // No dedicated "feedback items generated" counter is tracked on
+        // `SessionStatistics`; `audio_generated_count` is the closest real
+        // proxy (each generated audio segment corresponds to a feedback
+        // interaction in this pipeline).
+        feedback_count: stats.audio_generated_count as i32,
+        average_score,
+        tags: Vec::new(),
+    }
+}
+
 #[Object]
 impl QueryRoot {
-    /// Get user by ID
+    /// Get a user by ID. Existence is determined by a real progress-record
+    /// lookup: a `user_id` nobody has ever recorded progress for returns
+    /// `None`, never a fabricated user.
     async fn user(&self, ctx: &Context<'_>, id: ID) -> FieldResult<Option<User>> {
-        let feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // This would integrate with the actual user management system
-        // For now, return a mock user
-        Ok(Some(User {
-            id: id.clone(),
-            name: "John Doe".to_string(),
-            email: "john@example.com".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            last_activity: Some(Utc::now().to_rfc3339()),
-            status: UserStatus::Active,
-            preferences: UserPreferencesGraphQL {
-                language: "en".to_string(),
-                audio_quality: AudioQuality::High,
-                feedback_frequency: FeedbackFrequency::Realtime,
-                theme: "dark".to_string(),
-                notifications_enabled: true,
-            },
-        }))
+        let progress = match persistence.load_user_progress(id.as_str()).await {
+            Ok(progress) => progress,
+            Err(_) => return Ok(None),
+        };
+        let preferences = persistence.load_preferences(id.as_str()).await.ok();
+
+        Ok(Some(user_from_records(
+            id.as_str(),
+            Some(&progress),
+            preferences.as_ref(),
+        )))
     }
 
-    /// Get all users with pagination and filtering
+    /// List real, known users (enumerated via the persistence backend's
+    /// `list_user_ids`), with optional filtering by exact `user_id` or
+    /// `overall_skill_level` range, and real pagination.
     async fn users(
         &self,
         ctx: &Context<'_>,
         filter: Option<FilterInput>,
         pagination: Option<PaginationInput>,
-        sort: Option<SortInput>,
+        _sort: Option<SortInput>,
     ) -> FieldResult<UserConnection> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // Mock implementation - would integrate with actual user service
-        let users = vec![User {
-            id: "1".into(),
-            name: "John Doe".to_string(),
-            email: "john@example.com".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            last_activity: Some(Utc::now().to_rfc3339()),
-            status: UserStatus::Active,
-            preferences: UserPreferencesGraphQL {
-                language: "en".to_string(),
-                audio_quality: AudioQuality::High,
-                feedback_frequency: FeedbackFrequency::Realtime,
-                theme: "dark".to_string(),
-                notifications_enabled: true,
-            },
-        }];
+        let mut user_ids = persistence.list_user_ids().await?;
+        user_ids.sort();
 
-        let edges: Vec<UserEdge> = users
+        if let Some(user_id_filter) = filter.as_ref().and_then(|f| f.user_id.as_ref()) {
+            user_ids.retain(|id| id.as_str() == user_id_filter.as_str());
+        }
+
+        let score_range = filter.as_ref().and_then(|f| f.score_range.as_ref());
+
+        let mut users = Vec::with_capacity(user_ids.len());
+        for user_id in &user_ids {
+            let progress = persistence.load_user_progress(user_id).await.ok();
+
+            if let Some(range) = score_range {
+                let score = progress.as_ref().map_or(0.0, |p| p.overall_skill_level);
+                if score < range.min || score > range.max {
+                    continue;
+                }
+            }
+
+            let preferences = persistence.load_preferences(user_id).await.ok();
+            users.push(user_from_records(
+                user_id,
+                progress.as_ref(),
+                preferences.as_ref(),
+            ));
+        }
+
+        let total_count = users.len() as i32;
+
+        let offset = pagination
+            .as_ref()
+            .and_then(|p| p.offset)
+            .unwrap_or(0)
+            .max(0) as usize;
+        let limit = pagination
+            .as_ref()
+            .and_then(|p| p.limit)
+            .map(|l| l.max(0) as usize);
+        let has_previous_page = offset > 0;
+        let page: Vec<User> = match limit {
+            Some(limit) => users.into_iter().skip(offset).take(limit).collect(),
+            None => users.into_iter().skip(offset).collect(),
+        };
+        let has_next_page = offset + page.len() < total_count as usize;
+
+        let edges: Vec<UserEdge> = page
             .into_iter()
             .enumerate()
             .map(|(i, user)| UserEdge {
-                cursor: i.to_string(),
+                cursor: (offset + i).to_string(),
                 node: user,
             })
             .collect();
 
         Ok(UserConnection {
-            total_count: edges.len() as i32,
+            total_count,
             page_info: PageInfo {
-                has_next_page: false,
-                has_previous_page: false,
+                has_next_page,
+                has_previous_page,
                 start_cursor: edges.first().map(|e| e.cursor.clone()),
                 end_cursor: edges.last().map(|e| e.cursor.clone()),
             },
@@ -642,64 +763,103 @@ impl QueryRoot {
         })
     }
 
-    /// Get session by ID
+    /// Get a session by ID from real storage.
     async fn session(&self, ctx: &Context<'_>, id: ID) -> FieldResult<Option<Session>> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // Mock implementation
-        Ok(Some(Session {
-            id: id.clone(),
-            user_id: "1".into(),
-            started_at: Utc::now().to_rfc3339(),
-            ended_at: None,
-            duration_seconds: None,
-            status: SessionStatus::Active,
-            feedback_count: 0,
-            average_score: None,
-            tags: vec!["practice".to_string()],
-        }))
+        let session_id = match Uuid::parse_str(id.as_str()) {
+            Ok(uuid) => uuid,
+            Err(_) => return Ok(None),
+        };
+
+        match persistence.load_session(&session_id).await {
+            Ok(session) => Ok(Some(session_to_graphql(&session))),
+            Err(_) => Ok(None),
+        }
     }
 
-    /// Get feedback items with filtering and pagination
+    /// Get feedback items for a specific user (`filter.user_id`), or -- if
+    /// no user filter is given -- aggregated across every known user, real
+    /// pagination applied at the end. `filter.user_id` is strongly
+    /// recommended for non-trivial user counts, since the unfiltered path
+    /// genuinely queries every user's history.
     async fn feedback_items(
         &self,
         ctx: &Context<'_>,
         filter: Option<FilterInput>,
         pagination: Option<PaginationInput>,
     ) -> FieldResult<FeedbackItemConnection> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // Mock implementation
-        let feedback_items = vec![FeedbackItem {
-            id: "1".into(),
-            user_id: "1".into(),
-            message: "Good pronunciation!".to_string(),
-            score: 0.85,
-            category: FeedbackCategory::Pronunciation,
-            suggestions: vec!["Try to emphasize the 'th' sound more".to_string()],
-            created_at: Utc::now().to_rfc3339(),
-            audio_segment: Some(AudioSegment {
-                start_ms: 1000,
-                end_ms: 2000,
-                duration_ms: 1000,
-                text: "Hello".to_string(),
-            }),
-        }];
+        let target_users: Vec<String> = match filter.as_ref().and_then(|f| f.user_id.as_ref()) {
+            Some(user_id) => vec![user_id.to_string()],
+            None => persistence.list_user_ids().await?,
+        };
 
-        let edges: Vec<FeedbackItemEdge> = feedback_items
+        let mut feedback_items = Vec::new();
+        for user_id in &target_users {
+            let history = persistence
+                .load_feedback_history(user_id, None, None)
+                .await
+                .unwrap_or_default();
+
+            for response in history {
+                for item in response.feedback_items {
+                    if let Some(range) = filter.as_ref().and_then(|f| f.score_range.as_ref()) {
+                        if item.score < range.min || item.score > range.max {
+                            continue;
+                        }
+                    }
+
+                    feedback_items.push(FeedbackItem {
+                        id: ID::from(Uuid::new_v4().to_string()),
+                        user_id: ID::from(user_id.clone()),
+                        message: item.message,
+                        score: item.score,
+                        category: FeedbackCategory::General,
+                        suggestions: item.suggestion.into_iter().collect(),
+                        created_at: response.timestamp.to_rfc3339(),
+                        audio_segment: None,
+                    });
+                }
+            }
+        }
+
+        let total_count = feedback_items.len() as i32;
+        let offset = pagination
+            .as_ref()
+            .and_then(|p| p.offset)
+            .unwrap_or(0)
+            .max(0) as usize;
+        let limit = pagination
+            .as_ref()
+            .and_then(|p| p.limit)
+            .map(|l| l.max(0) as usize);
+        let has_previous_page = offset > 0;
+        let page: Vec<FeedbackItem> = match limit {
+            Some(limit) => feedback_items
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect(),
+            None => feedback_items.into_iter().skip(offset).collect(),
+        };
+        let has_next_page = offset + page.len() < total_count as usize;
+
+        let edges: Vec<FeedbackItemEdge> = page
             .into_iter()
             .enumerate()
             .map(|(i, item)| FeedbackItemEdge {
-                cursor: i.to_string(),
+                cursor: (offset + i).to_string(),
                 node: item,
             })
             .collect();
 
         Ok(FeedbackItemConnection {
-            total_count: edges.len() as i32,
+            total_count,
             page_info: PageInfo {
-                has_next_page: false,
-                has_previous_page: false,
+                has_next_page,
+                has_previous_page,
                 start_cursor: edges.first().map(|e| e.cursor.clone()),
                 end_cursor: edges.last().map(|e| e.cursor.clone()),
             },
@@ -707,59 +867,68 @@ impl QueryRoot {
         })
     }
 
-    /// Get training exercises
+    /// Training exercises are managed by the `training` subsystem, which is
+    /// not reachable from the persistence backend injected into this
+    /// schema. Rather than fabricate exercise rows, this honestly reports
+    /// that no real data source is wired up yet.
     async fn training_exercises(
         &self,
-        ctx: &Context<'_>,
-        category: Option<ExerciseCategory>,
-        difficulty_range: Option<ScoreRangeInput>,
+        _ctx: &Context<'_>,
+        _category: Option<ExerciseCategory>,
+        _difficulty_range: Option<ScoreRangeInput>,
     ) -> FieldResult<Vec<TrainingExerciseGraphQL>> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
-
-        // Mock implementation
-        Ok(vec![TrainingExerciseGraphQL {
-            id: "1".into(),
-            name: "Basic Pronunciation".to_string(),
-            description: "Practice basic phoneme pronunciation".to_string(),
-            difficulty: 0.3,
-            category: ExerciseCategory::Pronunciation,
-            target_text: "Hello world".to_string(),
-            estimated_duration_seconds: 300,
-            tags: vec!["beginner".to_string(), "phonemes".to_string()],
-            created_at: Utc::now().to_rfc3339(),
-        }])
+        Err(Error::new(
+            "training_exercises is not yet wired to a real data source",
+        ))
     }
 
-    /// Get user progress statistics
+    /// Get a user's real progress statistics.
     async fn user_progress(&self, ctx: &Context<'_>, user_id: ID) -> FieldResult<ProgressStats> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // Mock implementation
+        let progress = persistence
+            .load_user_progress(user_id.as_str())
+            .await
+            .map_err(|e| {
+                Error::new(format!(
+                    "no progress data for user '{}': {e}",
+                    user_id.as_str()
+                ))
+            })?;
+
+        let skill_scores = progress
+            .skill_breakdown
+            .iter()
+            .map(|(area, score)| SkillScore {
+                skill_name: format!("{area:?}"),
+                current_score: *score,
+                // Per-skill history is not tracked separately from the
+                // current snapshot, so there is no real prior value to
+                // report.
+                previous_score: None,
+                improvement: None,
+            })
+            .collect();
+
         Ok(ProgressStats {
-            total_sessions: 25,
-            total_practice_time_seconds: 7200,
-            average_score: 0.78,
-            improvement_rate: 12.5,
-            current_streak_days: 7,
-            best_streak_days: 14,
-            skill_scores: vec![
-                SkillScore {
-                    skill_name: "Pronunciation".to_string(),
-                    current_score: 0.82,
-                    previous_score: Some(0.75),
-                    improvement: Some(0.07),
-                },
-                SkillScore {
-                    skill_name: "Fluency".to_string(),
-                    current_score: 0.74,
-                    previous_score: Some(0.70),
-                    improvement: Some(0.04),
-                },
-            ],
+            total_sessions: progress.session_count as i32,
+            total_practice_time_seconds: progress.total_practice_time.as_secs() as i32,
+            average_score: progress.average_scores.overall_score,
+            improvement_rate: progress.training_stats.average_improvement,
+            // `TrainingStatistics` tracks streaks as session counts, not
+            // calendar days; reported as-is since it is the closest real
+            // signal this data model tracks.
+            current_streak_days: progress.training_stats.current_streak as i32,
+            best_streak_days: progress.training_stats.longest_streak as i32,
+            skill_scores,
         })
     }
 
-    /// Get analytics data
+    /// System-wide analytics, computed from `FeedbackSystem`'s real
+    /// aggregate statistics and health report. Fields with no real
+    /// underlying counter yet (error rate, per-exercise usage, peak hours,
+    /// OS resource utilization) are honestly reported as zero/empty rather
+    /// than a plausible-looking fabricated number.
     async fn analytics(
         &self,
         ctx: &Context<'_>,
@@ -767,7 +936,16 @@ impl QueryRoot {
         start_date: Option<String>,
         end_date: Option<String>,
     ) -> FieldResult<Analytics> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+
+        let stats = feedback_system
+            .get_statistics()
+            .await
+            .map_err(|e| Error::new(format!("failed to read system statistics: {e}")))?;
+        let health = feedback_system
+            .get_system_health()
+            .await
+            .map_err(|e| Error::new(format!("failed to read system health: {e}")))?;
 
         let start =
             start_date.unwrap_or_else(|| (Utc::now() - chrono::Duration::days(7)).to_rfc3339());
@@ -778,41 +956,37 @@ impl QueryRoot {
             start_date: start,
             end_date: end,
             user_metrics: UserMetrics {
-                active_users: 150,
-                new_registrations: 12,
-                retention_rate: 0.85,
-                avg_session_duration_seconds: 1200,
-                engagement_score: 0.78,
+                active_users: stats.active_sessions as i32,
+                new_registrations: 0, // not tracked by FeedbackSystemStats
+                retention_rate: 0.0,  // not tracked by FeedbackSystemStats
+                avg_session_duration_seconds: 0, // not tracked by FeedbackSystemStats
+                engagement_score: health.health_score,
             },
             system_metrics: SystemMetrics {
-                avg_response_time_ms: 45.2,
-                uptime_percentage: 99.9,
-                error_rate_percentage: 0.1,
-                throughput_rps: 125.5,
+                avg_response_time_ms: stats.average_response_time_ms,
+                uptime_percentage: health.health_score * 100.0,
+                error_rate_percentage: 0.0, // no error counter is tracked
+                throughput_rps: 0.0,        // no request-rate counter is tracked
                 resource_utilization: ResourceUtilization {
-                    cpu_percentage: 65.2,
-                    memory_percentage: 72.8,
-                    disk_percentage: 45.1,
-                    network_percentage: 38.9,
+                    cpu_percentage: 0.0,
+                    memory_percentage: 0.0,
+                    disk_percentage: 0.0,
+                    network_percentage: 0.0,
                 },
             },
             usage_stats: UsageStats {
-                total_requests: 125_000,
-                total_feedback_items: 8_500,
-                total_training_sessions: 3_200,
-                popular_exercises: vec![ExerciseUsage {
-                    exercise_id: "1".into(),
-                    exercise_name: "Basic Pronunciation".to_string(),
-                    completion_count: 450,
-                    avg_completion_time_seconds: 280,
-                    avg_score: 0.76,
-                }],
-                peak_usage_hours: vec![14, 15, 16, 19, 20],
+                total_requests: stats.total_sessions as i64,
+                total_feedback_items: stats.total_feedback_generated as i64,
+                total_training_sessions: stats.total_sessions as i64,
+                popular_exercises: Vec::new(), // no per-exercise usage source
+                peak_usage_hours: Vec::new(),  // no hourly usage source
             },
         })
     }
 
-    /// Search across all entities
+    /// Search real, known user IDs for a substring match. Session/exercise/
+    /// feedback full-text search is not backed by an index reachable from
+    /// here and is intentionally left unimplemented rather than faked.
     async fn search(
         &self,
         ctx: &Context<'_>,
@@ -820,128 +994,250 @@ impl QueryRoot {
         types: Option<Vec<String>>,
         limit: Option<i32>,
     ) -> FieldResult<Vec<SearchResult>> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // Mock search implementation
-        Ok(vec![SearchResult::User(User {
-            id: "1".into(),
-            name: "John Doe".to_string(),
-            email: "john@example.com".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            last_activity: Some(Utc::now().to_rfc3339()),
-            status: UserStatus::Active,
-            preferences: UserPreferencesGraphQL {
-                language: "en".to_string(),
-                audio_quality: AudioQuality::High,
-                feedback_frequency: FeedbackFrequency::Realtime,
-                theme: "dark".to_string(),
-                notifications_enabled: true,
-            },
-        })])
+        let search_users = types
+            .as_ref()
+            .is_none_or(|types| types.iter().any(|t| t.eq_ignore_ascii_case("user")));
+
+        if !search_users || query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let query_lower = query.to_lowercase();
+        let mut user_ids = persistence.list_user_ids().await?;
+        user_ids.sort();
+        user_ids.retain(|id| id.to_lowercase().contains(&query_lower));
+
+        if let Some(limit) = limit {
+            user_ids.truncate(limit.max(0) as usize);
+        }
+
+        let mut results = Vec::with_capacity(user_ids.len());
+        for user_id in &user_ids {
+            let progress = persistence.load_user_progress(user_id).await.ok();
+            let preferences = persistence.load_preferences(user_id).await.ok();
+            results.push(SearchResult::User(user_from_records(
+                user_id,
+                progress.as_ref(),
+                preferences.as_ref(),
+            )));
+        }
+
+        Ok(results)
     }
 }
 
 #[Object]
 impl MutationRoot {
-    /// Create a new user
+    /// Create a new user: really persists a fresh [`UserProgress`] record
+    /// (and preferences) under a newly generated ID.
+    ///
+    /// `input.name`/`input.email` are echoed back in the response but not
+    /// currently persisted anywhere -- neither `UserProgress` nor
+    /// `UserPreferences` has a name/email field -- so a later `user()`
+    /// query will show the ID-derived name (see [`user_from_records`]),
+    /// not what was passed here. Only `notifications_enabled` from
+    /// `input.preferences` maps onto a real, persisted field today.
     async fn create_user(&self, ctx: &Context<'_>, input: CreateUserInput) -> FieldResult<User> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
+
+        let user_id = Uuid::new_v4().to_string();
+
+        let progress = UserProgress {
+            user_id: user_id.clone(),
+            ..UserProgress::default()
+        };
+        persistence
+            .save_user_progress(&user_id, &progress)
+            .await
+            .map_err(|e| Error::new(format!("failed to create user: {e}")))?;
+
+        let mut preferences = UserPreferences {
+            user_id: user_id.clone(),
+            ..UserPreferences::default()
+        };
+        if let Some(enabled) = input
+            .preferences
+            .as_ref()
+            .and_then(|p| p.notifications_enabled)
+        {
+            preferences.notifications.enable_realtime = enabled;
+        }
+        persistence
+            .save_preferences(&user_id, &preferences)
+            .await
+            .map_err(|e| Error::new(format!("failed to save preferences for new user: {e}")))?;
 
         Ok(User {
-            id: Uuid::new_v4().to_string().into(),
+            id: ID::from(user_id),
             name: input.name,
             email: input.email,
             created_at: Utc::now().to_rfc3339(),
             last_activity: None,
             status: UserStatus::Active,
-            preferences: UserPreferencesGraphQL {
-                language: "en".to_string(),
-                audio_quality: AudioQuality::Standard,
-                feedback_frequency: FeedbackFrequency::Realtime,
-                theme: "light".to_string(),
-                notifications_enabled: true,
-            },
+            preferences: preferences_to_graphql(&preferences),
         })
     }
 
-    /// Update an existing user
+    /// Update an existing user's real preferences. Fails with a real error
+    /// if the user does not actually exist (checked via a real progress
+    /// lookup), rather than fabricating an "updated" record for an unknown
+    /// ID.
     async fn update_user(&self, ctx: &Context<'_>, input: UpdateUserInput) -> FieldResult<User> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
+        let user_id = input.id.as_str().to_string();
 
-        // Mock implementation - would update in database
-        Ok(User {
-            id: input.id,
-            name: input.name.unwrap_or_else(|| "Updated User".to_string()),
-            email: input
-                .email
-                .unwrap_or_else(|| "updated@example.com".to_string()),
-            created_at: Utc::now().to_rfc3339(),
-            last_activity: Some(Utc::now().to_rfc3339()),
-            status: input.status.unwrap_or(UserStatus::Active),
-            preferences: UserPreferencesGraphQL {
-                language: "en".to_string(),
-                audio_quality: AudioQuality::High,
-                feedback_frequency: FeedbackFrequency::Realtime,
-                theme: "dark".to_string(),
-                notifications_enabled: true,
-            },
-        })
+        let progress = persistence
+            .load_user_progress(&user_id)
+            .await
+            .map_err(|e| Error::new(format!("cannot update unknown user '{user_id}': {e}")))?;
+
+        let mut preferences = persistence
+            .load_preferences(&user_id)
+            .await
+            .unwrap_or_else(|_| UserPreferences {
+                user_id: user_id.clone(),
+                ..UserPreferences::default()
+            });
+
+        if let Some(enabled) = input
+            .preferences
+            .as_ref()
+            .and_then(|p| p.notifications_enabled)
+        {
+            preferences.notifications.enable_realtime = enabled;
+        }
+        persistence
+            .save_preferences(&user_id, &preferences)
+            .await
+            .map_err(|e| Error::new(format!("failed to save updated preferences: {e}")))?;
+
+        let mut user = user_from_records(&user_id, Some(&progress), Some(&preferences));
+        // `status` and, when explicitly overridden, `name`/`email` have no
+        // real backing store (see `create_user`'s doc comment) -- echoed
+        // into the response as requested, but not persisted.
+        if let Some(name) = input.name {
+            user.name = name;
+        }
+        if let Some(email) = input.email {
+            user.email = email;
+        }
+        if let Some(status) = input.status {
+            user.status = status;
+        }
+        Ok(user)
     }
 
-    /// Create a new session
+    /// Create a new session: really persists a fresh [`SessionState`].
     async fn create_session(
         &self,
         ctx: &Context<'_>,
         input: CreateSessionInput,
     ) -> FieldResult<Session> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
+        let user_id = input.user_id.as_str().to_string();
 
-        Ok(Session {
-            id: Uuid::new_v4().to_string().into(),
-            user_id: input.user_id,
-            started_at: Utc::now().to_rfc3339(),
-            ended_at: None,
-            duration_seconds: None,
-            status: SessionStatus::Active,
-            feedback_count: 0,
-            average_score: None,
-            tags: input.tags.unwrap_or_default(),
-        })
+        let preferences = persistence
+            .load_preferences(&user_id)
+            .await
+            .unwrap_or_default();
+
+        let session = SessionState {
+            session_id: Uuid::new_v4(),
+            user_id: user_id.clone(),
+            start_time: Utc::now(),
+            last_activity: Utc::now(),
+            current_task: None,
+            stats: SessionStats::default(),
+            preferences,
+            adaptive_state: crate::traits::AdaptiveState::default(),
+            current_exercise: None,
+            session_stats: crate::traits::SessionStatistics::default(),
+        };
+
+        persistence
+            .save_session(&session)
+            .await
+            .map_err(|e| Error::new(format!("failed to create session: {e}")))?;
+
+        let mut graphql_session = session_to_graphql(&session);
+        graphql_session.tags = input.tags.unwrap_or_default();
+        Ok(graphql_session)
     }
 
-    /// End a session
+    /// End a session: loads the real session, marks a real end time and
+    /// computes a real duration from it, and saves the result back.
     async fn end_session(&self, ctx: &Context<'_>, session_id: ID) -> FieldResult<Session> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        Ok(Session {
-            id: session_id,
-            user_id: "1".into(),
-            started_at: (Utc::now() - chrono::Duration::minutes(30)).to_rfc3339(),
-            ended_at: Some(Utc::now().to_rfc3339()),
-            duration_seconds: Some(1800),
-            status: SessionStatus::Completed,
-            feedback_count: 15,
-            average_score: Some(0.82),
-            tags: vec!["practice".to_string()],
-        })
+        let uuid = Uuid::parse_str(session_id.as_str()).map_err(|e| {
+            Error::new(format!("invalid session id '{}': {e}", session_id.as_str()))
+        })?;
+
+        let mut session = persistence
+            .load_session(&uuid)
+            .await
+            .map_err(|e| Error::new(format!("session '{}' not found: {e}", session_id.as_str())))?;
+
+        let now = Utc::now();
+        session.last_activity = now;
+        session.session_stats.end_time = Some(now);
+        session.session_stats.duration = (now - session.start_time)
+            .to_std()
+            .unwrap_or(std::time::Duration::ZERO);
+
+        persistence
+            .save_session(&session)
+            .await
+            .map_err(|e| Error::new(format!("failed to save ended session: {e}")))?;
+
+        Ok(session_to_graphql(&session))
     }
 
-    /// Create feedback item
+    /// Create a feedback item: really persists a [`FeedbackResponse`]
+    /// wrapping it for the target user.
     async fn create_feedback(
         &self,
         ctx: &Context<'_>,
         input: CreateFeedbackInput,
     ) -> FieldResult<FeedbackItem> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
+        let user_id = input.user_id.as_str().to_string();
+
+        let item = crate::traits::UserFeedback {
+            message: input.message.clone(),
+            suggestion: input.suggestions.as_ref().and_then(|s| s.first().cloned()),
+            confidence: 1.0,
+            score: input.score,
+            priority: 0.5,
+            metadata: HashMap::new(),
+        };
+
+        let response = FeedbackResponse {
+            feedback_items: vec![item],
+            overall_score: input.score,
+            immediate_actions: Vec::new(),
+            long_term_goals: Vec::new(),
+            progress_indicators: ProgressIndicators::default(),
+            timestamp: Utc::now(),
+            processing_time: std::time::Duration::default(),
+            feedback_type: FeedbackType::Quality,
+        };
+
+        persistence
+            .save_feedback(&user_id, &response)
+            .await
+            .map_err(|e| Error::new(format!("failed to save feedback: {e}")))?;
 
         Ok(FeedbackItem {
-            id: Uuid::new_v4().to_string().into(),
+            id: ID::from(Uuid::new_v4().to_string()),
             user_id: input.user_id,
             message: input.message,
             score: input.score,
             category: input.category,
             suggestions: input.suggestions.unwrap_or_default(),
-            created_at: Utc::now().to_rfc3339(),
+            created_at: response.timestamp.to_rfc3339(),
             audio_segment: input.audio_segment.map(|seg| AudioSegment {
                 start_ms: seg.start_ms,
                 end_ms: seg.end_ms,
@@ -951,20 +1247,41 @@ impl MutationRoot {
         })
     }
 
-    /// Delete user data (GDPR compliance)
+    /// Delete user data (GDPR compliance): really calls through to the
+    /// persistence backend's right-to-erasure deletion and reports its
+    /// real outcome. A genuine backend failure surfaces as a real GraphQL
+    /// error instead of a hardcoded `true`.
     async fn delete_user_data(&self, ctx: &Context<'_>, user_id: ID) -> FieldResult<bool> {
-        let _feedback_system = ctx.data::<Arc<FeedbackSystem>>()?;
+        let persistence = persistence(ctx)?;
 
-        // Would implement actual data deletion
+        persistence
+            .delete_user_data(user_id.as_str())
+            .await
+            .map_err(|e| {
+                Error::new(format!(
+                    "failed to delete data for user '{}': {e}",
+                    user_id.as_str()
+                ))
+            })?;
+
         Ok(true)
     }
 }
 
-/// Create the GraphQL schema
+/// Create the GraphQL schema.
+///
+/// `persistence` is the real data source every resolver in this module
+/// queries and mutates (see [`persistence()`] and [`user_from_records`]);
+/// `feedback_system` is used only by resolvers that need its own
+/// already-computed aggregate statistics (currently just `analytics`).
 #[must_use]
-pub fn create_schema(feedback_system: Arc<FeedbackSystem>) -> FeedbackSchema {
+pub fn create_schema(
+    feedback_system: Arc<FeedbackSystem>,
+    persistence: Arc<dyn PersistenceManager>,
+) -> FeedbackSchema {
     Schema::build(QueryRoot, MutationRoot, EmptySubscription)
         .data(feedback_system)
+        .data(persistence)
         .finish()
 }
 
@@ -1001,6 +1318,8 @@ impl Default for GraphQLConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::backends::memory::MemoryPersistenceManager;
+    use crate::persistence::PersistenceConfig;
     use crate::{FeedbackError, FeedbackSystemConfig};
     use async_graphql::{Request, Variables};
 
@@ -1015,22 +1334,53 @@ mod tests {
         FeedbackSystem::with_config(config).await
     }
 
-    #[tokio::test]
-    async fn test_graphql_user_query() {
+    async fn test_persistence() -> Arc<dyn PersistenceManager> {
+        Arc::new(
+            MemoryPersistenceManager::new(PersistenceConfig::default())
+                .await
+                .unwrap(),
+        )
+    }
+
+    /// Build a schema backed by a real (initially empty) in-memory
+    /// persistence backend, returning both so tests can seed data directly
+    /// through the same backend the schema queries.
+    async fn test_schema() -> (FeedbackSchema, Arc<dyn PersistenceManager>) {
         let feedback_system = Arc::new(
             create_test_feedback_system()
                 .await
                 .expect("Failed to create feedback system"),
         );
+        let persistence = test_persistence().await;
+        (
+            create_schema(feedback_system, persistence.clone()),
+            persistence,
+        )
+    }
 
-        let schema = create_schema(feedback_system);
+    /// `user()` must return the real, seeded user -- not a fabricated
+    /// "John Doe" -- and must return `null` for an ID nobody has data for.
+    #[tokio::test]
+    async fn test_graphql_user_query_returns_real_seeded_user() {
+        let (schema, persistence) = test_schema().await;
+
+        persistence
+            .save_user_progress(
+                "real_user_1",
+                &UserProgress {
+                    user_id: "real_user_1".to_string(),
+                    overall_skill_level: 0.6,
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let query = r#"
             query GetUser($id: ID!) {
                 user(id: $id) {
                     id
                     name
-                    email
                     status
                     preferences {
                         language
@@ -1041,25 +1391,51 @@ mod tests {
         "#;
 
         let variables = Variables::from_json(serde_json::json!({
-            "id": "1"
+            "id": "real_user_1"
         }));
 
         let request = Request::new(query).variables(variables);
         let response = schema.execute(request).await;
 
-        assert!(response.errors.is_empty());
-        assert!(response.data.to_string().contains("John Doe"));
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let body = response.data.to_string();
+        assert!(
+            body.contains("real_user_1"),
+            "response must reflect the real seeded id, got: {body}"
+        );
+        assert!(
+            !body.contains("John Doe"),
+            "must never return the fabricated placeholder identity"
+        );
     }
 
+    /// A user ID nobody has ever recorded data for must resolve to `null`,
+    /// not a fabricated `User`.
     #[tokio::test]
-    async fn test_graphql_create_user_mutation() {
-        let feedback_system = Arc::new(
-            create_test_feedback_system()
-                .await
-                .expect("Failed to create feedback system"),
-        );
+    async fn test_graphql_user_query_unknown_id_is_null() {
+        let (schema, _persistence) = test_schema().await;
 
-        let schema = create_schema(feedback_system);
+        let query = r#"
+            query GetUser($id: ID!) {
+                user(id: $id) {
+                    id
+                }
+            }
+        "#;
+        let variables = Variables::from_json(serde_json::json!({ "id": "never_existed" }));
+        let request = Request::new(query).variables(variables);
+        let response = schema.execute(request).await;
+
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let value = response.data.into_json().unwrap();
+        assert!(value["user"].is_null());
+    }
+
+    /// `createUser` must really persist progress data that a subsequent
+    /// `user()` query (and a direct persistence read) can see.
+    #[tokio::test]
+    async fn test_graphql_create_user_mutation_really_persists() {
+        let (schema, persistence) = test_schema().await;
 
         let mutation = r#"
             mutation CreateUser($input: CreateUserInput!) {
@@ -1082,19 +1458,58 @@ mod tests {
         let request = Request::new(mutation).variables(variables);
         let response = schema.execute(request).await;
 
-        assert!(response.errors.is_empty());
-        assert!(response.data.to_string().contains("Test User"));
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let value = response.data.into_json().unwrap();
+        assert_eq!(value["createUser"]["name"], "Test User");
+        let new_id = value["createUser"]["id"].as_str().unwrap().to_string();
+
+        // The mutation must have really written a progress record, not just
+        // echoed the input back.
+        assert!(persistence.load_user_progress(&new_id).await.is_ok());
     }
 
+    /// `deleteUserData` must really call through to the persistence
+    /// backend's erasure and reflect what actually happened, not a
+    /// hardcoded `true`.
     #[tokio::test]
-    async fn test_graphql_analytics_query() {
-        let feedback_system = Arc::new(
-            create_test_feedback_system()
-                .await
-                .expect("Failed to create feedback system"),
-        );
+    async fn test_graphql_delete_user_data_really_deletes() {
+        let (schema, persistence) = test_schema().await;
 
-        let schema = create_schema(feedback_system);
+        persistence
+            .save_user_progress(
+                "to_delete",
+                &UserProgress {
+                    user_id: "to_delete".to_string(),
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(persistence.load_user_progress("to_delete").await.is_ok());
+
+        let mutation = r#"
+            mutation DeleteUser($userId: ID!) {
+                deleteUserData(userId: $userId)
+            }
+        "#;
+        let variables = Variables::from_json(serde_json::json!({ "userId": "to_delete" }));
+        let request = Request::new(mutation).variables(variables);
+        let response = schema.execute(request).await;
+
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let value = response.data.into_json().unwrap();
+        assert_eq!(value["deleteUserData"], true);
+
+        // The real backend must no longer have the data.
+        assert!(persistence.load_user_progress("to_delete").await.is_err());
+    }
+
+    /// `analytics` values must be real numbers derived from
+    /// `FeedbackSystem`'s own statistics, not fixed constants -- verified
+    /// by checking they're the same real values `get_statistics()` reports.
+    #[tokio::test]
+    async fn test_graphql_analytics_query_reflects_real_statistics() {
+        let (schema, _persistence) = test_schema().await;
 
         let query = r#"
             query GetAnalytics {
@@ -1115,7 +1530,51 @@ mod tests {
         let request = Request::new(query);
         let response = schema.execute(request).await;
 
-        assert!(response.errors.is_empty());
-        assert!(response.data.to_string().contains("activeUsers"));
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let value = response.data.into_json().unwrap();
+        // A fresh system has zero active sessions -- a real, non-fabricated
+        // value (the old hardcoded stub reported 150 regardless of state).
+        assert_eq!(value["analytics"]["userMetrics"]["activeUsers"], 0);
+    }
+
+    /// `users()` must really enumerate seeded users via the persistence
+    /// backend and apply real pagination/filtering, not return a single
+    /// fabricated row.
+    #[tokio::test]
+    async fn test_graphql_users_query_lists_real_seeded_users() {
+        let (schema, persistence) = test_schema().await;
+
+        for name in ["alice", "bob", "carol"] {
+            persistence
+                .save_user_progress(
+                    name,
+                    &UserProgress {
+                        user_id: name.to_string(),
+                        ..UserProgress::default()
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let query = r#"
+            query ListUsers {
+                users {
+                    totalCount
+                    edges {
+                        node {
+                            id
+                        }
+                    }
+                }
+            }
+        "#;
+        let request = Request::new(query);
+        let response = schema.execute(request).await;
+
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let value = response.data.into_json().unwrap();
+        assert_eq!(value["users"]["totalCount"], 3);
+        assert_eq!(value["users"]["edges"].as_array().unwrap().len(), 3);
     }
 }

@@ -525,6 +525,14 @@ pub struct SkillMetrics {
     pub confidence_level: f32,
     /// Practice frequency
     pub practice_frequency: f32,
+    /// Number of historical performance snapshots that carried real data
+    /// for this focus area. `0` means every field above is a prior/fallback
+    /// derived from the user's overall model state rather than area-specific
+    /// evidence -- kept explicit so "insufficient data" is distinguishable
+    /// from a genuinely measured value. `#[serde(default)]` so older
+    /// serialized assessments without this field still deserialize.
+    #[serde(default)]
+    pub data_points: u32,
     /// Last assessment timestamp
     pub last_assessment: SystemTime,
 }
@@ -1102,6 +1110,14 @@ impl AICoachingSystem {
     }
 
     /// Conduct automated skill assessment
+    ///
+    /// Every metric is computed deterministically from the real
+    /// `user_model` supplied by the caller -- no random sampling. When a
+    /// focus area has no area-specific history yet, this is reflected
+    /// honestly via a lower `confidence_level` and `data_points == 0`
+    /// (see [`SkillMetrics::data_points`]) rather than a fabricated
+    /// reading; running this twice on the same `user_model` always
+    /// produces the same result.
     pub async fn conduct_skill_assessment(
         &self,
         user_id: Uuid,
@@ -1109,30 +1125,27 @@ impl AICoachingSystem {
     ) -> Result<SkillAssessment, CoachingError> {
         let assessment_id = Uuid::new_v4();
 
-        // Analyze user's historical performance across different focus areas
-        let mut skill_breakdown = HashMap::new();
-
-        // Mock assessment - in reality would analyze extensive performance data
-        for focus_area in [
+        // Analyze the user's real historical performance across focus areas.
+        let focus_areas = [
             FocusArea::Pronunciation,
             FocusArea::Intonation,
             FocusArea::Rhythm,
             FocusArea::Fluency,
-        ] {
-            let metrics = SkillMetrics {
-                accuracy: 0.75 + (scirs2_core::random::random::<f32>() * 0.2), // Mock data
-                consistency: 0.70 + (scirs2_core::random::random::<f32>() * 0.25),
-                improvement_rate: 0.05 + (scirs2_core::random::random::<f32>() * 0.1),
-                confidence_level: 0.68 + (scirs2_core::random::random::<f32>() * 0.3),
-                practice_frequency: 0.8,
-                last_assessment: SystemTime::now(),
-            };
-            skill_breakdown.insert(focus_area, metrics);
+        ];
+
+        let mut skill_breakdown = HashMap::new();
+        for focus_area in &focus_areas {
+            let metrics = Self::compute_skill_metrics(user_model, focus_area);
+            skill_breakdown.insert(focus_area.clone(), metrics);
         }
 
-        // Identify improvement areas
+        // Identify improvement areas. Iterates the fixed `focus_areas` order
+        // (rather than the HashMap directly) so the result is deterministic
+        // given the same `user_model`, not dependent on hash-map iteration
+        // order.
         let mut improvement_areas = Vec::new();
-        for (area, metrics) in &skill_breakdown {
+        for area in &focus_areas {
+            let metrics = &skill_breakdown[area];
             if metrics.accuracy < 0.8 {
                 improvement_areas.push(ImprovementArea {
                     area: area.clone(),
@@ -1153,9 +1166,10 @@ impl AICoachingSystem {
             }
         }
 
-        // Identify strengths
+        // Identify strengths (same deterministic ordering rationale).
         let mut strengths = Vec::new();
-        for (area, metrics) in &skill_breakdown {
+        for area in &focus_areas {
+            let metrics = &skill_breakdown[area];
             if metrics.accuracy > 0.85 {
                 strengths.push(SkillStrength {
                     area: area.clone(),
@@ -1173,15 +1187,30 @@ impl AICoachingSystem {
             .sum::<f32>()
             / skill_breakdown.len() as f32;
 
-        // Recommend focus area (lowest performing area)
-        let recommended_focus = skill_breakdown
+        // Recommend focus area (lowest performing area). Iterates the fixed
+        // `focus_areas` order with `total_cmp` so ties break deterministically
+        // (first in canonical order) instead of depending on HashMap
+        // iteration order or risking a NaN panic from `partial_cmp`.
+        let recommended_focus = focus_areas
             .iter()
             .min_by(|a, b| {
-                a.1.accuracy
-                    .partial_cmp(&b.1.accuracy)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                skill_breakdown[*a]
+                    .accuracy
+                    .total_cmp(&skill_breakdown[*b].accuracy)
             })
-            .map_or(FocusArea::Pronunciation, |(area, _)| area.clone());
+            .cloned()
+            .unwrap_or(FocusArea::Pronunciation);
+
+        // Confidence in the assessment as a whole: the average of the
+        // per-area confidence levels, each of which already reflects how
+        // much real evidence backs that area (see
+        // `Self::compute_skill_metrics`).
+        let confidence_interval = (skill_breakdown
+            .values()
+            .map(|metrics| metrics.confidence_level)
+            .sum::<f32>()
+            / skill_breakdown.len() as f32)
+            .clamp(0.0, 1.0);
 
         let assessment = SkillAssessment {
             assessment_id,
@@ -1192,7 +1221,7 @@ impl AICoachingSystem {
             improvement_areas,
             strengths,
             recommended_focus,
-            confidence_interval: 0.85, // Confidence in the assessment
+            confidence_interval,
         };
 
         // Store assessment in history
@@ -1203,6 +1232,84 @@ impl AICoachingSystem {
             .push(assessment.clone());
 
         Ok(assessment)
+    }
+
+    /// Compute real, deterministic [`SkillMetrics`] for one focus area from
+    /// the user's tracked model state. Never draws from a random source --
+    /// the same `user_model` always yields the same result.
+    fn compute_skill_metrics(user_model: &UserModel, focus_area: &FocusArea) -> SkillMetrics {
+        // Per-area history: the trend value each historical performance
+        // snapshot recorded for this specific focus area, oldest first
+        // (`performance_history` is push_back/pop_front -- see
+        // `AdaptiveFeedbackEngine::update_user_model`).
+        let series: Vec<f32> = user_model
+            .performance_history
+            .iter()
+            .filter_map(|snapshot| snapshot.improvement_trends.get(focus_area).copied())
+            .collect();
+
+        let has_direct_data = user_model.skill_breakdown.contains_key(focus_area);
+        let accuracy = user_model
+            .skill_breakdown
+            .get(focus_area)
+            .copied()
+            .unwrap_or(user_model.skill_level)
+            .clamp(0.0, 1.0);
+
+        // Consistency: blend the user's tracked overall consistency with the
+        // real variance of this area's historical trend values (low
+        // variance => high consistency, via a bounded 1/(1+stddev) map).
+        // With fewer than 2 area-specific samples there is nothing to
+        // measure variance over, so fall back to the tracked overall
+        // consistency score alone.
+        let consistency = if series.len() >= 2 {
+            let local_stability = 1.0 / (1.0 + crate::utils::standard_deviation(&series));
+            ((user_model.consistency_score + local_stability) / 2.0).clamp(0.0, 1.0)
+        } else {
+            user_model.consistency_score.clamp(0.0, 1.0)
+        };
+
+        // Improvement rate: real linear-regression slope of this area's
+        // historical trend values over session order (requires at least 2
+        // points; otherwise there is honestly no measurable trend yet).
+        let improvement_rate = if series.len() >= 2 {
+            let x: Vec<f32> = (0..series.len()).map(|i| i as f32).collect();
+            crate::statistical_helpers::linear_regression(&x, &series)
+                .map_or(0.0, |(slope, _intercept)| slope)
+                .clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // Confidence: the model's own tracked confidence (grows with
+        // recorded interactions), halved when this specific area has no
+        // direct entry in `skill_breakdown` -- `accuracy` above is then an
+        // extrapolation from the general skill level, not area-specific
+        // evidence.
+        let confidence_level = if has_direct_data {
+            user_model.confidence
+        } else {
+            user_model.confidence * 0.5
+        }
+        .clamp(0.0, 1.0);
+
+        // Practice frequency: fraction of recorded historical sessions that
+        // actually carried data for this specific focus area.
+        let practice_frequency = if user_model.performance_history.is_empty() {
+            0.0
+        } else {
+            series.len() as f32 / user_model.performance_history.len() as f32
+        };
+
+        SkillMetrics {
+            accuracy,
+            consistency,
+            improvement_rate,
+            confidence_level,
+            practice_frequency,
+            data_points: series.len() as u32,
+            last_assessment: SystemTime::now(),
+        }
     }
 
     /// Set user coaching preferences
@@ -1309,5 +1416,168 @@ mod tests {
         assert_eq!(assessment.user_id, user_id);
         assert!(!assessment.skill_breakdown.is_empty());
         assert!(assessment.overall_score >= 0.0 && assessment.overall_score <= 1.0);
+    }
+
+    /// A higher tracked `skill_breakdown` value for a focus area must
+    /// produce a proportionally higher reported accuracy for that same
+    /// area -- proving the result is a real function of `user_model`, not
+    /// a random draw.
+    #[tokio::test]
+    async fn test_skill_assessment_reflects_skill_breakdown() {
+        let system = AICoachingSystem::new();
+
+        let mut high_model = UserModel::default();
+        high_model
+            .skill_breakdown
+            .insert(FocusArea::Pronunciation, 0.95);
+        high_model.confidence = 0.9;
+
+        let mut low_model = UserModel::default();
+        low_model
+            .skill_breakdown
+            .insert(FocusArea::Pronunciation, 0.25);
+        low_model.confidence = 0.9;
+
+        let high_assessment = system
+            .conduct_skill_assessment(Uuid::new_v4(), &high_model)
+            .await
+            .unwrap();
+        let low_assessment = system
+            .conduct_skill_assessment(Uuid::new_v4(), &low_model)
+            .await
+            .unwrap();
+
+        let high_accuracy = high_assessment.skill_breakdown[&FocusArea::Pronunciation].accuracy;
+        let low_accuracy = low_assessment.skill_breakdown[&FocusArea::Pronunciation].accuracy;
+
+        assert!((high_accuracy - 0.95).abs() < 1e-6);
+        assert!((low_accuracy - 0.25).abs() < 1e-6);
+        assert!(high_accuracy > low_accuracy);
+        assert!(high_assessment.overall_score > low_assessment.overall_score);
+    }
+
+    /// A genuinely rising real performance-history trend must produce a
+    /// positive `improvement_rate`, and a genuinely falling one a negative
+    /// `improvement_rate` -- the sign is not fixed/random.
+    #[tokio::test]
+    async fn test_skill_assessment_improvement_rate_follows_trend_direction() {
+        let system = AICoachingSystem::new();
+
+        let mut improving_model = UserModel::default();
+        for value in [0.1_f32, 0.2, 0.3, 0.4, 0.5] {
+            let mut trends = HashMap::new();
+            trends.insert(FocusArea::Pronunciation, value);
+            improving_model
+                .performance_history
+                .push_back(crate::traits::PerformanceData {
+                    quality_scores: vec![],
+                    pronunciation_scores: vec![],
+                    improvement_trends: trends,
+                    learning_velocity: 0.0,
+                    consistency: 0.0,
+                });
+        }
+
+        let mut declining_model = UserModel::default();
+        for value in [0.5_f32, 0.4, 0.3, 0.2, 0.1] {
+            let mut trends = HashMap::new();
+            trends.insert(FocusArea::Pronunciation, value);
+            declining_model
+                .performance_history
+                .push_back(crate::traits::PerformanceData {
+                    quality_scores: vec![],
+                    pronunciation_scores: vec![],
+                    improvement_trends: trends,
+                    learning_velocity: 0.0,
+                    consistency: 0.0,
+                });
+        }
+
+        let improving_assessment = system
+            .conduct_skill_assessment(Uuid::new_v4(), &improving_model)
+            .await
+            .unwrap();
+        let declining_assessment = system
+            .conduct_skill_assessment(Uuid::new_v4(), &declining_model)
+            .await
+            .unwrap();
+
+        let improving_rate =
+            improving_assessment.skill_breakdown[&FocusArea::Pronunciation].improvement_rate;
+        let declining_rate =
+            declining_assessment.skill_breakdown[&FocusArea::Pronunciation].improvement_rate;
+
+        assert!(improving_rate > 0.0, "improving_rate = {improving_rate}");
+        assert!(declining_rate < 0.0, "declining_rate = {declining_rate}");
+        assert_eq!(
+            improving_assessment.skill_breakdown[&FocusArea::Pronunciation].data_points,
+            5
+        );
+    }
+
+    /// Running the assessment twice on an identical `UserModel` must
+    /// produce identical metrics -- the crux of "not `random()`".
+    #[tokio::test]
+    async fn test_skill_assessment_is_deterministic() {
+        let system = AICoachingSystem::new();
+        let mut model = UserModel::default();
+        model.skill_breakdown.insert(FocusArea::Pronunciation, 0.6);
+        model.confidence = 0.4;
+        model.consistency_score = 0.5;
+
+        let user_id = Uuid::new_v4();
+        let first = system
+            .conduct_skill_assessment(user_id, &model)
+            .await
+            .unwrap();
+        let second = system
+            .conduct_skill_assessment(user_id, &model)
+            .await
+            .unwrap();
+
+        for area in [
+            FocusArea::Pronunciation,
+            FocusArea::Intonation,
+            FocusArea::Rhythm,
+            FocusArea::Fluency,
+        ] {
+            let a = &first.skill_breakdown[&area];
+            let b = &second.skill_breakdown[&area];
+            assert_eq!(a.accuracy, b.accuracy);
+            assert_eq!(a.consistency, b.consistency);
+            assert_eq!(a.improvement_rate, b.improvement_rate);
+            assert_eq!(a.confidence_level, b.confidence_level);
+            assert_eq!(a.practice_frequency, b.practice_frequency);
+        }
+        assert_eq!(first.overall_score, second.overall_score);
+        assert_eq!(first.recommended_focus, second.recommended_focus);
+    }
+
+    /// A focus area absent from `skill_breakdown` and with no performance
+    /// history must be marked honestly (`data_points == 0`, halved
+    /// confidence) rather than silently presented as a fully-measured
+    /// value.
+    #[tokio::test]
+    async fn test_skill_assessment_marks_insufficient_data_honestly() {
+        let system = AICoachingSystem::new();
+        let mut model = UserModel::default();
+        // Pronunciation deliberately absent from skill_breakdown, and no
+        // performance_history at all.
+        model.skill_breakdown.insert(FocusArea::Intonation, 0.5);
+        model.confidence = 0.8;
+
+        let assessment = system
+            .conduct_skill_assessment(Uuid::new_v4(), &model)
+            .await
+            .unwrap();
+
+        let pronunciation = &assessment.skill_breakdown[&FocusArea::Pronunciation];
+        assert_eq!(pronunciation.data_points, 0);
+        // No direct skill_breakdown entry => confidence is halved relative
+        // to the tracked model confidence.
+        assert!((pronunciation.confidence_level - 0.4).abs() < 1e-6);
+
+        let intonation = &assessment.skill_breakdown[&FocusArea::Intonation];
+        assert!((intonation.confidence_level - 0.8).abs() < 1e-6);
     }
 }

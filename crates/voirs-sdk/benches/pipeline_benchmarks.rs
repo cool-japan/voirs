@@ -40,7 +40,7 @@ fn bench_pipeline_creation(c: &mut Criterion) {
         b.to_async(&runtime).iter(|| async {
             let pipeline = VoirsPipelineBuilder::new()
                 .with_quality(QualityLevel::High)
-                .with_voice("test-voice")
+                .with_voice("en-US-female-calm")
                 .with_test_mode(true)
                 .build()
                 .await

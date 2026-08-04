@@ -99,6 +99,11 @@ oxiarc-zstd = { workspace = true, optional = true }
 # SHA-256 model-integrity verification (pipeline/init.rs) - always available
 sha2.workspace = true
 hex.workspace = true
+
+# Real model-weight loading: binds safetensors/pth tensors into the vocoder
+# inference graph (pipeline/init.rs::load_vocoder)
+candle-core.workspace = true
+candle-nn.workspace = true
 aes-gcm = { workspace = true, optional = true }
 oxicode = { workspace = true, optional = true }
 

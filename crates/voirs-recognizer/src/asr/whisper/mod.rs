@@ -4,6 +4,7 @@
 //! eliminating Python dependencies while maintaining full compatibility
 //! with the original model architecture and trained weights.
 
+pub mod assets;
 pub mod attention;
 pub mod audio_processor;
 pub mod batch_processing;
@@ -16,6 +17,7 @@ pub mod quantization;
 pub mod streaming;
 pub mod tokenizer;
 
+pub use assets::WhisperAssets;
 pub use attention::{KVCache, MultiHeadAttention};
 pub use audio_processor::WhisperAudioProcessor;
 pub use batch_processing::{

@@ -131,14 +131,30 @@ impl PronunciationEvaluatorImpl {
         for i in 0..min_len {
             let aligned_phoneme = &alignment.phonemes[i];
             let expected_phoneme = &expected_phonemes[i];
-            let accuracy = self.calculate_phoneme_similarity(
+            // `aligned_phoneme.confidence` is the acoustic Goodness-of-Pronunciation
+            // score produced by forced alignment (see `align_phonemes_to_audio`): how
+            // well the audio segment assigned to this phoneme matches the acoustic
+            // profile expected for it (voicing / energy / spectral noisiness). This is
+            // the dominant term because `align_phonemes_to_audio` places the
+            // *reference* phoneme sequence onto the audio (forced alignment, not free
+            // recognition), so `aligned_phoneme.phoneme.symbol` and
+            // `expected_phoneme.symbol` are identical by construction in that path and
+            // symbol comparison alone would be uninformative. `calculate_phoneme_similarity`
+            // is still included (with lower weight) because `alignment` here is a
+            // trait-level parameter: a caller of `evaluate_pronunciation_with_alignment`
+            // may supply an alignment built by a genuinely independent recognizer,
+            // in which case the aligned symbol can differ from the reference and this
+            // term becomes real, differentiating evidence.
+            let symbol_similarity = self.calculate_phoneme_similarity(
                 &aligned_phoneme.phoneme.symbol,
                 &expected_phoneme.symbol,
             );
+            let accuracy =
+                (aligned_phoneme.confidence * 0.7 + symbol_similarity * 0.3).clamp(0.0, 1.0);
             let duration_accuracy = if let Some(expected_duration) = expected_phoneme.duration_ms {
                 let actual_duration =
                     (aligned_phoneme.end_time - aligned_phoneme.start_time) * 1000.0;
-                let ratio = actual_duration / expected_duration;
+                let ratio = actual_duration / expected_duration.max(1.0);
                 1.0 - (ratio - 1.0).abs().min(1.0)
             } else {
                 1.0
@@ -175,18 +191,57 @@ impl PronunciationEvaluatorImpl {
         let words: Vec<&str> = expected_text.split_whitespace().collect();
         let mut word_scores = Vec::new();
         for (i, word) in words.iter().enumerate() {
-            let word_phonemes = self
-                .get_word_phonemes_from_alignment(alignment, i, word)
-                .await?;
+            let aligned_word_phonemes =
+                super::forced_alignment::word_phoneme_span(alignment, i, word, words.len());
             let accuracy = self
-                .calculate_word_pronunciation_accuracy(word, &word_phonemes)
+                .calculate_word_pronunciation_accuracy(&aligned_word_phonemes)
                 .await?;
+            let expected_stress_pattern = self.get_expected_stress_pattern(word);
+            let actual_stress_pattern = self
+                .extract_actual_stress_pattern(alignment, i, word, words.len())
+                .await?;
+            let stress_accuracy =
+                self.compare_stress_patterns(&expected_stress_pattern, &actual_stress_pattern);
+            let syllable_accuracy = {
+                let expected_syllables = expected_stress_pattern.len().max(1) as f32;
+                let actual_syllables = aligned_word_phonemes
+                    .iter()
+                    .filter(|p| self.get_phonetic_features(&p.phoneme.symbol).is_vowel)
+                    .count()
+                    .max(usize::from(!aligned_word_phonemes.is_empty())) as f32;
+                if actual_syllables == 0.0 {
+                    0.5
+                } else {
+                    1.0 - (expected_syllables - actual_syllables).abs()
+                        / expected_syllables.max(actual_syllables)
+                }
+            };
+            let phoneme_scores: Vec<PhonemeAccuracyScore> = aligned_word_phonemes
+                .iter()
+                .enumerate()
+                .map(|(pos, ap)| {
+                    let duration_accuracy = ap.phoneme.duration_ms.map_or(1.0, |expected_ms| {
+                        let actual_ms = (ap.end_time - ap.start_time) * 1000.0;
+                        let ratio = actual_ms / expected_ms.max(1.0);
+                        1.0 - (ratio - 1.0).abs().min(1.0)
+                    });
+                    PhonemeAccuracyScore {
+                        expected_phoneme: ap.phoneme.symbol.clone(),
+                        actual_phoneme: Some(ap.phoneme.symbol.clone()),
+                        accuracy: ap.confidence,
+                        duration_accuracy,
+                        position: pos,
+                        start_time: ap.start_time,
+                        end_time: ap.end_time,
+                    }
+                })
+                .collect();
             word_scores.push(WordPronunciationScore {
                 word: (*word).to_string(),
                 accuracy,
-                stress_accuracy: 0.85,
-                syllable_accuracy: 0.90,
-                phoneme_scores: vec![],
+                stress_accuracy,
+                syllable_accuracy: syllable_accuracy.clamp(0.0, 1.0),
+                phoneme_scores,
                 position: i,
             });
         }
@@ -486,7 +541,7 @@ impl PronunciationEvaluatorImpl {
         for (word_idx, word) in words.iter().enumerate() {
             let expected_stress_pattern = self.get_expected_stress_pattern(word);
             let actual_stress_pattern = self
-                .extract_actual_stress_pattern(alignment, word_idx, word)
+                .extract_actual_stress_pattern(alignment, word_idx, word, words.len())
                 .await?;
             let stress_match_score =
                 self.compare_stress_patterns(&expected_stress_pattern, &actual_stress_pattern);
@@ -770,119 +825,6 @@ impl PronunciationEvaluatorImpl {
             _ => None,
         }
     }
-    pub(crate) fn mock_phonemize(&self, word: &str) -> Vec<Phoneme> {
-        let phoneme_map = self.create_phoneme_mapping();
-        let mut phonemes = Vec::new();
-        let chars: Vec<char> = word.to_lowercase().chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            let mut found = false;
-            if i < chars.len() - 1 {
-                let bigram = format!("{}{}", chars[i], chars[i + 1]);
-                if let Some(phoneme_sym) = phoneme_map.get(&bigram) {
-                    phonemes.push(Phoneme {
-                        symbol: phoneme_sym.clone(),
-                        ipa_symbol: phoneme_sym.clone(),
-                        stress: self.estimate_stress_level(word, i),
-                        syllable_position: self.determine_syllable_position(word, i),
-                        duration_ms: Some(self.estimate_phoneme_duration(phoneme_sym)),
-                        confidence: 0.9,
-                    });
-                    i += 2;
-                    found = true;
-                }
-            }
-            if !found {
-                let single_char = chars[i].to_string();
-                let phoneme_sym = phoneme_map
-                    .get(&single_char)
-                    .unwrap_or(&single_char)
-                    .clone();
-                phonemes.push(Phoneme {
-                    symbol: phoneme_sym.clone(),
-                    ipa_symbol: phoneme_sym,
-                    stress: self.estimate_stress_level(word, i),
-                    syllable_position: self.determine_syllable_position(word, i),
-                    duration_ms: Some(self.estimate_phoneme_duration(&chars[i].to_string())),
-                    confidence: 0.8,
-                });
-                i += 1;
-            }
-        }
-        phonemes
-    }
-    pub(crate) fn create_phoneme_mapping(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-        map.insert("a".to_string(), "æ".to_string());
-        map.insert("e".to_string(), "ε".to_string());
-        map.insert("i".to_string(), "ɪ".to_string());
-        map.insert("o".to_string(), "ɔ".to_string());
-        map.insert("u".to_string(), "ʊ".to_string());
-        map.insert("ai".to_string(), "aɪ".to_string());
-        map.insert("au".to_string(), "aʊ".to_string());
-        map.insert("oi".to_string(), "ɔɪ".to_string());
-        map.insert("ou".to_string(), "oʊ".to_string());
-        map.insert("th".to_string(), "θ".to_string());
-        map.insert("sh".to_string(), "ʃ".to_string());
-        map.insert("ch".to_string(), "tʃ".to_string());
-        map.insert("ng".to_string(), "ŋ".to_string());
-        map.insert("ph".to_string(), "f".to_string());
-        map.insert("p".to_string(), "p".to_string());
-        map.insert("b".to_string(), "b".to_string());
-        map.insert("t".to_string(), "t".to_string());
-        map.insert("d".to_string(), "d".to_string());
-        map.insert("k".to_string(), "k".to_string());
-        map.insert("g".to_string(), "g".to_string());
-        map.insert("f".to_string(), "f".to_string());
-        map.insert("v".to_string(), "v".to_string());
-        map.insert("s".to_string(), "s".to_string());
-        map.insert("z".to_string(), "z".to_string());
-        map.insert("m".to_string(), "m".to_string());
-        map.insert("n".to_string(), "n".to_string());
-        map.insert("l".to_string(), "l".to_string());
-        map.insert("r".to_string(), "r".to_string());
-        map.insert("w".to_string(), "w".to_string());
-        map.insert("y".to_string(), "j".to_string());
-        map.insert("h".to_string(), "h".to_string());
-        map
-    }
-    pub(crate) fn estimate_stress_level(&self, word: &str, position: usize) -> u8 {
-        let word_len = word.len();
-        if word_len <= 3 {
-            return 1;
-        }
-        if position < word_len / 3 {
-            2
-        } else {
-            u8::from(position < 2 * word_len / 3)
-        }
-    }
-    pub(crate) fn determine_syllable_position(
-        &self,
-        word: &str,
-        position: usize,
-    ) -> voirs_sdk::types::SyllablePosition {
-        let word_len = word.len();
-        let relative_pos = position as f32 / word_len as f32;
-        if relative_pos < 0.33 {
-            voirs_sdk::types::SyllablePosition::Onset
-        } else if relative_pos < 0.67 {
-            voirs_sdk::types::SyllablePosition::Nucleus
-        } else {
-            voirs_sdk::types::SyllablePosition::Coda
-        }
-    }
-    pub(crate) fn estimate_phoneme_duration(&self, phoneme: &str) -> f32 {
-        match phoneme {
-            "æ" | "ε" | "ɪ" | "ɔ" | "ʊ" | "aɪ" | "aʊ" | "ɔɪ" | "oʊ" => 150.0,
-            "f" | "v" | "s" | "z" | "ʃ" | "θ" => 120.0,
-            "p" | "b" | "t" | "d" | "k" | "g" => 80.0,
-            "m" | "n" | "ŋ" => 100.0,
-            "l" | "r" => 90.0,
-            "w" | "j" => 70.0,
-            _ => 100.0,
-        }
-    }
     pub(crate) fn calculate_phoneme_similarity(&self, phoneme1: &str, phoneme2: &str) -> f32 {
         if phoneme1 == phoneme2 {
             return 1.0;
@@ -1092,169 +1034,41 @@ impl PronunciationEvaluatorImpl {
         (vowels.contains(&p1) && vowels.contains(&p2))
             || (consonants.contains(&p1) && consonants.contains(&p2))
     }
-    pub(crate) async fn get_word_phonemes_from_alignment(
-        &self,
-        _alignment: &PhonemeAlignment,
-        _word_index: usize,
-        _word: &str,
-    ) -> Result<Vec<Phoneme>, EvaluationError> {
-        Ok(vec![])
-    }
+    /// Score a word's pronunciation quality from its real forced-aligned phonemes
+    /// (see [`super::evaluator_impl2::PronunciationEvaluatorImpl::align_phonemes_to_audio`]
+    /// and [`super::forced_alignment::word_phoneme_span`]).
+    ///
+    /// Combines the mean acoustic Goodness-of-Pronunciation confidence (how well each
+    /// segment's measured samples match the acoustic profile expected for its
+    /// phoneme) with how well each phoneme's *measured* duration (`end_time -
+    /// start_time`, from the audio) matches its G2P-predicted duration
+    /// (`Phoneme::duration_ms`). Both terms are derived from the actual audio and
+    /// vary with it; there are no fixed fallback constants standing in for either.
     pub(crate) async fn calculate_word_pronunciation_accuracy(
         &self,
-        word: &str,
-        actual_phonemes: &[Phoneme],
+        actual_phonemes: &[AlignedPhoneme],
     ) -> Result<f32, EvaluationError> {
-        let expected_phonemes = self.mock_phonemize(word);
-        if expected_phonemes.is_empty() || actual_phonemes.is_empty() {
+        if actual_phonemes.is_empty() {
             return Ok(0.0);
         }
-        let alignment_matrix = self.compute_dtw_alignment(&expected_phonemes, actual_phonemes)?;
-        let aligned_pairs =
-            self.extract_optimal_path(&alignment_matrix, &expected_phonemes, actual_phonemes)?;
-        let mut total_score = 0.0;
-        let mut phoneme_count = 0;
-        for (expected_opt, actual_opt) in aligned_pairs {
-            phoneme_count += 1;
-            match (expected_opt, actual_opt) {
-                (Some(expected), Some(actual)) => {
-                    let phoneme_similarity =
-                        self.calculate_phoneme_similarity(&expected.symbol, &actual.symbol);
-                    let duration_accuracy = if let Some(expected_dur) = expected.duration_ms {
-                        let actual_dur = actual.duration_ms.unwrap_or(100.0);
-                        let duration_ratio =
-                            (actual_dur / expected_dur).min(expected_dur / actual_dur);
-                        duration_ratio.max(0.3)
-                    } else {
-                        1.0
-                    };
-                    let stress_accuracy = if expected.stress == actual.stress {
-                        1.0
-                    } else if (i32::from(expected.stress) - i32::from(actual.stress)).abs() == 1 {
-                        0.8
-                    } else {
-                        0.6
-                    };
-                    let combined_score =
-                        phoneme_similarity * 0.6 + duration_accuracy * 0.2 + stress_accuracy * 0.2;
-                    total_score += combined_score;
-                }
-                (Some(_), None) => {
-                    total_score += 0.0;
-                }
-                (None, Some(_)) => {
-                    total_score += 0.3;
-                }
-                (None, None) => {
-                    continue;
-                }
-            }
-        }
-        let base_accuracy = if phoneme_count > 0 {
-            total_score / phoneme_count as f32
-        } else {
-            0.0
-        };
-        let length_penalty = self.calculate_length_penalty(&expected_phonemes, actual_phonemes);
-        let syllable_structure_bonus = self
-            .calculate_syllable_structure_accuracy(word, actual_phonemes)
-            .await?;
-        let final_accuracy = (base_accuracy + syllable_structure_bonus) * length_penalty;
-        Ok(final_accuracy.max(0.0).min(1.0))
-    }
-    pub(crate) fn compute_dtw_alignment(
-        &self,
-        expected: &[Phoneme],
-        actual: &[Phoneme],
-    ) -> Result<Vec<Vec<f32>>, EvaluationError> {
-        let rows = expected.len() + 1;
-        let cols = actual.len() + 1;
-        let mut dtw_matrix = vec![vec![f32::INFINITY; cols]; rows];
-        dtw_matrix[0][0] = 0.0;
-        for i in 1..rows {
-            dtw_matrix[i][0] = dtw_matrix[i - 1][0] + 1.0;
-        }
-        for j in 1..cols {
-            dtw_matrix[0][j] = dtw_matrix[0][j - 1] + 1.0;
-        }
-        for i in 1..rows {
-            for j in 1..cols {
-                let similarity = self
-                    .calculate_phoneme_similarity(&expected[i - 1].symbol, &actual[j - 1].symbol);
-                let substitution_cost = 1.0 - similarity;
-                dtw_matrix[i][j] = substitution_cost
-                    + [
-                        dtw_matrix[i - 1][j] + 1.0,
-                        dtw_matrix[i][j - 1] + 1.0,
-                        dtw_matrix[i - 1][j - 1],
-                    ]
-                    .iter()
-                    .fold(f32::INFINITY, |a, &b| a.min(b));
-            }
-        }
-        Ok(dtw_matrix)
-    }
-    pub(crate) fn extract_optimal_path<'a>(
-        &self,
-        matrix: &[Vec<f32>],
-        expected: &'a [Phoneme],
-        actual: &'a [Phoneme],
-    ) -> Result<Vec<(Option<&'a Phoneme>, Option<&'a Phoneme>)>, EvaluationError> {
-        let mut path = Vec::new();
-        let mut i = expected.len();
-        let mut j = actual.len();
-        while i > 0 || j > 0 {
-            if i == 0 {
-                path.push((None, Some(&actual[j - 1])));
-                j -= 1;
-            } else if j == 0 {
-                path.push((Some(&expected[i - 1]), None));
-                i -= 1;
-            } else {
-                let diag = matrix[i - 1][j - 1];
-                let up = matrix[i - 1][j];
-                let left = matrix[i][j - 1];
-                if diag <= up && diag <= left {
-                    path.push((Some(&expected[i - 1]), Some(&actual[j - 1])));
-                    i -= 1;
-                    j -= 1;
-                } else if up <= left {
-                    path.push((Some(&expected[i - 1]), None));
-                    i -= 1;
-                } else {
-                    path.push((None, Some(&actual[j - 1])));
-                    j -= 1;
-                }
-            }
-        }
-        path.reverse();
-        Ok(path)
-    }
-    pub(crate) fn calculate_length_penalty(&self, expected: &[Phoneme], actual: &[Phoneme]) -> f32 {
-        if expected.is_empty() {
-            return if actual.is_empty() { 1.0 } else { 0.5 };
-        }
-        let length_ratio = actual.len() as f32 / expected.len() as f32;
-        if !(0.5..=2.0).contains(&length_ratio) {
-            0.7
-        } else if !(0.8..=1.25).contains(&length_ratio) {
-            0.9
-        } else {
+        let mean_confidence = actual_phonemes.iter().map(|p| p.confidence).sum::<f32>()
+            / actual_phonemes.len() as f32;
+        let duration_ratios: Vec<f32> = actual_phonemes
+            .iter()
+            .filter_map(|p| {
+                p.phoneme.duration_ms.map(|expected_ms| {
+                    let expected_ms = expected_ms.max(1.0);
+                    let actual_ms = ((p.end_time - p.start_time) * 1000.0).max(0.001);
+                    (actual_ms / expected_ms).min(expected_ms / actual_ms).clamp(0.0, 1.0)
+                })
+            })
+            .collect();
+        let duration_accuracy = if duration_ratios.is_empty() {
             1.0
-        }
-    }
-    pub(crate) async fn calculate_syllable_structure_accuracy(
-        &self,
-        word: &str,
-        _actual_phonemes: &[Phoneme],
-    ) -> Result<f32, EvaluationError> {
-        let vowel_count = word.chars().filter(|c| "aeiou".contains(*c)).count();
-        let expected_syllables = vowel_count.max(1);
-        if expected_syllables <= 3 {
-            Ok(0.1)
         } else {
-            Ok(0.05)
-        }
+            duration_ratios.iter().sum::<f32>() / duration_ratios.len() as f32
+        };
+        Ok((mean_confidence * 0.7 + duration_accuracy * 0.3).clamp(0.0, 1.0))
     }
     pub(crate) async fn calculate_rhythm_regularity(
         &self,

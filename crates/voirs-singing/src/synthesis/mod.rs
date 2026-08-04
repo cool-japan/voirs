@@ -101,6 +101,15 @@ pub fn create_hybrid_engine() -> crate::Result<SynthesisEngine> {
 
 /// Create a synthesis engine with DiffSinger model
 ///
+/// By default this registers a model that synthesizes audio via an explicit,
+/// non-neural analytical DSP approximation (real DDPM noise schedule and
+/// reverse-process loop, but an algebraic noise estimate and additive-sine
+/// vocoder rather than trained networks) - see the `synthesis::diffsinger`
+/// module docs. Call [`DiffSingerModel::load_from_file`] with real
+/// safetensors weights and set [`DiffSingerConfig::use_neural_denoiser`] to
+/// use the real neural noise-prediction network instead; a trained neural
+/// vocoder is not implemented locally yet.
+///
 /// # Returns
 ///
 /// SynthesisEngine with default DiffSinger model registered
@@ -200,7 +209,12 @@ pub enum SynthesisCapability {
     Granular,
     /// Neural synthesis using deep learning
     Neural,
-    /// DiffSinger diffusion-based synthesis
+    /// DiffSinger-style DDPM synthesis. The real diffusion noise schedule
+    /// and reverse-process loop are implemented; the noise-prediction and
+    /// vocoder stages default to explicit non-neural DSP fallbacks unless
+    /// real neural weights are loaded (see `synthesis::diffsinger` module
+    /// docs) - this capability does not imply a pretrained model ships with
+    /// this crate.
     DiffSinger,
 }
 

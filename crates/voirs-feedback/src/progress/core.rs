@@ -18,6 +18,7 @@ use crate::progress::dashboard::{
 use crate::progress::metrics::{
     ConsistencyMetrics, MetricsCalculator, ProgressSystemStats, SessionAnalytics,
 };
+use crate::progress::significance;
 use crate::traits::{
     Achievement, AchievementTier, FeedbackProvider, FeedbackResponse, FeedbackResult, FeedbackType,
     FocusArea, Goal, GoalMetric, ProgressConfig, ProgressIndicators, ProgressReport,
@@ -275,23 +276,78 @@ impl ComprehensiveAnalyticsFramework {
         }
     }
 
-    /// Test statistical significance
+    /// Test statistical significance of a metric's change within `time_period`.
+    ///
+    /// Splits `progress.progress_history` into two real samples -- entries
+    /// older than `time_period` ago ("baseline") and entries within it
+    /// ("recent") -- extracts `metric`'s value from each snapshot (see
+    /// [`Self::extract_metric_value`]), and runs a real two-sided Welch's
+    /// t-test between the two samples via [`significance::welch_t_test`].
+    ///
+    /// With fewer than two data points in either window there is honestly
+    /// nothing to test: the result reports `p_value = 1.0` /
+    /// `is_significant = false` (no evidence of a difference) rather than a
+    /// fabricated reading.
     pub async fn test_statistical_significance(
         &self,
-        _progress: &UserProgress,
-        _metric: AnalyticsMetric,
-        _time_period: Duration,
+        progress: &UserProgress,
+        metric: AnalyticsMetric,
+        time_period: Duration,
     ) -> Result<StatisticalSignificanceResult, FeedbackError> {
-        // Simplified implementation - in a real system this would perform actual statistical tests
-        Ok(StatisticalSignificanceResult {
-            p_value: 0.05,
-            is_significant: true,
-            confidence_level: 0.95,
-            effect_size: 0.3,
+        let alpha = 0.05_f64; // matches this framework's documented 95% confidence level
+        let cutoff = Utc::now()
+            - chrono::Duration::from_std(time_period)
+                .unwrap_or_else(|_| chrono::Duration::days(30));
+
+        let mut baseline = Vec::new();
+        let mut recent = Vec::new();
+        for snapshot in &progress.progress_history {
+            let value = Self::extract_metric_value(snapshot, &metric.name);
+            if snapshot.timestamp >= cutoff {
+                recent.push(value);
+            } else {
+                baseline.push(value);
+            }
+        }
+
+        Ok(match significance::welch_t_test(&baseline, &recent) {
+            Some(outcome) => StatisticalSignificanceResult {
+                p_value: outcome.p_value,
+                is_significant: outcome.p_value < alpha,
+                confidence_level: 1.0 - alpha,
+                effect_size: outcome.effect_size,
+            },
+            None => StatisticalSignificanceResult {
+                p_value: 1.0,
+                is_significant: false,
+                confidence_level: 1.0 - alpha,
+                effect_size: 0.0,
+            },
         })
     }
 
+    /// Real value of `metric_name` at a given historical snapshot.
+    ///
+    /// Matches a tracked focus-area score when `metric_name` corresponds to
+    /// one, following the `skill_<focus_area>` naming convention used by
+    /// [`Self::generate_analytics_report`]; otherwise falls back to the
+    /// snapshot's overall score.
+    fn extract_metric_value(snapshot: &ProgressSnapshot, metric_name: &str) -> f64 {
+        let normalized = metric_name.trim_start_matches("skill_").to_lowercase();
+        for (area, &score) in &snapshot.area_scores {
+            if format!("{area:?}").to_lowercase() == normalized {
+                return f64::from(score);
+            }
+        }
+        f64::from(snapshot.overall_score)
+    }
+
     /// Generate comparative analysis
+    ///
+    /// Compares the two users' overall skill levels for `percentage_change`,
+    /// and separately runs a real Welch's t-test between their real
+    /// historical `overall_score` samples (from `progress_history`) to
+    /// determine `statistical_significance` -- never a hardcoded p-value.
     pub async fn generate_comparative_analysis(
         &self,
         user_progress_data: &[UserProgress],
@@ -307,18 +363,45 @@ impl ComprehensiveAnalyticsFramework {
 
         let baseline_value = f64::from(user_progress_data[0].overall_skill_level);
         let comparison_value = f64::from(user_progress_data[1].overall_skill_level);
-        let percentage_change = ((comparison_value - baseline_value) / baseline_value) * 100.0;
+        let percentage_change = if baseline_value != 0.0 {
+            ((comparison_value - baseline_value) / baseline_value) * 100.0
+        } else {
+            0.0
+        };
+
+        let alpha = 0.05_f64;
+        let baseline_samples: Vec<f64> = user_progress_data[0]
+            .progress_history
+            .iter()
+            .map(|s| f64::from(s.overall_score))
+            .collect();
+        let comparison_samples: Vec<f64> = user_progress_data[1]
+            .progress_history
+            .iter()
+            .map(|s| f64::from(s.overall_score))
+            .collect();
+
+        let statistical_significance =
+            match significance::welch_t_test(&baseline_samples, &comparison_samples) {
+                Some(outcome) => StatisticalSignificanceResult {
+                    p_value: outcome.p_value,
+                    is_significant: outcome.p_value < alpha,
+                    confidence_level: 1.0 - alpha,
+                    effect_size: outcome.effect_size,
+                },
+                None => StatisticalSignificanceResult {
+                    p_value: 1.0,
+                    is_significant: false,
+                    confidence_level: 1.0 - alpha,
+                    effect_size: 0.0,
+                },
+            };
 
         Ok(ComparativeAnalyticsResult {
             baseline_value,
             comparison_value,
             percentage_change,
-            statistical_significance: StatisticalSignificanceResult {
-                p_value: 0.05,
-                is_significant: percentage_change.abs() > 10.0,
-                confidence_level: 0.95,
-                effect_size: 0.3,
-            },
+            statistical_significance,
         })
     }
 
@@ -1294,5 +1377,194 @@ impl ProgressTracker for ProgressAnalyzer {
         progress.last_updated = Utc::now();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod significance_tests {
+    use super::*;
+
+    fn snapshot(days_ago: i64, overall_score: f32) -> ProgressSnapshot {
+        ProgressSnapshot {
+            timestamp: Utc::now() - chrono::Duration::days(days_ago),
+            overall_score,
+            area_scores: HashMap::new(),
+            session_count: 1,
+            events: Vec::new(),
+        }
+    }
+
+    fn progress_with_history(history: Vec<ProgressSnapshot>) -> UserProgress {
+        UserProgress {
+            progress_history: history,
+            ..UserProgress::default()
+        }
+    }
+
+    fn overall_skill_metric() -> AnalyticsMetric {
+        AnalyticsMetric {
+            name: "overall_skill_level".to_string(),
+            value: 0.0,
+            timestamp: Utc::now(),
+            metric_type: MetricType::Gauge,
+        }
+    }
+
+    /// This module's `ComprehensiveAnalyticsFramework` is a distinct type
+    /// from `progress::analytics::ComprehensiveAnalyticsFramework` (see
+    /// `progress-core-hardcoded-significance` finding) -- it needs its own
+    /// coverage proving the result is a real function of the input data.
+    #[tokio::test]
+    async fn test_statistical_significance_varies_with_data() {
+        let framework = ComprehensiveAnalyticsFramework::new();
+
+        let improving = progress_with_history(vec![
+            snapshot(60, 0.30),
+            snapshot(50, 0.32),
+            snapshot(45, 0.29),
+            snapshot(40, 0.31),
+            snapshot(5, 0.85),
+            snapshot(3, 0.88),
+            snapshot(2, 0.84),
+            snapshot(1, 0.87),
+        ]);
+
+        let flat = progress_with_history(vec![
+            snapshot(60, 0.50),
+            snapshot(50, 0.52),
+            snapshot(45, 0.49),
+            snapshot(40, 0.51),
+            snapshot(5, 0.51),
+            snapshot(3, 0.50),
+            snapshot(2, 0.49),
+            snapshot(1, 0.52),
+        ]);
+
+        let window = Duration::from_secs(30 * 24 * 3600);
+
+        let improving_result = framework
+            .test_statistical_significance(&improving, overall_skill_metric(), window)
+            .await
+            .unwrap();
+        let flat_result = framework
+            .test_statistical_significance(&flat, overall_skill_metric(), window)
+            .await
+            .unwrap();
+
+        assert!(
+            improving_result.is_significant,
+            "clear improvement should be significant: {improving_result:?}"
+        );
+        assert!(
+            !flat_result.is_significant,
+            "flat data should not be significant: {flat_result:?}"
+        );
+        assert!(improving_result.p_value < flat_result.p_value);
+    }
+
+    /// With fewer than two data points on one side of the window, the
+    /// result must be the honest "insufficient data" neutral outcome, not a
+    /// fabricated significant reading.
+    #[tokio::test]
+    async fn test_statistical_significance_insufficient_data_is_honest() {
+        let framework = ComprehensiveAnalyticsFramework::new();
+        let sparse = progress_with_history(vec![snapshot(1, 0.9)]);
+
+        let result = framework
+            .test_statistical_significance(
+                &sparse,
+                overall_skill_metric(),
+                Duration::from_secs(30 * 24 * 3600),
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.is_significant);
+        assert!((result.p_value - 1.0).abs() < 1e-9);
+        assert_eq!(result.effect_size, 0.0);
+    }
+
+    /// Two users with clearly different real score histories must be
+    /// reported as significantly different; two users with similar
+    /// histories must not.
+    #[tokio::test]
+    async fn test_generate_comparative_analysis_uses_real_history() {
+        let framework = ComprehensiveAnalyticsFramework::new();
+
+        let strong = UserProgress {
+            overall_skill_level: 0.9,
+            progress_history: vec![
+                snapshot(10, 0.88),
+                snapshot(8, 0.91),
+                snapshot(6, 0.89),
+                snapshot(4, 0.92),
+            ],
+            ..UserProgress::default()
+        };
+        let weak = UserProgress {
+            overall_skill_level: 0.3,
+            progress_history: vec![
+                snapshot(10, 0.28),
+                snapshot(8, 0.31),
+                snapshot(6, 0.29),
+                snapshot(4, 0.32),
+            ],
+            ..UserProgress::default()
+        };
+
+        let differing = framework
+            .generate_comparative_analysis(&[strong, weak], overall_skill_metric(), None)
+            .await
+            .unwrap();
+        assert!(differing.statistical_significance.is_significant);
+
+        let similar_a = UserProgress {
+            overall_skill_level: 0.6,
+            progress_history: vec![
+                snapshot(10, 0.58),
+                snapshot(8, 0.61),
+                snapshot(6, 0.59),
+                snapshot(4, 0.60),
+            ],
+            ..UserProgress::default()
+        };
+        let similar_b = UserProgress {
+            overall_skill_level: 0.61,
+            progress_history: vec![
+                snapshot(10, 0.60),
+                snapshot(8, 0.62),
+                snapshot(6, 0.59),
+                snapshot(4, 0.61),
+            ],
+            ..UserProgress::default()
+        };
+
+        let similar = framework
+            .generate_comparative_analysis(&[similar_a, similar_b], overall_skill_metric(), None)
+            .await
+            .unwrap();
+        assert!(!similar.statistical_significance.is_significant);
+    }
+
+    /// A zero baseline skill level must not produce a NaN/Inf
+    /// `percentage_change`.
+    #[tokio::test]
+    async fn test_generate_comparative_analysis_handles_zero_baseline() {
+        let framework = ComprehensiveAnalyticsFramework::new();
+        let zero_baseline = UserProgress {
+            overall_skill_level: 0.0,
+            ..UserProgress::default()
+        };
+        let other = UserProgress {
+            overall_skill_level: 0.5,
+            ..UserProgress::default()
+        };
+
+        let result = framework
+            .generate_comparative_analysis(&[zero_baseline, other], overall_skill_metric(), None)
+            .await
+            .unwrap();
+
+        assert!(result.percentage_change.is_finite());
     }
 }

@@ -223,7 +223,7 @@ fn bench_model_caching(c: &mut Criterion) {
     group.bench_function("first_load", |b| {
         b.to_async(&runtime).iter(|| async {
             let pipeline = VoirsPipelineBuilder::new()
-                .with_voice("test-voice-unique")
+                .with_voice("en-US-female-calm")
                 .with_test_mode(true)
                 .build()
                 .await
@@ -237,7 +237,7 @@ fn bench_model_caching(c: &mut Criterion) {
     // Create cached pipeline
     let cached_pipeline = runtime.block_on(async {
         VoirsPipelineBuilder::new()
-            .with_voice("test-voice-cached")
+            .with_voice("en-US-male-news")
             .with_test_mode(true)
             .build()
             .await

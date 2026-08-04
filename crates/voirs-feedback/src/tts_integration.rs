@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{OnceCell, RwLock};
 
 /// Text-to-speech errors
 #[derive(Error, Debug, Clone)]
@@ -381,7 +382,220 @@ pub trait TtsEngineBackend: Send + Sync {
     async fn is_speaking(&self) -> bool;
 }
 
-/// Mock TTS engine for testing and fallback
+/// Real TTS engine backed by `voirs-sdk`'s synthesis pipeline
+/// ([`voirs_sdk::VoirsPipeline`]).
+///
+/// The pipeline is expensive to build (real G2P + real acoustic model +
+/// real vocoder, possibly downloading model weights over the network on
+/// first use), so it is constructed lazily on first call and cached for
+/// the engine's lifetime. If construction fails — no network, no cached
+/// model weights, an unsupported device, or it simply takes too long —
+/// every method honestly returns [`TtsError::InitializationFailed`] or
+/// [`TtsError::SynthesisFailed`]; there is no silent fallback to silence.
+pub struct VoirsTtsEngine {
+    pipeline: OnceCell<Result<Arc<voirs_sdk::VoirsPipeline>, String>>,
+    /// When `true`, the underlying pipeline is built with
+    /// `voirs_sdk`'s explicit test mode (offline, deterministic-per-input
+    /// dummy components) instead of attempting to load real model weights.
+    /// Only ever set by [`Self::new_test_mode`], used by this crate's own
+    /// tests — production callers get [`Self::new`], which always attempts
+    /// real synthesis.
+    test_mode: bool,
+    /// Upper bound on how long pipeline construction (including any model
+    /// download) may take before this engine gives up and reports
+    /// [`TtsError::InitializationFailed`].
+    build_timeout: Duration,
+    speaking: Arc<RwLock<bool>>,
+}
+
+impl std::fmt::Debug for VoirsTtsEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VoirsTtsEngine")
+            .field("test_mode", &self.test_mode)
+            .field("build_timeout", &self.build_timeout)
+            .field("pipeline_built", &self.pipeline.initialized())
+            .finish()
+    }
+}
+
+impl VoirsTtsEngine {
+    /// Create a new engine that attempts real synthesis via `voirs-sdk`
+    /// (real G2P, real acoustic model, real vocoder) on first use.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_options(false, Duration::from_secs(30))
+    }
+
+    /// Create an engine whose pipeline is built in `voirs-sdk`'s explicit
+    /// test mode: fast, fully offline, deterministic-per-input dummy
+    /// components (see `voirs_sdk::pipeline::{DummyG2p, DummyAcoustic,
+    /// DummyVocoder}`) rather than real model weights. Intended for this
+    /// crate's own integration tests; never used by [`TtsManager::new`].
+    #[must_use]
+    pub fn new_test_mode() -> Self {
+        Self::with_options(true, Duration::from_secs(10))
+    }
+
+    fn with_options(test_mode: bool, build_timeout: Duration) -> Self {
+        Self {
+            pipeline: OnceCell::new(),
+            test_mode,
+            build_timeout,
+            speaking: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    /// Get (building on first call) the underlying real pipeline.
+    async fn pipeline(&self) -> TtsResult<Arc<voirs_sdk::VoirsPipeline>> {
+        let test_mode = self.test_mode;
+        let build_timeout = self.build_timeout;
+
+        let result = self
+            .pipeline
+            .get_or_init(move || async move {
+                let build = voirs_sdk::VoirsPipeline::builder()
+                    .with_test_mode(test_mode)
+                    .build();
+
+                match tokio::time::timeout(build_timeout, build).await {
+                    Ok(Ok(pipeline)) => Ok(Arc::new(pipeline)),
+                    Ok(Err(e)) => Err(format!("failed to build VoiRS pipeline: {e}")),
+                    Err(_) => Err(format!(
+                        "timed out after {build_timeout:?} building the VoiRS pipeline \
+                         (no network access or cached model weights?)"
+                    )),
+                }
+            })
+            .await;
+
+        result
+            .clone()
+            .map_err(|message| TtsError::InitializationFailed { message })
+    }
+}
+
+impl Default for VoirsTtsEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl TtsEngineBackend for VoirsTtsEngine {
+    fn engine_type(&self) -> TtsEngine {
+        TtsEngine::VoiRS
+    }
+
+    async fn list_voices(&self) -> TtsResult<Vec<VoiceInfo>> {
+        let pipeline = self.pipeline().await?;
+        let voice_configs =
+            pipeline
+                .list_voices()
+                .await
+                .map_err(|e| TtsError::SynthesisFailed {
+                    message: format!("failed to list VoiRS voices: {e}"),
+                })?;
+
+        Ok(voice_configs
+            .into_iter()
+            .map(|voice| {
+                let gender = match voice.characteristics.gender {
+                    Some(voirs_sdk::types::Gender::Male) => VoiceGender::Male,
+                    Some(voirs_sdk::types::Gender::Female) => VoiceGender::Female,
+                    Some(voirs_sdk::types::Gender::NonBinary) => VoiceGender::Neutral,
+                    None => VoiceGender::Any,
+                };
+                VoiceInfo {
+                    id: voice.id,
+                    name: voice.name,
+                    language: voice.language.as_str().to_string(),
+                    gender,
+                    is_neural: true,
+                    engine: TtsEngine::VoiRS,
+                    quality: 1.0,
+                }
+            })
+            .collect())
+    }
+
+    async fn synthesize(&self, utterance: &SpeechUtterance) -> TtsResult<SpeechResult> {
+        let pipeline = self.pipeline().await?;
+        let audio =
+            pipeline
+                .synthesize(&utterance.text)
+                .await
+                .map_err(|e| TtsError::SynthesisFailed {
+                    message: e.to_string(),
+                })?;
+
+        Ok(SpeechResult {
+            audio_data: audio.samples().to_vec(),
+            sample_rate: audio.sample_rate(),
+            channels: audio.channels() as u16,
+            duration: audio.duration(),
+        })
+    }
+
+    async fn speak(&self, utterance: &SpeechUtterance) -> TtsResult<()> {
+        let speech = self.synthesize(utterance).await?;
+
+        *self.speaking.write().await = true;
+        let audio = voirs_sdk::AudioBuffer::new(
+            speech.audio_data,
+            speech.sample_rate,
+            u32::from(speech.channels),
+        );
+        // `AudioBuffer::play` is a blocking call (opens a real cpal output
+        // stream and sleeps for the audio's duration), so it must run on a
+        // blocking-friendly thread rather than the async executor.
+        let play_result = tokio::task::spawn_blocking(move || audio.play()).await;
+        *self.speaking.write().await = false;
+
+        match play_result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(TtsError::PlaybackError {
+                message: e.to_string(),
+            }),
+            Err(join_err) => Err(TtsError::PlaybackError {
+                message: format!("playback task panicked: {join_err}"),
+            }),
+        }
+    }
+
+    async fn stop(&self) -> TtsResult<()> {
+        // The underlying `cpal` stream created by `AudioBuffer::play` runs
+        // to completion inside its own blocking task with no external
+        // handle exposed to cancel it early; only the "are we speaking"
+        // flag can be reset from here.
+        *self.speaking.write().await = false;
+        Ok(())
+    }
+
+    async fn pause(&self) -> TtsResult<()> {
+        Err(TtsError::InvalidParameters {
+            message: "VoirsTtsEngine does not support pausing in-progress playback".to_string(),
+        })
+    }
+
+    async fn resume(&self) -> TtsResult<()> {
+        Err(TtsError::InvalidParameters {
+            message: "VoirsTtsEngine does not support resuming paused playback".to_string(),
+        })
+    }
+
+    async fn is_speaking(&self) -> bool {
+        *self.speaking.read().await
+    }
+}
+
+/// Mock TTS engine: produces silent, purely length-derived audio and never
+/// touches any real synthesis backend.
+///
+/// This exists solely for this crate's own unit tests and for downstream
+/// consumers who explicitly want a deterministic stand-in in their own
+/// tests (via [`TtsManager::register_engine`]). It is **never** registered
+/// automatically — [`TtsManager::new`] registers the real
+/// [`VoirsTtsEngine`] instead, so silence is never a default output.
 #[derive(Debug)]
 pub struct MockTtsEngine {
     voices: Vec<VoiceInfo>,
@@ -488,11 +702,23 @@ pub struct TtsManager {
 }
 
 impl TtsManager {
-    /// Create a new TTS manager with default mock engine
+    /// Create a new TTS manager backed by the real [`VoirsTtsEngine`].
+    ///
+    /// The real engine is registered under both [`TtsEngine::Native`] (the
+    /// manager's default active engine) and [`TtsEngine::VoiRS`], so a
+    /// freshly constructed manager attempts genuine synthesis via
+    /// `voirs-sdk` out of the box. Model loading is lazy and can fail (no
+    /// network, no cached weights, ...); those failures surface as typed
+    /// [`TtsError`]s from `synthesize`/`speak`, never as silent digital
+    /// silence. Use [`MockTtsEngine`] explicitly (via
+    /// [`Self::register_engine`]) if a deterministic offline stand-in is
+    /// needed for testing.
     #[must_use]
     pub fn new() -> Self {
         let mut engines: HashMap<TtsEngine, Arc<dyn TtsEngineBackend>> = HashMap::new();
-        engines.insert(TtsEngine::Native, Arc::new(MockTtsEngine::new()));
+        let voirs_engine: Arc<dyn TtsEngineBackend> = Arc::new(VoirsTtsEngine::new());
+        engines.insert(TtsEngine::Native, voirs_engine.clone());
+        engines.insert(TtsEngine::VoiRS, voirs_engine);
 
         Self {
             engines,
@@ -798,15 +1024,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tts_manager_list_voices() {
+    async fn test_tts_manager_default_active_engine_is_real_voirs_not_mock() {
         let manager = TtsManager::new();
+        assert_eq!(manager.get_active_engine().await, TtsEngine::Native);
+
+        // The backend registered under the default-active `Native` key must
+        // be the real VoiRS engine, not a silently-substituted mock (whose
+        // `engine_type()` would also report `Native`, but is a distinct
+        // type from `VoirsTtsEngine`).
+        let native_backend = manager.engines.get(&TtsEngine::Native).unwrap();
+        let voirs_backend = manager.engines.get(&TtsEngine::VoiRS).unwrap();
+        assert_eq!(native_backend.engine_type(), TtsEngine::VoiRS);
+        assert_eq!(voirs_backend.engine_type(), TtsEngine::VoiRS);
+    }
+
+    /// Registering a `MockTtsEngine` (which reports `TtsEngine::Native`)
+    /// injects it into the `Native` slot, giving tests of manager
+    /// *mechanics* (queueing, preferences, ...) a deterministic, offline
+    /// backend independent of real model availability.
+    async fn manager_with_mock_engine() -> TtsManager {
+        let mut manager = TtsManager::new();
+        manager
+            .register_engine(Arc::new(MockTtsEngine::new()))
+            .await;
+        manager
+    }
+
+    #[tokio::test]
+    async fn test_tts_manager_list_voices() {
+        let manager = manager_with_mock_engine().await;
         let voices = manager.list_voices().await.unwrap();
         assert!(!voices.is_empty());
     }
 
     #[tokio::test]
     async fn test_tts_manager_find_voice() {
-        let manager = TtsManager::new();
+        let manager = manager_with_mock_engine().await;
 
         let voice = manager.find_voice("en", VoiceGender::Female).await.unwrap();
         assert!(voice.is_some());
@@ -834,9 +1087,85 @@ mod tests {
 
     #[tokio::test]
     async fn test_tts_manager_speak() {
-        let manager = TtsManager::new();
+        let manager = manager_with_mock_engine().await;
         let result = manager.speak("Hello TTS").await;
         assert!(result.is_ok());
+    }
+
+    /// Real end-to-end check of the default (non-mock) manager. A
+    /// sandboxed CI environment with no network access and no cached model
+    /// weights is expected to honestly fail pipeline construction; a
+    /// developer machine with real models available is expected to
+    /// actually synthesize. Silent digital silence (the old
+    /// `MockTtsEngine`-by-default behavior) is the one outcome this test
+    /// rules out.
+    #[tokio::test]
+    async fn test_voirs_tts_engine_synthesize_is_real_not_fake_silence() {
+        let engine = VoirsTtsEngine::new();
+        let utterance = SpeechUtterance::new("Testing real synthesis output.");
+
+        match engine.synthesize(&utterance).await {
+            Ok(result) => {
+                assert!(result.sample_rate > 0);
+                assert!(!result.audio_data.is_empty());
+                assert!(
+                    result.audio_data.iter().any(|&s| s != 0.0),
+                    "real synthesis must not be all-zero silence"
+                );
+            }
+            Err(TtsError::InitializationFailed { .. } | TtsError::SynthesisFailed { .. }) => {
+                // Honest fail-closed: no network / no cached model weights
+                // in this environment. Acceptable; fabricated success is not.
+            }
+            Err(other) => panic!("unexpected error variant from real engine: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_voirs_tts_engine_type_is_not_mock() {
+        let engine = VoirsTtsEngine::new();
+        assert_eq!(engine.engine_type(), TtsEngine::VoiRS);
+    }
+
+    /// The strongest regression test for this fix: using `voirs-sdk`'s own
+    /// explicit, fully-offline test mode (no network required), prove that
+    /// (a) synthesis actually succeeds, (b) the output is not all-zero
+    /// silence, and (c) different input text produces genuinely different
+    /// output — the defining property the old
+    /// `vec![0.0; utterance.text.len() * const]` mock never had.
+    #[tokio::test]
+    async fn test_voirs_tts_engine_test_mode_output_varies_with_input() {
+        let engine = VoirsTtsEngine::new_test_mode();
+
+        let short = SpeechUtterance::new("Hi");
+        let long =
+            SpeechUtterance::new("This is a considerably longer sentence than the short one.");
+
+        let short_result = engine
+            .synthesize(&short)
+            .await
+            .expect("offline test-mode synthesis should never require network access");
+        let long_result = engine
+            .synthesize(&long)
+            .await
+            .expect("offline test-mode synthesis should never require network access");
+
+        assert!(!short_result.audio_data.is_empty());
+        assert!(!long_result.audio_data.is_empty());
+        assert!(short_result.audio_data.iter().any(|&s| s != 0.0));
+        assert!(long_result.audio_data.iter().any(|&s| s != 0.0));
+        assert_ne!(
+            short_result.duration, long_result.duration,
+            "audio duration must depend on the real input, not be a fixed/fake value"
+        );
+
+        // Calling twice with the same text must not spuriously fail: the
+        // cached pipeline is reused, not rebuilt per call.
+        let repeat_result = engine
+            .synthesize(&short)
+            .await
+            .expect("second call should reuse the cached pipeline");
+        assert_eq!(repeat_result.sample_rate, short_result.sample_rate);
     }
 
     #[tokio::test]
@@ -860,7 +1189,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tts_manager_process_queue() {
-        let manager = TtsManager::new();
+        let manager = manager_with_mock_engine().await;
 
         let utterance = SpeechUtterance::new("Queued message");
         manager.queue_speech(utterance).await;

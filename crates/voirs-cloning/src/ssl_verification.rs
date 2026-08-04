@@ -741,7 +741,7 @@ impl SslSpeakerVerifier {
 
         let embedding_dim = self.config.embedding_dim;
         let num_heads = self.config.num_attention_heads;
-        if num_heads == 0 || embedding_dim % num_heads != 0 {
+        if num_heads == 0 || !embedding_dim.is_multiple_of(num_heads) {
             return Err(Error::Config(format!(
                 "num_attention_heads ({num_heads}) must evenly divide embedding_dim ({embedding_dim})"
             )));
@@ -1155,15 +1155,23 @@ mod tests {
 
         let mut tensors: StdHashMap<String, Tensor> = StdHashMap::new();
 
+        // NOTE: weight matrices intentionally vary per-element (not a
+        // constant fill). A constant-fill weight matrix makes every output
+        // *feature* identical across the embedding dimension, which
+        // LayerNorm's mean-subtraction then collapses to exactly zero for
+        // every element - a degenerate test fixture, not a real checkpoint
+        // (real trained weights are never literally constant). `insert`
+        // varies each element by its flat index so the resulting embedding
+        // is non-degenerate, matching what an actual checkpoint looks like.
         fn insert(
             tensors: &mut StdHashMap<String, Tensor>,
             device: &Device,
             name: &str,
             shape: Vec<usize>,
-            value: f32,
+            scale: f32,
         ) {
             let len: usize = shape.iter().product();
-            let data = vec![value; len];
+            let data: Vec<f32> = (0..len).map(|i| scale * (1.0 + (i as f32) * 0.1)).collect();
             tensors.insert(
                 name.to_string(),
                 Tensor::from_vec(data, shape, device).unwrap(),

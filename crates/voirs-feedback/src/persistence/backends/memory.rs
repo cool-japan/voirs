@@ -241,6 +241,16 @@ impl PersistenceManager for MemoryPersistenceManager {
         })
     }
 
+    async fn list_user_ids(&self) -> PersistenceResult<Vec<String>> {
+        let storage = self.storage.read().await;
+        let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        ids.extend(storage.user_progress.keys().cloned());
+        ids.extend(storage.user_preferences.keys().cloned());
+        ids.extend(storage.sessions.values().map(|s| s.user_id.clone()));
+        ids.extend(self.feedback_storage.user_ids().await);
+        Ok(ids.into_iter().collect())
+    }
+
     async fn cleanup(&self, older_than: DateTime<Utc>) -> PersistenceResult<CleanupResult> {
         let start_time = std::time::Instant::now();
 
@@ -546,5 +556,60 @@ mod tests {
             "feedback history must be empty after right-to-erasure deletion, got {} records",
             history_after.len()
         );
+    }
+
+    #[tokio::test]
+    async fn test_list_user_ids_covers_every_store() {
+        let config = PersistenceConfig::default();
+        let mut manager = MemoryPersistenceManager::new(config).await.unwrap();
+        manager.initialize().await.unwrap();
+
+        assert!(manager.list_user_ids().await.unwrap().is_empty());
+
+        // A user known only via progress.
+        manager
+            .save_user_progress(
+                "progress_only",
+                &UserProgress {
+                    user_id: "progress_only".to_string(),
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
+        // A user known only via a session.
+        let session = SessionState {
+            session_id: Uuid::new_v4(),
+            user_id: "session_only".to_string(),
+            start_time: Utc::now(),
+            last_activity: Utc::now(),
+            current_task: None,
+            stats: SessionStats::default(),
+            preferences: UserPreferences::default(),
+            adaptive_state: crate::traits::AdaptiveState::default(),
+            current_exercise: None,
+            session_stats: crate::traits::SessionStatistics::default(),
+        };
+        manager.save_session(&session).await.unwrap();
+        // A user known via both progress and preferences (must not be
+        // double-counted).
+        manager
+            .save_user_progress(
+                "dual_source",
+                &UserProgress {
+                    user_id: "dual_source".to_string(),
+                    ..UserProgress::default()
+                },
+            )
+            .await
+            .unwrap();
+        manager
+            .save_preferences("dual_source", &UserPreferences::default())
+            .await
+            .unwrap();
+
+        let mut ids = manager.list_user_ids().await.unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["dual_source", "progress_only", "session_only"]);
     }
 }
