@@ -124,7 +124,7 @@ async-stream = "0.3"
 # Serialization
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0"
-oxicode = { version = "0.2.5", features = ["serde"] }
+oxicode = { version = "0.2.6", features = ["serde"] }
 ordered-float = "5.3"
 
 # CLI and utilities
