@@ -105,7 +105,7 @@ mp4 = "0.14"  # MP4 container support
 
 # DSP and math
 # NOTE: ndarray and num-complex removed - use scirs2-core::ndarray and scirs2-core::numeric
-oxifft = "0.4.1"
+oxifft = "0.4.2"
 # NOTE: wide and simba kept for direct SIMD in specific optimized paths (non-array operations)
 wide = "1.5.0"  # SIMD processing
 simba = "0.10"  # SIMD abstractions
