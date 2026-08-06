@@ -610,19 +610,63 @@ impl MemoryTracker {
         self.format_stack_trace(frames)
     }
 
+    /// Crates whose frames are runtime plumbing rather than caller context.
+    const RUNTIME_CRATES: &'static [&'static str] =
+        &["std", "core", "alloc", "test", "backtrace", "addr2line"];
+
     /// Check if a stack frame should be included in the trace
     fn should_include_frame(&self, frame_info: &str) -> bool {
         // Filter out internal Rust runtime frames
-        !frame_info.contains("::fmt::")
-            && !frame_info.contains("std::")
-            && !frame_info.contains("core::")
+        !frame_info.is_empty()
+            && !frame_info.contains("::fmt::")
             && !frame_info.contains("rust_begin_unwind")
             && !frame_info.contains("__rust_")
-            && !frame_info.contains("backtrace::")
-            && !frame_info
-                .contains("voirs_sdk::memory::tracking::MemoryTracker::capture_stack_trace")
-            && !frame_info.contains("voirs_sdk::memory::tracking::MemoryTracker::record_allocation")
-            && !frame_info.is_empty()
+            // Hide the tracker's own plumbing -- every entry point that can sit on
+            // top of a capture, or it burns the frame budget describing itself.
+            // Matched on the trailing path so the check holds for both symbol
+            // formats (see `is_runtime_frame`).
+            && !frame_info.contains("MemoryTracker::capture_stack_trace")
+            && !frame_info.contains("MemoryTracker::record_allocation")
+            && !frame_info.contains("MemoryTracker::get_compact_stack_trace")
+            && !Self::is_runtime_frame(frame_info)
+    }
+
+    /// Whether a frame belongs to the Rust runtime rather than to calling code.
+    ///
+    /// A single trace mixes two symbol formats: locally compiled code demangles to
+    /// the legacy form (`std::panicking::catch_unwind`), while the precompiled
+    /// standard library resolves through DWARF to the v0 form
+    /// (`std[bb513d90a5cee88a]::panicking::catch_unwind`). Both are recognised here.
+    ///
+    /// Only the head of the path is inspected, so a caller frame is kept when its
+    /// generic arguments merely mention runtime types, and a crate whose name ends
+    /// in a runtime crate name (`scirs2_core`) is not mistaken for one.
+    fn is_runtime_frame(frame_info: &str) -> bool {
+        // `<Type as Trait>::method` renders the receiver first; fall through to the
+        // trait when the receiver is not a path (`<fn() -> _ as FnOnce<()>>::call_once`).
+        frame_info
+            .split(" as ")
+            .find_map(Self::crate_root_of)
+            .is_some_and(|krate| Self::RUNTIME_CRATES.contains(&krate))
+    }
+
+    /// Extract the crate name heading a demangled path fragment, if it starts with one.
+    fn crate_root_of(path: &str) -> Option<&str> {
+        let path = path.trim_start().trim_start_matches('<');
+        let bytes = path.as_bytes();
+        let end = bytes
+            .iter()
+            .position(|b| !(b.is_ascii_alphanumeric() || *b == b'_'))?;
+        if end == 0 {
+            return None;
+        }
+
+        // A crate root is followed by `[` (v0 disambiguator) or `::` (path separator).
+        match bytes[end] {
+            b'[' => Some(&path[..end]),
+            b':' if bytes.get(end + 1) == Some(&b':') => Some(&path[..end]),
+            _ => None,
+        }
     }
 
     /// Format stack trace frames for better readability
@@ -957,28 +1001,55 @@ mod tests {
         // Record allocation with stack trace
         tracker.record_allocation(0x1000, 1024, AllocationCategory::AudioBuffer);
 
-        // Check if allocation was recorded with stack trace
-        if let Ok(allocations) = tracker.allocations.read() {
-            if let Some(allocation_info) = allocations.get(&0x1000) {
-                assert!(allocation_info.stack_trace.is_some());
-                let stack_trace = allocation_info.stack_trace.as_ref().unwrap();
-                assert!(!stack_trace.is_empty());
+        // Whether a caller's name is recoverable at all depends on the platform
+        // symbolizer, not on the tracker: with symbols stripped or debug info
+        // unavailable, frames resolve to the nearest preceding symbol instead
+        // (`_main`, `__mh_execute_header`). Probe that capability separately so a
+        // degraded environment is never mistaken for a tracking bug, and so a real
+        // filtering or truncation regression is never excused as one.
+        let raw_backtrace = Backtrace::new();
+        let symbolication_available = raw_backtrace.frames().iter().any(|frame| {
+            frame.symbols().iter().any(|symbol| {
+                symbol
+                    .name()
+                    .is_some_and(|name| format!("{name}").contains("test_stack_trace_capture"))
+            })
+        });
 
-                // Check that the stack trace contains meaningful information
-                let has_meaningful_frame = stack_trace.iter().any(|frame| {
-                    frame.contains("test_stack_trace_capture")
-                        || frame.contains("record_allocation")
-                });
-                assert!(
-                    has_meaningful_frame,
-                    "Stack trace should contain meaningful frames: {stack_trace:?}"
-                );
-            } else {
-                panic!("Allocation not found in tracker");
-            }
-        } else {
+        // Check if allocation was recorded with stack trace
+        let Ok(allocations) = tracker.allocations.read() else {
             panic!("Failed to read allocations");
         };
+        let Some(allocation_info) = allocations.get(&0x1000) else {
+            panic!("Allocation not found in tracker");
+        };
+        let Some(stack_trace) = allocation_info.stack_trace.as_ref() else {
+            panic!("Stack trace should be recorded when enabled");
+        };
+        assert!(!stack_trace.is_empty());
+
+        // The tracker's own plumbing is noise for leak attribution and must never
+        // surface, whether or not symbolication succeeded.
+        for frame in stack_trace {
+            assert!(
+                !frame.contains("MemoryTracker::capture_stack_trace")
+                    && !frame.contains("MemoryTracker::record_allocation"),
+                "Tracker internals should be filtered out: {frame}"
+            );
+        }
+
+        if symbolication_available {
+            // Symbolication works here, so the calling frame must survive both the
+            // runtime-frame filter and the frame cap. If it does not, the tracker
+            // dropped the only information a leak report is built from.
+            let has_meaningful_frame = stack_trace
+                .iter()
+                .any(|frame| frame.contains("test_stack_trace_capture"));
+            assert!(
+                has_meaningful_frame,
+                "Stack trace should contain meaningful frames: {stack_trace:?}"
+            );
+        }
     }
 
     #[test]
@@ -1049,6 +1120,69 @@ mod tests {
         assert!(!tracker.should_include_frame("__rust_start_panic"));
         assert!(!tracker.should_include_frame("backtrace::backtrace"));
         assert!(!tracker.should_include_frame(""));
+    }
+
+    #[test]
+    fn test_stack_trace_filtering_v0_symbol_format() {
+        let tracker = MemoryTracker::with_default_config();
+
+        // The precompiled standard library resolves through DWARF to the v0 format,
+        // which plain `std::` / `core::` substring checks do not match. Left
+        // unfiltered these frames crowd out real callers under the frame cap.
+        assert!(!tracker.should_include_frame(
+            "std[bb513d90a5cee88a]::panicking::catch_unwind (panicking.rs:544)"
+        ));
+        assert!(!tracker
+            .should_include_frame("test[83d61c8db1bee592]::run_test_in_process (lib.rs:686)"));
+        assert!(!tracker.should_include_frame(
+            "<alloc[1519c0c6]::boxed::Box<dyn core[f63e07]::ops::function::FnOnce<()>> \
+             as core[f63e07]::ops::function::FnOnce<()>>::call_once (boxed.rs:2240)"
+        ));
+        // Receiver is not a path, so the trait decides.
+        assert!(!tracker.should_include_frame(
+            "<fn() -> core[f63e07]::result::Result<(), alloc[1519c0c6]::string::String> \
+             as core[f63e07]::ops::function::FnOnce<()>>::call_once (function.rs:250)"
+        ));
+
+        // Caller frames survive, including generics that mention runtime types and
+        // crates whose name merely ends in a runtime crate name.
+        assert!(tracker.should_include_frame(
+            "voirs_sdk::memory::tracking::tests::test_stack_trace_capture (tracking.rs:958)"
+        ));
+        assert!(tracker.should_include_frame(
+            "voirs_sdk::pipeline::synth::<alloc::string::String> (mod.rs:12)"
+        ));
+        assert!(tracker.should_include_frame("scirs2_core::simd_ops::add (lib.rs:1)"));
+
+        // The tracker's own plumbing stays hidden in either symbol format.
+        assert!(!tracker.should_include_frame(
+            "voirs_sdk::memory::tracking::MemoryTracker::record_allocation (tracking.rs:184)"
+        ));
+        assert!(!tracker.should_include_frame(
+            "voirs_sdk[9a1f]::memory::tracking::MemoryTracker::capture_stack_trace (tracking.rs:560)"
+        ));
+        assert!(!tracker.should_include_frame(
+            "voirs_sdk::memory::tracking::MemoryTracker::get_compact_stack_trace (tracking.rs:689)"
+        ));
+    }
+
+    #[test]
+    fn test_compact_stack_trace_excludes_tracker_internals() {
+        let config = TrackingConfig {
+            enable_stack_traces: true,
+            enable_detailed_tracking: true,
+            ..Default::default()
+        };
+        let tracker = MemoryTracker::new(config);
+
+        // The compact trace keeps only the top 5 frames, so any tracker frame left
+        // in place costs a fifth of the budget a leak report is read from.
+        let compact = tracker.get_compact_stack_trace();
+        assert!(
+            !compact.contains("MemoryTracker::get_compact_stack_trace")
+                && !compact.contains("MemoryTracker::capture_stack_trace"),
+            "Compact trace should not describe the tracker itself: {compact}"
+        );
     }
 
     #[test]
