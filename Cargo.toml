@@ -93,8 +93,8 @@ dasp = "0.11"
 claxon = "0.4"  # FLAC decoding
 # Pure-Rust FLAC encoding (COOLJAPAN OxiAudio: FLAC via flacenc). Replaces the
 # C-FFI `flac-bound` (libFLAC). Used (optionally) under the `ffi-codecs` feature.
-oxiaudio-core = "0.2.0"    # OxiAudio core types (AudioBuffer, ChannelLayout, SampleFormat)
-oxiaudio-encode = "0.2.0"  # OxiAudio Pure-Rust encoders (FLAC via flacenc)
+oxiaudio-core = "0.2.1"    # OxiAudio core types (AudioBuffer, ChannelLayout, SampleFormat)
+oxiaudio-encode = "0.2.1"  # OxiAudio Pure-Rust encoders (FLAC via flacenc)
 symphonia = { version = "0.6.0", features = ["aiff", "aac", "mp3"] }  # Comprehensive audio codec support
 opus = "0.3"  # Opus audio codec
 lewton = "0.10"  # OGG Vorbis decoding
