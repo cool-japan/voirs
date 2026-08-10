@@ -44,7 +44,7 @@ uuid = { workspace = true, features = ["v4"] }
 hex = "0.4"
 sha2.workspace = true
 hmac = { version = "0.13", optional = true }
-quick-xml = { package = "oxixml-quickxml-compat", version = "0.1.1", optional = true }
+quick-xml = { package = "oxixml-quickxml-compat", version = "0.1.2", optional = true }
 oxicode.workspace = true
 
 # Error handling
