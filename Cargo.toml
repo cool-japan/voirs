@@ -81,7 +81,7 @@ voirs-integration-tests = { version = "0.1.0", path = "crates/voirs-integration-
 candle-core = "0.11.0"
 candle-nn = "0.11.0"
 candle-transformers = "0.11.0"
-oxionnx = "0.1.6"
+oxionnx = "0.1.7"
 safetensors = "0.8.0"
 tract-onnx = "0.23.3"  # ONNX model loading and inference
 tract-core = "0.23.3"  # Core tract functionality for ONNX conversion
