@@ -57,7 +57,7 @@ scirs2-core = { version = "0.6.5", features = ["array", "random", "simd", "paral
 scirs2-fft = { version = "0.6.5", features = ["oxifft"] }
 
 # NumRS2 - NumPy-like numerical computing (for numpy .npz file support)
-numrs2 = "0.4.0"
+numrs2 = "0.4.1"
 
 # Internal VoiRS crates
 voirs-g2p = { version = "0.1.0", path = "crates/voirs-g2p" }
